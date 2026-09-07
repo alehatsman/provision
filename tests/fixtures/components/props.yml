@@ -1,0 +1,11 @@
+props:
+  who:
+    type: string
+    required: true
+  count:
+    type: int
+    default: 1
+steps:
+  - name: greet {{ props.who }} {{ props.count }}
+    shell: echo hi
+    changed_when: false

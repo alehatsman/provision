@@ -1,0 +1,3 @@
+- name: bad call
+  use: ./components/props.yml
+  props: { count: 2 }

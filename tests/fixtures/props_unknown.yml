@@ -1,0 +1,3 @@
+- name: bad call
+  use: ./components/props.yml
+  props: { who: a, nope: 1 }

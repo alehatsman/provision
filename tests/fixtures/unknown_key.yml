@@ -1,0 +1,3 @@
+- name: typo
+  shell: echo a
+  creats: /tmp/x

@@ -1,0 +1,6 @@
+steps:
+  - vars:
+      inside_only: 1
+  - name: sees the parent
+    shell: echo "{{ from_parent }}"
+    changed_when: false

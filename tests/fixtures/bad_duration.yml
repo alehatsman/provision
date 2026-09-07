@@ -1,0 +1,4 @@
+- name: bad timeout
+  shell: echo a
+  timeout: 5 minutes
+  changed_when: false

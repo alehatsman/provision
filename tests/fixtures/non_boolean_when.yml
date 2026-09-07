@@ -1,0 +1,6 @@
+- vars:
+    label: yes-ish
+- name: truthy is not true
+  shell: echo a
+  when: label
+  changed_when: false

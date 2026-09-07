@@ -1,0 +1,7 @@
+- vars:
+    from_parent: p
+- name: child
+  use: ./components/leaky.yml
+- name: parent cannot see the child's vars
+  shell: echo "{{ inside_only }}"
+  changed_when: false

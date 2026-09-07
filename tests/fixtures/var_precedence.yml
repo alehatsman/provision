@@ -1,0 +1,5 @@
+- vars:
+    k: from_vars
+- name: k is {{ k }}
+  shell: echo a
+  changed_when: false

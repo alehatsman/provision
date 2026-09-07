@@ -1,0 +1,15 @@
+- name: untagged
+  shell: echo untagged
+  changed_when: false
+- name: tagged-x
+  shell: echo x
+  tags: [x]
+  changed_when: false
+- name: tagged-always
+  shell: echo always
+  tags: [always]
+  changed_when: false
+- name: tagged-y-would-not-render
+  shell: echo "{{ never_defined_anywhere }}"
+  tags: [y]
+  changed_when: false

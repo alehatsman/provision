@@ -1,0 +1,6 @@
+- vars:
+    apps: [git, curl]
+- name: names is a list
+  pkg:
+    names: "{{ apps }}"
+  changed_when: false

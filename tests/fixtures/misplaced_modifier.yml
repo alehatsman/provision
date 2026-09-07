@@ -1,0 +1,4 @@
+- name: props without use
+  shell: echo a
+  props: { a: 1 }
+  changed_when: false

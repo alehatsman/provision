@@ -1,0 +1,8 @@
+- name: gated by creates
+  shell: echo a
+  creates: /tmp
+- name: gated by unless
+  shell: echo a
+  unless: "true"
+- name: no gate at all
+  shell: echo a
