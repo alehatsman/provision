@@ -1,6 +1,6 @@
 # provision — specification
 
-Status: v0.5 · 2026-09-08 · owner: aleh
+Status: v0.6 · 2026-09-08 · owner: aleh
 
 This is the contract. Code that disagrees with it is wrong, or this file is.
 Fix one.
@@ -439,9 +439,23 @@ service:
   two mean opposite things, and the combination is a validation error.
 - `restarted` and `reloaded` are always `changed`, and always `would change`
   under plan. Neither has a before-state to compare against.
+- **Probes never escalate.** `systemctl is-active` and `is-enabled` answer
+  for anyone, and asking for root to read a world-readable state is how
+  `plan` stops working on a machine with a cold sudo credential. Only the
+  mutations take the step's `sudo`.
 - launchd: `launchctl print gui/$UID/<name>` for `scope: user` and
-  `launchctl print system/<name>` for system, `bootstrap`/`bootout` for
-  `enabled`, `kickstart -k` for `restarted`.
+  `launchctl print system/<name>` for system asks whether it is loaded;
+  `launchctl print-disabled <domain>` asks whether it is enabled, and is the
+  probe `enabled` uses. `kickstart -k` is `restarted`, `bootout` is
+  `stopped`.
+- `enabled` is `launchctl enable`/`disable`, **not** `bootstrap`/`bootout`.
+  `bootstrap` needs the path to a plist and a `service` step does not carry
+  one — the unit was placed by a `file` or `template` step that knows where
+  it went. `enable` takes a service target and no path.
+- For the same reason a launchd unit must **already be bootstrapped** before
+  `started` can reach it: `kickstart` cannot load a plist that was never
+  loaded. The step that places the plist bootstraps it, the way a systemd
+  unit file is followed by `cmd: [systemctl, daemon-reload]`.
 - A launchd path on a machine that is not macOS is a validation error naming
   the fact that decided it. Windows is a validation error too: use `shell`
   with PowerShell.
@@ -627,6 +641,8 @@ one of `ok`, `changed`, `unknown`, `skipped`, `failed`, `would_change`,
 | `pkg` with `update_cache: true` under `plan` | The cache is not refreshed. A dry run that mutates the package database is not a dry run |
 | `service` with `scope: user` and `sudo: true` | Validation error. The two mean opposite things |
 | `service` on a launchd path on a machine that is not macOS | Validation error naming the fact that decided it |
+| `service` with `enabled: false` on a static, indirect, generated or alias systemd unit | `is-enabled` exits 0 for all of those, so the step would change forever and `disable` is a no-op. Use `state:` alone on units that have no enablement to change |
+| A typed action's command hangs | Killed on the step's `timeout` and reported `timed out after N`, the same as a `shell` step. Probes and mutations take the same path: a hung package manager hangs the query as readily as the install |
 
 ## 11. Validation of this spec
 

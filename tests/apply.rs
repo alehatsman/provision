@@ -170,17 +170,12 @@ fn a_failure_stops_the_run_and_shows_the_stderr_tail() {
     assert!(!out.contains("Never reached"), "the run must stop at the failure:\n{out}");
 }
 
-#[test]
-fn an_unimplemented_action_says_which_phase_brings_it() {
-    let dir = tempfile::tempdir().unwrap();
-    let (code, out) = apply(dir.path(), "not_yet.yml", &[]);
-    assert_eq!(code, 1, "{out}");
-    assert!(out.contains("is not implemented yet (phase 2)"), "{out}");
-    // But it still plans, which is what keeps the dotfiles tree usable today.
-    let path = fixture("not_yet.yml");
-    let out = run_in(dir.path(), &["plan", "--plan-no-probe", path.to_str().unwrap()]);
-    assert_eq!(out.status.code(), Some(0));
-}
+// `an_unimplemented_action_says_which_phase_brings_it` lived here through
+// phase 2, repointed each time an action landed: file, then pkg. All seven
+// actions now exist, so `NotYet` is unreachable from a plan and the test has
+// nothing left to assert. Retired at the phase 2 gate rather than quietly
+// deleted — the machinery it covered is still in the runner, for the next
+// action that arrives ahead of its implementation.
 
 // ── retry and timeout ─────────────────────────────────────────────────────
 

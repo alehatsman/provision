@@ -555,8 +555,11 @@ impl Spec {
             let got = ctx
                 .as_root(&["cat", &self.path])
                 .map_err(|e| format!("cannot run cat: {e}"))?;
+            if got.how != crate::exec::process::How::Exited {
+                return Err(format!("reading {} did not finish", self.path));
+            }
             if got.rc != 0 {
-                return Err(format!("cannot read {} as root: {}", self.path, trim(&got.stderr)));
+                return Err(format!("cannot read {} as root: {}", self.path, got.stderr_text().trim()));
             }
             return Ok(got.stdout);
         }
@@ -602,11 +605,8 @@ impl Spec {
                 && !parent.as_os_str().is_empty()
             {
                 let dir = parent.display().to_string();
-                let got = ctx
-                    .as_root(&["install", "-d", "-m", "0755", &dir])
-                    .map_err(|x| e("run install -d", x))?;
-                if got.rc != 0 {
-                    return Err(format!("cannot create {dir}: {}", trim(&got.stderr)));
+                if let Some(bad) = ctx.perform(&["install", "-d", "-m", "0755", &dir], true) {
+                    return Err(describe(bad));
                 }
             }
             // Not next to the destination: being unable to create a file
@@ -628,9 +628,8 @@ impl Spec {
                 argv.extend(["-g", g]);
             }
             argv.extend([staged_str.as_str(), self.path.as_str()]);
-            let got = ctx.as_root(&argv).map_err(|x| e("run install", x))?;
-            if got.rc != 0 {
-                return Err(format!("install failed for {}: {}", self.path, trim(&got.stderr)));
+            if let Some(bad) = ctx.perform(&argv, true) {
+                return Err(describe(bad));
             }
             return Ok(());
         }
@@ -668,9 +667,8 @@ impl Spec {
                 argv.extend(["-g", g]);
             }
             argv.push(&self.path);
-            let got = ctx.as_root(&argv).map_err(|e| format!("cannot run install: {e}"))?;
-            if got.rc != 0 {
-                return Err(format!("cannot create {}: {}", self.path, trim(&got.stderr)));
+            if let Some(bad) = ctx.perform(&argv, true) {
+                return Err(describe(bad));
             }
             return Ok(());
         }
@@ -680,11 +678,8 @@ impl Spec {
 
     fn make_link(&self, ctx: &Ctx<'_>, target: &str) -> std::result::Result<(), String> {
         if ctx.sudo {
-            let got = ctx
-                .as_root(&["ln", "-sfn", target, &self.path])
-                .map_err(|e| format!("cannot run ln: {e}"))?;
-            if got.rc != 0 {
-                return Err(format!("cannot link {}: {}", self.path, trim(&got.stderr)));
+            if let Some(bad) = ctx.perform(&["ln", "-sfn", target, &self.path], true) {
+                return Err(describe(bad));
             }
             return Ok(());
         }
@@ -696,11 +691,8 @@ impl Spec {
     fn remove(&self, ctx: &Ctx<'_>, kind: Kind) -> std::result::Result<(), String> {
         if ctx.sudo {
             let flag = if self.force { "-rf" } else { "-r" };
-            let got = ctx
-                .as_root(&["rm", flag, &self.path])
-                .map_err(|e| format!("cannot run rm: {e}"))?;
-            if got.rc != 0 {
-                return Err(format!("cannot remove {}: {}", self.path, trim(&got.stderr)));
+            if let Some(bad) = ctx.perform(&["rm", flag, &self.path], true) {
+                return Err(describe(bad));
             }
             return Ok(());
         }
@@ -715,11 +707,8 @@ impl Spec {
     fn chmod(&self, ctx: &Ctx<'_>, mode: u32) -> std::result::Result<(), String> {
         if ctx.sudo {
             let m = format!("{mode:04o}");
-            let got = ctx
-                .as_root(&["chmod", &m, &self.path])
-                .map_err(|e| format!("cannot run chmod: {e}"))?;
-            if got.rc != 0 {
-                return Err(format!("cannot chmod {}: {}", self.path, trim(&got.stderr)));
+            if let Some(bad) = ctx.perform(&["chmod", &m, &self.path], true) {
+                return Err(describe(bad));
             }
             return Ok(());
         }
@@ -738,11 +727,8 @@ impl Spec {
             self.owner.as_deref().unwrap_or(""),
             self.group.as_deref().unwrap_or("")
         );
-        let got = ctx
-            .as_root(&["chown", &spec, &self.path])
-            .map_err(|e| format!("cannot run chown: {e}"))?;
-        if got.rc != 0 {
-            return Err(format!("cannot chown {}: {}", self.path, trim(&got.stderr)));
+        if let Some(bad) = ctx.perform(&["chown", &spec, &self.path], true) {
+            return Err(describe(bad));
         }
         Ok(())
     }
@@ -751,15 +737,20 @@ impl Spec {
 // ── helpers ───────────────────────────────────────────────────────────────
 
 fn failed(msg: impl Into<String>) -> Effect {
-    Effect::Failed { msg: msg.into(), detail: String::new() }
+    Effect::fail(msg)
 }
 
 fn blank(s: &str) -> &str {
     if s.is_empty() { "?" } else { s }
 }
 
-fn trim(s: &str) -> String {
-    s.trim().lines().last().unwrap_or("").to_string()
+/// `perform` already worded the failure; these helpers return a String, so
+/// unwrap it back out rather than inventing a second phrasing.
+fn describe(e: Effect) -> String {
+    match e {
+        Effect::Failed { msg, .. } => msg,
+        _ => "failed".to_string(),
+    }
 }
 
 /// Unified, three lines of context (spec §9.1). Content that is not text gets

@@ -64,7 +64,42 @@ pub enum How {
 }
 
 /// Spawn, capture, and wait — killing the whole group on timeout or Ctrl-C.
+///
+/// The lossy view, for the runner and for `register`.
 pub fn run(s: Spawn<'_>) -> std::io::Result<Output> {
+    let raw = run_raw(s)?;
+    Ok(Output {
+        rc: raw.rc,
+        stdout: String::from_utf8_lossy(&raw.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&raw.stderr).into_owned(),
+        how: raw.how,
+    })
+}
+
+/// The exact-bytes view, for reading state.
+///
+/// `file` compares a target against itself byte for byte, and a lossy String
+/// makes a binary file differ from itself forever. This is the same spawn,
+/// the same process group and the same watchdog — only the last step differs.
+pub fn capture(s: Spawn<'_>) -> std::io::Result<Raw> {
+    run_raw(s)
+}
+
+pub struct Raw {
+    pub rc: i32,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+    pub how: How,
+}
+
+impl Raw {
+    /// stderr as text, which is all any caller wants of it.
+    pub fn stderr_text(&self) -> String {
+        String::from_utf8_lossy(&self.stderr).into_owned()
+    }
+}
+
+fn run_raw(s: Spawn<'_>) -> std::io::Result<Raw> {
     let (program, args) = s.argv.split_first().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty command")
     })?;
@@ -103,12 +138,7 @@ pub fn run(s: Spawn<'_>) -> std::io::Result<Output> {
         How::Interrupted => 130,
     };
 
-    Ok(Output {
-        rc,
-        stdout: out.join().unwrap_or_default(),
-        stderr: err.join().unwrap_or_default(),
-        how,
-    })
+    Ok(Raw { rc, stdout: out.join().unwrap_or_default(), stderr: err.join().unwrap_or_default(), how })
 }
 
 /// Wait, but wake up often enough to notice a Ctrl-C or a blown deadline.
@@ -190,18 +220,15 @@ fn drain(
                 }
             }
         }
-        // Spec §10 said "exact bytes in `register`" and this is where that was
-        // given up: a `register` holding bytes breaks `result.stdout == "yes"`,
-        // which is the only thing a register is for. Lossy in both places.
-        let _ = tx.send(String::from_utf8_lossy(&buf).into_owned());
+        let _ = tx.send(buf);
     });
     Reader(Some((h, rx)))
 }
 
-struct Reader(Option<(std::thread::JoinHandle<()>, mpsc::Receiver<String>)>);
+struct Reader(Option<(std::thread::JoinHandle<()>, mpsc::Receiver<Vec<u8>>)>);
 
 impl Reader {
-    fn join(self) -> Option<String> {
+    fn join(self) -> Option<Vec<u8>> {
         let (h, rx) = self.0?;
         let text = rx.recv().ok();
         let _ = h.join();
@@ -255,37 +282,4 @@ fn kill_group(pid: u32) {
         .status();
 }
 
-/// Run a command and capture its bytes.
-///
-/// Deliberately not `run`: reading state needs the exact bytes, and `run`
-/// hands back lossy `String`s because that is what a `register` can hold. It
-/// also needs none of the machinery around it — no process group, no
-/// watchdog, no streaming — because it is asking a question, not doing work.
-pub fn capture(argv: &[String], stdin: Option<&str>) -> std::io::Result<Captured> {
-    let (program, args) = argv.split_first().ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty command")
-    })?;
-    let mut child = Command::new(program)
-        .args(args)
-        .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    if let Some(text) = stdin
-        && let Some(mut pipe) = child.stdin.take()
-    {
-        let _ = pipe.write_all(text.as_bytes());
-    }
-    let out = child.wait_with_output()?;
-    Ok(Captured {
-        rc: out.status.code().unwrap_or(-1),
-        stdout: out.stdout,
-        stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
-    })
-}
 
-pub struct Captured {
-    pub rc: i32,
-    pub stdout: Vec<u8>,
-    pub stderr: String,
-}

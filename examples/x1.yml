@@ -14,16 +14,6 @@
 - vars:
     palette_variant: monokai_dark
 
-- name: Upgrade system
-  pkg:
-    manager: pacman
-    state: latest
-    update_cache: true
-  sudo: true
-  timeout: 15m
-  retry: { attempts: 3, delay: 10s }
-  tags: [system]
-
 - name: Enable multilib
   shell: sed -i 's/^#\[multilib\]/[multilib]/; /^\[multilib\]/{n;s/^#Include/Include/}' /etc/pacman.conf
   unless: grep -qx '\[multilib\]' /etc/pacman.conf
@@ -33,6 +23,10 @@
 - name: Base packages
   pkg:
     names: [base-devel, git, zsh, tmux, neovim, tailscale]
+    # The database refresh the old `Upgrade system` step was doing on the
+    # side. The distro upgrade itself is gone: a full upgrade is a choice,
+    # not a state (migration.md §2).
+    update_cache: true
   sudo: true
   tags: [system, packages]
 

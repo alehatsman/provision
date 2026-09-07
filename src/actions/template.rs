@@ -141,10 +141,7 @@ impl Spec {
     fn reach(&self, ctx: &Ctx<'_>, act: bool) -> (Effect, Option<String>) {
         if let Some(bad) = self.dest_is_a_file() {
             return (
-                Effect::Failed {
-                    msg: format!("{bad} exists and is a regular file, not a directory"),
-                    detail: String::new(),
-                },
+                Effect::fail(format!("{bad} exists and is a regular file, not a directory")),
                 None,
             );
         }
@@ -163,6 +160,7 @@ impl Spec {
                     }
                 }
                 Effect::Unprobed => return (Effect::Unprobed, None),
+                Effect::Unknown => return (Effect::Unknown, None),
                 failed @ Effect::Failed { .. } => return (failed, None),
             }
         }

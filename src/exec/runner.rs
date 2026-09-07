@@ -281,12 +281,17 @@ impl Runner {
             sudo: p.sudo,
             root_available: self.root_available,
             escalate: &self.sudo,
+            timeout: p.timeout,
+            env: &p.env,
         };
         let (effect, mut note) = match &p.action {
             Action::File(spec) => {
                 (if act { spec.apply(&ctx) } else { spec.plan(&ctx) }, None)
             }
             Action::Service(spec) => {
+                (if act { spec.apply(&ctx) } else { spec.plan(&ctx) }, None)
+            }
+            Action::Pkg(spec) => {
                 (if act { spec.apply(&ctx) } else { spec.plan(&ctx) }, None)
             }
             Action::Template(spec) => {
@@ -301,12 +306,13 @@ impl Runner {
 
         let (mut status, detail) = match effect {
             Effect::Ok => (Status::Ok, None),
+            Effect::Unknown => (Status::Unknown, None),
             Effect::Changed(d) => {
                 (if act { Status::Changed } else { Status::WouldChange }, d)
             }
             Effect::Unprobed => (Status::WouldRunUnprobed, None),
-            Effect::Failed { msg, detail } => (
-                Status::Failed(Failure { msg, rc: Some(1), stderr: detail, interrupted: false }),
+            Effect::Failed { msg, detail, interrupted } => (
+                Status::Failed(Failure { msg, rc: Some(1), stderr: detail, interrupted }),
                 None,
             ),
         };

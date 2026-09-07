@@ -293,7 +293,7 @@ fn a_probed_plan_runs_the_asserts() {
     // Spec §6.7: plan reports the failure and keeps walking, so the rest of
     // the plan is still on screen. Only apply stops at the first failure.
     assert!(text.contains("Reload shell hint"), "{text}");
-    assert!(text.contains("20 steps"), "{text}");
+    assert!(text.contains("19 steps"), "{text}");
 }
 
 #[test]

@@ -7,6 +7,7 @@
 //! inspection and get their own modules then.
 
 pub mod file;
+pub mod pkg;
 pub mod service;
 pub mod template;
 
@@ -17,6 +18,8 @@ use crate::exec::sudo::Sudo;
 use crate::template::Engine;
 use crate::yaml::N;
 use minijinja::Value;
+use std::collections::BTreeMap;
+use std::time::Duration;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
@@ -26,6 +29,7 @@ pub enum Action {
     File(file::Spec),
     Template(template::Spec),
     Service(service::Spec),
+    Pkg(pkg::Spec),
     /// Parsed and validated, but with no runner until phase 2. `plan` reports
     /// it unprobed; `apply` refuses rather than pretending it converged.
     NotYet(&'static str),
@@ -119,7 +123,7 @@ impl Action {
     /// An action that inspects and changes state itself, rather than reporting
     /// through an exit code. It never reaches the runner's argv path.
     pub fn is_typed(&self) -> bool {
-        matches!(self, Action::File(_) | Action::Template(_) | Action::Service(_))
+        matches!(self, Action::File(_) | Action::Template(_) | Action::Service(_) | Action::Pkg(_))
     }
 }
 
@@ -222,6 +226,11 @@ impl Action {
                 None => return Ok(None),
             },
 
+            "pkg" => match pkg::parse(step, engine, ctx, raw)? {
+                Some(spec) => Action::Pkg(spec),
+                None => return Ok(None),
+            },
+
             "service" => match service::parse(step, engine, ctx, raw)? {
                 Some(spec) => Action::Service(spec),
                 None => return Ok(None),
@@ -259,43 +268,119 @@ fn static_key(key: &str) -> &'static str {
 pub enum Effect {
     /// Already as declared.
     Ok,
+    /// Cannot tell without asking a remote. `pkg` with `state: latest` on a
+    /// package that is installed: whether a newer version exists is not a
+    /// question the local database answers.
+    Unknown,
     /// Differs. The string is the diff or the metadata delta, if there is one
     /// worth printing.
     Changed(Option<String>),
-    Failed { msg: String, detail: String },
+    Failed {
+        msg: String,
+        detail: String,
+        /// Ctrl-C, not the step's own fault. Drives the exit code, not the
+        /// glyph.
+        interrupted: bool,
+    },
     /// Could not look: the answer needs a root this run does not have. Plan
     /// only — `apply` proved sudo works before the first step.
     Unprobed,
 }
 
 /// The part of the run a typed action needs. Two questions and a way to ask
-/// them as root; nothing about scopes, templates, or the walk.
+/// them; nothing about scopes, templates, or the walk.
 pub struct Ctx<'a> {
     /// The step's own `sudo: true`.
     pub sudo: bool,
     /// Whether escalation works at all. Only `plan` ever sees this false.
     pub root_available: bool,
     pub escalate: &'a Sudo,
+    /// The step's `timeout` (spec §4). Every command a typed action runs is
+    /// bound by it — `systemctl start` waits on the unit's own timeout and
+    /// `apt-get install` waits forever on a dpkg lock, and §4 promises the
+    /// step is killed either way.
+    pub timeout: Duration,
+    pub env: &'a BTreeMap<String, String>,
 }
 
 impl Ctx<'_> {
-    /// Run a command as root and capture its bytes exactly.
-    pub fn as_root(&self, argv: &[&str]) -> std::io::Result<process::Captured> {
+    pub fn as_root(&self, argv: &[&str]) -> std::io::Result<process::Raw> {
         self.exec(argv, true)
     }
 
-    /// Run a command, escalating only when asked. Probes usually should not:
-    /// `systemctl is-active` answers for anyone, and asking for root to read
-    /// a state that is world-readable is how `plan` stops working on a
-    /// machine with a cold credential.
-    pub fn exec(&self, argv: &[&str], as_root: bool) -> std::io::Result<process::Captured> {
+    /// Run a command, escalating only when asked.
+    ///
+    /// Probes usually should not: `systemctl is-active` and `dpkg-query`
+    /// answer for anyone, and asking for root to read a world-readable state
+    /// is how `plan` stops working on a machine with a cold credential.
+    ///
+    /// Probes and mutations take the same path regardless, because a hung
+    /// manager hangs `is-active` exactly as it hangs `start`.
+    pub fn exec(&self, argv: &[&str], as_root: bool) -> std::io::Result<process::Raw> {
         let argv: Vec<String> = argv.iter().map(|s| (*s).to_string()).collect();
         let (argv, stdin) = if as_root {
             (self.escalate.wrap(argv, &[]), self.escalate.stdin())
         } else {
             (argv, None)
         };
-        process::capture(&argv, stdin.as_deref())
+        process::capture(process::Spawn {
+            argv: &argv,
+            cwd: None,
+            env: self.env,
+            stdin: stdin.as_deref(),
+            timeout: self.timeout,
+            stream: false,
+        })
+    }
+
+    /// Run a command that does work. `None` means it succeeded.
+    ///
+    /// The message is the **first** non-empty stderr line, not the last:
+    /// systemd ends with "See `systemctl status ...`", which is a pointer,
+    /// not a reason. The whole stderr goes to the detail, so the failure
+    /// block shows what happened.
+    pub fn perform(&self, argv: &[&str], as_root: bool) -> Option<Effect> {
+        let got = match self.exec(argv, as_root) {
+            Ok(g) => g,
+            Err(e) => return Some(Effect::fail(format!("cannot run {}: {e}", argv[0]))),
+        };
+        if let Some(bad) = self.stopped(&got) {
+            return Some(bad);
+        }
+        if got.rc != 0 {
+            let stderr = got.stderr_text();
+            let why = stderr
+                .lines()
+                .map(str::trim)
+                .find(|l| !l.is_empty())
+                .unwrap_or("failed")
+                .to_string();
+            return Some(Effect::Failed {
+                msg: format!("{} failed: {why}", argv[0]),
+                detail: stderr.trim().to_string(),
+                interrupted: false,
+            });
+        }
+        None
+    }
+
+    /// The wording the shell path uses for a command that did not get to
+    /// finish, so a `file` step and a `shell` step read the same when the
+    /// same thing happened to them.
+    pub fn stopped(&self, got: &process::Raw) -> Option<Effect> {
+        match got.how {
+            process::How::Exited => None,
+            process::How::TimedOut => Some(Effect::Failed {
+                msg: format!("timed out after {}", crate::output::event::human(self.timeout)),
+                detail: got.stderr_text(),
+                interrupted: false,
+            }),
+            process::How::Interrupted => Some(Effect::Failed {
+                msg: "interrupted".into(),
+                detail: String::new(),
+                interrupted: true,
+            }),
+        }
     }
 
     /// Spec §6.3: with `sudo: true` every probe of the target runs as root,
@@ -303,5 +388,12 @@ impl Ctx<'_> {
     /// root to read.
     pub fn reads_as_root(&self) -> bool {
         self.sudo
+    }
+}
+
+impl Effect {
+    /// A failure with no captured output behind it.
+    pub fn fail(msg: impl Into<String>) -> Effect {
+        Effect::Failed { msg: msg.into(), detail: String::new(), interrupted: false }
     }
 }

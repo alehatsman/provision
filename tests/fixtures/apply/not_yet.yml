@@ -1,5 +1,0 @@
----
-# Whatever phase 2 has not reached yet. `file` lived here until it landed.
-- name: A phase 2 action
-  pkg:
-    name: definitely-not-installed

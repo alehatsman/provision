@@ -62,7 +62,7 @@ against a machine mooncake has already converged.
 | `pkg.upgrade: {}` (1) | **delete** | a full distro upgrade is a choice, not a state. Decided 2026-09-08; upgrade by hand or from the justfile (§6) |
 | `pkg.repo` brew (1 site, 4 taps) | `shell: brew tap X` + `unless: brew tap \| grep -qx X` | §3.1, collapsed into the one loop of §3.6 |
 | `pkg.repo` apt (3) | keyring `shell` + `file` DEB822 source + `cmd: [apt-get, update]` | **three steps, not one.** §3.11. Not PPAs — §3.3 does not cover them |
-| `os.service` (10) | `service: {name, state, enabled, scope}` | `daemon_reload: true` (1 site) becomes a preceding `cmd: [systemctl, daemon-reload]` |
+| `os.service` (10) | `service: {name, state, enabled, scope}` | `daemon_reload: true` (1 site) becomes a preceding `cmd: [systemctl, daemon-reload]`. On launchd the same shape applies for a different reason: the step that places a plist must bootstrap it in a following `cmd`, because `kickstart` cannot load one that was never loaded. Zero launchd service sites in the fleet today |
 | `os.systemd` (5) — `unit`/`service`/`install` blocks | `template` + `cmd: [systemctl, daemon-reload]` + `service` | **writes a unit file**; `service` does not. Recipe in §3.8. `reload_on_change` becomes `register` + `when` |
 | `os.user` (2) | `shell: chsh` + `unless` | recipe in §3.5 |
 | `stat` (2) + `pip` (2) | delete | only in `components/nvim/python_venv.yml`, which is deleted; see §4 |

@@ -140,8 +140,9 @@ pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result
 // ── the four operations ───────────────────────────────────────────────────
 
 impl Backend {
-    /// `None` when the answer cannot be had — an unknown unit, or a manager
-    /// that is not running. The verdict treats that as "not as declared".
+    /// `None` only when the command could not be run at all. An unknown or
+    /// inactive unit is `Some(false)`: `is-active` exits 3 for those, which
+    /// is an answer. The verdict treats `None` as "not as declared".
     fn is_active(&self, name: &str, ctx: &Ctx<'_>) -> Option<bool> {
         match self {
             Backend::Systemd { user } => {
@@ -161,16 +162,21 @@ impl Backend {
                 let got = ctx.exec(&["systemctl", scope_flag(*user), "is-enabled", name], false).ok()?;
                 Some(got.rc == 0)
             }
-            // launchd conflates loaded and enabled; spec §6.6 says best
-            // effort, reported honestly, and this is the honest answer.
+            // `print` reports loaded-ness, not enablement, so a unit that is
+            // enabled but not yet loaded would read disabled forever — the
+            // step would change on every run after `enable` had already
+            // worked. `print-disabled` lists exactly the pair `enable` and
+            // `disable` write, and takes a domain rather than a path.
             Backend::Launchd { user } => {
-                let got = ctx.exec(&["launchctl", "print", &domain(*user, name)], false).ok()?;
-                Some(got.rc == 0)
+                let got = ctx.exec(&["launchctl", "print-disabled", &domain_root(*user)], false).ok()?;
+                let out = String::from_utf8_lossy(&got.stdout);
+                let line = out.lines().find(|l| l.contains(&format!("\"{name}\"")))?;
+                Some(!line.contains("disabled"))
             }
         }
     }
 
-    fn set_state(&self, name: &str, want: Want, ctx: &Ctx<'_>) -> std::result::Result<(), String> {
+    fn set_state(&self, name: &str, want: Want, ctx: &Ctx<'_>) -> std::result::Result<(), Effect> {
         let root = ctx.sudo;
         match self {
             Backend::Systemd { user } => {
@@ -195,7 +201,7 @@ impl Backend {
         }
     }
 
-    fn set_enabled(&self, name: &str, on: bool, ctx: &Ctx<'_>) -> std::result::Result<(), String> {
+    fn set_enabled(&self, name: &str, on: bool, ctx: &Ctx<'_>) -> std::result::Result<(), Effect> {
         let root = ctx.sudo;
         match self {
             Backend::Systemd { user } => {
@@ -220,12 +226,14 @@ fn scope_flag(user: bool) -> &'static str {
 }
 
 fn domain(user: bool, name: &str) -> String {
-    if user {
-        let uid = std::env::var("UID").unwrap_or_else(|_| users_uid());
-        format!("gui/{uid}/{name}")
-    } else {
-        format!("system/{name}")
-    }
+    format!("{}/{name}", domain_root(user))
+}
+
+/// `gui/<uid>` or `system`. `$UID` is a shell variable and is not exported,
+/// so `getuid` is the only source; `scope: user` with `sudo` is rejected at
+/// parse time, so this is always the invoking user.
+fn domain_root(user: bool) -> String {
+    if user { format!("gui/{}", users_uid()) } else { "system".to_string() }
 }
 
 #[cfg(unix)]
@@ -238,13 +246,11 @@ fn users_uid() -> String {
     String::new()
 }
 
-fn run(ctx: &Ctx<'_>, argv: &[&str], as_root: bool) -> std::result::Result<(), String> {
-    let got = ctx.exec(argv, as_root).map_err(|e| format!("cannot run {}: {e}", argv[0]))?;
-    if got.rc != 0 {
-        let why = got.stderr.trim().lines().last().unwrap_or("").to_string();
-        return Err(format!("{} failed: {why}", argv.join(" ")));
+fn run(ctx: &Ctx<'_>, argv: &[&str], as_root: bool) -> std::result::Result<(), Effect> {
+    match ctx.perform(argv, as_root) {
+        Some(bad) => Err(bad),
+        None => Ok(()),
     }
-    Ok(())
 }
 
 // ── the verdict, which never asks which backend it is ─────────────────────
@@ -274,8 +280,8 @@ impl Spec {
             };
             if needed {
                 changes.push(format!("{} {}", verb_of(want), self.name));
-                if act && let Err(e) = self.backend.set_state(&self.name, want, ctx) {
-                    return Effect::Failed { msg: e, detail: String::new() };
+                if act && let Err(bad) = self.backend.set_state(&self.name, want, ctx) {
+                    return bad;
                 }
             }
         }
@@ -288,8 +294,8 @@ impl Spec {
                     if want { "enable" } else { "disable" },
                     self.name
                 ));
-                if act && let Err(e) = self.backend.set_enabled(&self.name, want, ctx) {
-                    return Effect::Failed { msg: e, detail: String::new() };
+                if act && let Err(bad) = self.backend.set_enabled(&self.name, want, ctx) {
+                    return bad;
                 }
             }
         }
