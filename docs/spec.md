@@ -544,6 +544,15 @@ provision version
   `validate` is the subset of `plan` that runs nothing, not a weaker check.
   Anything `plan` would reject before touching the machine, `validate`
   rejects too.
+
+  It is therefore evaluated against **this host's facts and PATH**. Resolving
+  a `pkg` step's default manager asks what is on PATH, and a `service` step's
+  backend follows the `os` fact, so a plan written for another machine can be
+  rejected here for a reason that is true only here: a `service` step
+  validated with `os` reading `windows`, or a `pkg` step naming no `manager`
+  on a box that has none. This is the host-dependence a `when` gate has always
+  had, now reaching one step further. Name the `manager` on a plan meant to
+  validate anywhere.
 - `plan`: everything `validate` does, plus render templates, evaluate `when`,
   probe `unless`/`creates`/`pkg`/`service`/`file` state, print what would
   change. Runs nothing that mutates. Exit 0 if nothing would change, 2 if

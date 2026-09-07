@@ -7,7 +7,7 @@
     name: coreutils
     manager: apt
 
-- name: A package that was never installed, wanted absent
+- name: An absent package, wanted absent
   pkg:
     name: provision-no-such-package
     state: absent

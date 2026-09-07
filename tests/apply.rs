@@ -870,3 +870,299 @@ fn a_service_that_declares_nothing_is_an_error() {
     assert_eq!(out.status.code(), Some(3), "{text}");
     assert!(text.contains("needs `state` or `enabled`"), "{text}");
 }
+
+
+// ── pkg ───────────────────────────────────────────────────────────────────
+
+/// The host-side `pkg` tests read this machine's dpkg database and never
+/// write to it. There is nothing to read on a box without apt.
+fn apt_is_local() -> bool {
+    let on_path = |bin: &str| {
+        Command::new(bin).arg("--version").output().map(|o| o.status.success()).unwrap_or(false)
+    };
+    on_path("apt-get") && on_path("dpkg-query")
+}
+
+/// One plan, written into `dir` and run through `plan`.
+///
+/// Validation happens before anything runs, so `plan` reaches every error
+/// below and no malformed body can act.
+fn pkg_plan(dir: &Path, body: &str) -> (i32, String) {
+    let path = dir.join("pkg.yml");
+    std::fs::write(&path, body).unwrap();
+    let out = run_in(dir, &["plan", path.to_str().unwrap()]);
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned()
+            + &String::from_utf8_lossy(&out.stderr),
+    )
+}
+
+#[test]
+fn pkg_leaves_a_host_that_already_matches_alone() {
+    // Both verdicts come out of the query alone: `present` on a package the
+    // database lists, and `absent` on one it does not. Neither runs the
+    // manager, which is why this fixture is safe under `apply`.
+    if !apt_is_local() {
+        eprintln!("skipped: needs apt");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(dir.path(), "pkg_noop.yml", &[]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(verdict(&out, "base system always has"), "ok", "{out}");
+    assert_eq!(verdict(&out, "An absent package"), "ok", "{out}");
+    assert!(!out.contains("changed"), "nothing may change on this host:\n{out}");
+}
+
+#[test]
+fn pkg_plan_names_what_it_would_install_and_admits_what_it_cannot_know() {
+    if !apt_is_local() {
+        eprintln!("skipped: needs apt");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture("pkg_plan.yml");
+    let out = run_in(dir.path(), &["plan", path.to_str().unwrap()]);
+    let text = String::from_utf8_lossy(&out.stdout);
+
+    // Spec §6.5: plan lists the packages that would be installed, by actual
+    // query — the name is in the detail, not just the count.
+    assert!(line_for(&text, "not installed").contains("would change"), "{text}");
+    assert!(text.contains("install provision-no-such-package"), "{text}");
+    // Spec §6.5: whether a newer version exists is not a question the local
+    // database answers, so `latest` on an installed package says so.
+    assert_eq!(verdict(&text, "asked for latest"), "unknown", "{text}");
+    // D15: an unknown verdict is not a converged one.
+    assert_eq!(out.status.code(), Some(2), "{text}");
+}
+
+#[test]
+fn the_managers_that_refuse_root_refuse_sudo() {
+    // Spec §6.5: brew and yay both refuse to run as root, so `sudo: true` on
+    // either is a validation error rather than a failure at the far end.
+    let dir = tempfile::tempdir().unwrap();
+    for manager in ["brew", "yay"] {
+        let (code, out) = pkg_plan(
+            dir.path(),
+            &format!(
+                "- name: As root\n  pkg:\n    name: git\n    manager: {manager}\n  sudo: true\n"
+            ),
+        );
+        assert_eq!(code, 3, "{out}");
+        assert!(out.contains(&format!("`{manager}` must not run as root")), "{out}");
+    }
+}
+
+#[test]
+fn an_unknown_manager_lists_the_ones_that_exist() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) =
+        pkg_plan(dir.path(), "- name: Nope\n  pkg:\n    name: git\n    manager: nix\n");
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("unknown package manager `nix`"), "{out}");
+    for known in ["pacman", "yay", "apt", "brew", "winget"] {
+        assert!(out.contains(known), "the note does not name {known}:\n{out}");
+    }
+}
+
+#[test]
+fn cask_belongs_to_brew_and_nowhere_else() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = pkg_plan(
+        dir.path(),
+        "- name: A cask\n  pkg:\n    name: git\n    manager: apt\n    cask: true\n",
+    );
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("`cask` does not apply to `apt`"), "{out}");
+    assert!(out.contains("casks are a brew concept"), "{out}");
+}
+
+#[test]
+fn pkg_wants_exactly_one_of_name_and_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = pkg_plan(
+        dir.path(),
+        "- name: Both\n  pkg:\n    name: git\n    names: [git]\n    manager: apt\n",
+    );
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("`name` and `names` are mutually exclusive"), "{out}");
+
+    let (code, out) = pkg_plan(dir.path(), "- name: Neither\n  pkg:\n    manager: apt\n");
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("`pkg` requires `name` or `names`"), "{out}");
+}
+
+// The apt status filter — `dpkg-query -W` alone also lists removed-but-config
+// packages, which would read as present — has no host-side test: every one of
+// the 1660 entries in this machine's database is `install ok installed`, so
+// there is nothing here to catch the missing filter. The assertion lives in
+// `the_apt_query_ignores_a_package_that_is_only_config_files`, which makes
+// such a package inside a container. plan.md records that.
+
+#[test]
+fn a_typed_actions_command_is_bound_by_the_steps_timeout() {
+    // 837a07b. Before it a command a typed action spawned carried no
+    // deadline, so a manager blocked on a lock hung the run for good.
+    //
+    // What hangs here is `dpkg-query`: the real query of the real `pkg`
+    // action, reached through the real `Ctx::exec`, supplied by a stub
+    // earlier on PATH. Only the binary is a stand-in — a manager that blocks
+    // on its lock cannot be arranged on this host without touching its
+    // packages. Nothing about the verdict is simulated.
+    if !apt_is_local() {
+        eprintln!("skipped: needs apt");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let pidfile = dir.path().join("query.pid");
+    let stub = bin.join("dpkg-query");
+    std::fs::write(
+        &stub,
+        format!("#!/bin/sh\nsleep 300 &\necho $! > {}\nsleep 300\n", pidfile.display()),
+    )
+    .unwrap();
+    set_mode(&stub, 0o755);
+
+    let plan = dir.path().join("hang.yml");
+    std::fs::write(
+        &plan,
+        "- name: A query that never answers\n  pkg:\n    name: coreutils\n    manager: apt\n  timeout: 2s\n",
+    )
+    .unwrap();
+
+    let began = std::time::Instant::now();
+    let out = Command::new(env!("CARGO_BIN_EXE_provision"))
+        .args(["apply", plan.to_str().unwrap()])
+        .env("PATH", format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default()))
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("provision failed to start");
+    let elapsed = began.elapsed();
+    let text = String::from_utf8_lossy(&out.stdout).into_owned()
+        + &String::from_utf8_lossy(&out.stderr);
+
+    assert_eq!(out.status.code(), Some(1), "{text}");
+    // The step's own 2s, not the ten-minute default of spec §4, and worded
+    // the way the shell path words it.
+    assert!(text.contains("timed out after 2"), "{text}");
+    assert!(elapsed < std::time::Duration::from_secs(60), "the step was never killed: {elapsed:?}");
+
+    // And the kill reached past the command into what the command started.
+    let pid = std::fs::read_to_string(&pidfile)
+        .expect("the stub query never ran")
+        .trim()
+        .to_string();
+    let alive = Command::new("kill")
+        .args(["-0", &pid])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    assert!(!alive, "pid {pid} outlived the process group it was killed with");
+}
+
+// ── pkg, in a container ───────────────────────────────────────────────────
+
+/// Installing and removing packages is the one thing these tests may not do
+/// to the machine they run on, so it happens in a throwaway container or not
+/// at all. Off by default: a plain `cargo test` must not need Docker.
+fn container_tests_enabled() -> bool {
+    if std::env::var("PROVISION_CONTAINER_TESTS").is_err() {
+        eprintln!("skipped: set PROVISION_CONTAINER_TESTS=1");
+        return false;
+    }
+    true
+}
+
+/// One shell line in a throwaway container, with the binary under test and
+/// the fixture directory mounted in. `--rm`, so nothing survives the run.
+fn in_container(image: &str, script: &str) -> (i32, String) {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/apply");
+    let args: Vec<String> = vec![
+        "run".into(),
+        "--rm".into(),
+        "-v".into(),
+        format!("{}:/usr/local/bin/provision:ro", env!("CARGO_BIN_EXE_provision")),
+        "-v".into(),
+        format!("{}:/plan:ro", fixtures.display()),
+        "-e".into(),
+        "NO_COLOR=1".into(),
+        "-e".into(),
+        "DEBIAN_FRONTEND=noninteractive".into(),
+        image.into(),
+        "sh".into(),
+        "-c".into(),
+        script.into(),
+    ];
+    let out = Command::new("docker").args(&args).output().expect("docker failed to start");
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned()
+            + &String::from_utf8_lossy(&out.stderr),
+    )
+}
+
+/// The two applies of the idempotency gate, in one container so the first
+/// one's state is what the second one reads.
+fn twice(image: &str, plan: &str) -> (i32, String) {
+    in_container(
+        image,
+        &format!(
+            "provision apply /plan/{plan} && echo ---SECOND--- && provision apply /plan/{plan}"
+        ),
+    )
+}
+
+#[test]
+#[ignore = "needs docker; set PROVISION_CONTAINER_TESTS=1"]
+fn apt_installs_a_package_twice_changed_then_ok() {
+    if !container_tests_enabled() {
+        return;
+    }
+    let (code, out) = twice("ubuntu:24.04", "pkg_container_apt.yml");
+    assert_eq!(code, 0, "{out}");
+    let (first, second) = out.split_once("---SECOND---").expect(&out);
+    assert!(line_for(first, "A tiny package").contains("changed"), "{out}");
+    assert!(first.contains("install sl"), "{out}");
+    assert_eq!(verdict(second, "A tiny package"), "ok", "{out}");
+}
+
+#[test]
+#[ignore = "needs docker; set PROVISION_CONTAINER_TESTS=1"]
+fn pacman_installs_a_package_twice_changed_then_ok() {
+    if !container_tests_enabled() {
+        return;
+    }
+    let (code, out) = twice("archlinux:latest", "pkg_container_pacman.yml");
+    assert_eq!(code, 0, "{out}");
+    let (first, second) = out.split_once("---SECOND---").expect(&out);
+    assert!(line_for(first, "A tiny package").contains("changed"), "{out}");
+    assert!(first.contains("install tree"), "{out}");
+    assert_eq!(verdict(second, "A tiny package"), "ok", "{out}");
+}
+
+#[test]
+#[ignore = "needs docker; set PROVISION_CONTAINER_TESTS=1"]
+fn the_apt_query_ignores_a_package_that_is_only_config_files() {
+    // Spec §6.5: plain `dpkg-query -W` lists a removed-but-config package,
+    // which would read as present and make `present` a silent no-op on a
+    // package that is not installed. `nano` leaves /etc/nanorc behind, so
+    // install-then-remove is enough to build the case. No host has one to
+    // borrow, so it is built here.
+    if !container_tests_enabled() {
+        return;
+    }
+    let (code, out) = in_container(
+        "ubuntu:24.04",
+        "apt-get update -qq >/dev/null && apt-get install -y -qq nano >/dev/null \
+         && apt-get remove -y -qq nano >/dev/null \
+         && dpkg-query -W -f '${Package}\\t${Status}\\n' nano \
+         && provision plan /plan/pkg_container_config_files.yml",
+    );
+    assert!(out.contains("deinstall ok config-files"), "the case was not built:\n{out}");
+    assert_eq!(code, 2, "{out}");
+    assert!(line_for(&out, "only config files").contains("would change"), "{out}");
+    assert!(out.contains("install nano"), "{out}");
+}
