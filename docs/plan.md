@@ -73,13 +73,21 @@ diff or message. The output layer knows nothing about actions.
 
 ### Phase 0 — parse, validate, render, plan-without-probe
 
-**Status: code complete, gate open.** 45 tests green. What shipped differs
+**Status: done. Phase 0 is closed.** 46 tests green. What shipped differs
 from the plan below in three places, each recorded: `saphyr` replaced
 `serde_yaml` (D13), `plan` binds registers to a placeholder (D14), and
 `validate.rs` folded into `expand.rs` — validate and plan are the same walk
 with different reporting, so a plan cannot succeed on a config validate
-rejects. The remaining gate work is the `~/dotfiles` mechanical rewrite
-(migration.md §7 step 1), which lands in the dotfiles repo, not this one.
+rejects.
+
+The `~/dotfiles` rewrite (migration.md §7 step 1) is done on that repo's
+`provision` branch: all 58 YAML files, all five machine plans plus the
+standalone Windows bootstrap `validate` clean and render every template
+under `plan --plan-no-probe`. It found one hole here — action bodies were
+not key-checked — now closed by `model::action_body_keys`. See
+migration.md §8 and §9.
+
+Phase 1 is next: the execution core.
 
 Deliverables
 

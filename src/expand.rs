@@ -429,6 +429,13 @@ impl Expander {
             }
         }
 
+        if let Some(allowed) = model::action_body_keys(step.key)
+            && step.body.as_map().is_ok()
+            && let Err(d) = step.body.deny_unknown_keys(allowed, &format!("`{}`", step.key))
+        {
+            self.diags.push(d);
+        }
+
         if step.key == "template" {
             self.check_template_sources(step, &ctx);
         }

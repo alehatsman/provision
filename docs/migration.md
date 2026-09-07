@@ -1,6 +1,7 @@
 # Migrating `~/dotfiles` from mooncake to provision
 
-Status: v1.0 · 2026-09-07 · measured against `~/dotfiles` at commit `9548bbd`
+Status: v1.2 · 2026-09-08 · executed against `~/dotfiles` at commit `9548bbd`
+on branch `provision`; §7 step 1 is done
 (58 YAML files, 371 steps, 27 `.j2` templates, 18 components, 5 machines).
 
 Counts below are the audited ones from [audit.md](audit.md), which closed the
@@ -58,8 +59,9 @@ against a machine mooncake has already converged.
 | `file.download` (1) | `shell: curl -fsSL URL -o PATH` + `creates: PATH` | |
 | `file.template: {src, dest}` | `template: {src, dest}` | 32 sites, rename |
 | `pkg: {name/names, state, manager, cask, update_cache}` | `pkg:` same | unchanged; `manager: yay` supported |
-| `pkg.upgrade: {}` (1) | `shell: apt-get upgrade -y` with `changed_when` on output | or drop; a full upgrade on every apply is a choice, not a state |
-| `pkg.repo` (4: brew taps) | `shell: brew tap X` + `unless: brew tap \| grep -qx X` | recipe below |
+| `pkg.upgrade: {}` (1) | **delete** | a full distro upgrade is a choice, not a state. Decided 2026-09-08; upgrade by hand or from the justfile (§6) |
+| `pkg.repo` brew (1 site, 4 taps) | `shell: brew tap X` + `unless: brew tap \| grep -qx X` | §3.1, collapsed into the one loop of §3.6 |
+| `pkg.repo` apt (3) | keyring `shell` + `file` DEB822 source + `cmd: [apt-get, update]` | **three steps, not one.** §3.11. Not PPAs — §3.3 does not cover them |
 | `os.service` (10) | `service: {name, state, enabled, scope}` | `daemon_reload: true` (1 site) becomes a preceding `cmd: [systemctl, daemon-reload]` |
 | `os.systemd` (5) — `unit`/`service`/`install` blocks | `template` + `cmd: [systemctl, daemon-reload]` + `service` | **writes a unit file**; `service` does not. Recipe in §3.8. `reload_on_change` becomes `register` + `when` |
 | `os.user` (2) | `shell: chsh` + `unless` | recipe in §3.5 |
@@ -253,6 +255,51 @@ mint a token against the daemon. `retry` composes with `assert` (spec §6.7):
 
 30 attempts × 2s is the 60s timeout the original declared.
 
+### 3.11 `pkg.repo` apt — keyring, DEB822 source, update
+
+Replaces `components/terraform/index.yml:13`,
+`components/google-cloud/index.yml:10` and
+`platforms/windows/index.yml:127` (tailscale). mooncake's `pkg.repo` apt
+driver did keyring fetch, source write and `apt-get update` atomically in
+one step; provision has no such action and is not getting one (decided
+2026-09-08 — the heaviest action in the language for three sites). It
+expands to three steps, which is also the first time the update is
+visibly gated on the source actually changing:
+
+```yaml
+- name: Tailscale apt keyring
+  shell: curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/{{ ubuntu_codename }}.noarmor.gpg -o /etc/apt/keyrings/tailscale.gpg
+  creates: /etc/apt/keyrings/tailscale.gpg
+  sudo: true
+
+- name: Tailscale apt source
+  file:
+    path: /etc/apt/sources.list.d/tailscale.sources
+    content: |
+      Types: deb
+      URIs: https://pkgs.tailscale.com/stable/ubuntu
+      Suites: {{ ubuntu_codename }}
+      Components: main
+      Signed-By: /etc/apt/keyrings/tailscale.gpg
+    mode: "0644"
+  sudo: true
+  register: tailscale_repo
+
+- name: Refresh apt after the Tailscale source changed
+  cmd: [apt-get, update]
+  when: tailscale_repo.changed
+  sudo: true
+```
+
+- `/etc/apt/keyrings` must exist; on all three targets it ships with
+  `apt`. The keyring step is gated by `creates`, so a rotated key needs
+  the file deleted — same posture mooncake had with `gpg_check: false`.
+- `gpg_check: false` on all three sites means no fingerprint was ever
+  pinned. The rewrite does not change that; pinning is a separate call.
+- The `.sources` (DEB822) form is deliberate and matches what `pkg.repo`
+  wrote, so the `Signed-By` conflict documented at
+  `platforms/windows/index.yml:111` stays resolved.
+
 ## 4. Hand edits, by file
 
 Complete. The spec §11 gate ([audit.md](audit.md)) walked all 371 steps and
@@ -263,23 +310,28 @@ extended this list; every construct in `~/dotfiles` now has a mapping.
 | `mooncake.yml` (root dispatcher) | rename to `provision.yml`; keeps `import` + `when: hostname == …` |
 | `machines/*/index.yml` | delete the `vars: is_wsl:` block (fact now); `as_user` → `sudo`; assert flatten |
 | `shared/bootstrap.yml` | delete the systemd-linger step's agentd justification comment; delete the sudoers step's mooncake-specific comment; keep the steps |
-| `components/fleet-peer/` | delete the component and its `use` sites |
-| `components/mooncake/` | delete; replace with a `components/provision/` that installs the binary from a release URL with `creates` |
+| `components/fleet-peer/` | **keep, keys only.** Corrected 2026-09-08: draft v1.0 said delete, premised on dropping mooncake. mooncake stays in use, and every step here is a `shell`/`file`/`assert` that migrates mechanically — including `mooncake agentd bootstrap`, which is just a command. provision has no fleet feature; it does not need one to provision a mooncake peer |
+| `components/mooncake/` | **keep, keys only.** Corrected 2026-09-08: the component installs nothing — its one step builds the `mooncake-ci:latest` image moongit runs mooncake's repo CI in, on main_pc. mooncake stays a tool in use. No `components/provision/`: there is no release URL yet |
 | `components/moongit/` | keep; `os.systemd` → §3.8 recipe with `scope: user` + a `reload_on_change` restart step; `wait.http` → §3.10; `log` → §3.9 |
 | `components/nvim/python_venv.yml` | **delete**, and its `import`. Sole user of `stat` and `pip`; its `when:` on line 14 tests `python3_venv_path` (a path, always truthy) instead of `python3_venv_present`, so it has been dead since it was written |
 | `components/nvim/index.yml` | `for_each_file` → §3.7 one-step directory template; delete the `python_venv.yml` import |
-| `machines/x1/thermal.yml` | 4 × `os.systemd` → §3.8; add `units/*.service.j2` next to it |
+| `machines/x1/thermal.yml` | 4 × `os.systemd` → §3.8; add `units/*.service.j2` next to it; **2 × `text.replace`** on `arch.conf` → §3.2 sed shape (missed by draft v1.0, which listed only the arch site) |
 | `platforms/macos/packages.yml` | `pkg.repo` + `for_each` taps → §3.6 single shell step; delete the `taps` var; `shell` xcode/rosetta/brew steps unchanged |
-| `platforms/arch/index.yml` | `text.replace` multilib → §3.2; `text.line` → recipe; `os.user` → §3.5; yay build step unchanged |
-| `platforms/windows/index.yml` | `os.service` `daemon_reload: true` → a preceding `cmd: [systemctl, daemon-reload]` (§3.8) |
+| `components/terraform/index.yml`, `components/google-cloud/index.yml` | `pkg.repo` apt → §3.11 three-step form |
+| `platforms/arch/index.yml` | `text.replace` multilib → §3.2; `text.line` → recipe; `os.user` → §3.5; yay build step unchanged; **`pkg: {upgrade: true}` → `update_cache: true`** — the step was doing a `pacman -Syu` *and* the database refresh every other `pkg` step installs against. The upgrade goes (same call as `pkg.upgrade`); the refresh stays |
+| `platforms/windows/index.yml` | `os.service` `daemon_reload: true` → a preceding `cmd: [systemctl, daemon-reload]` (§3.8); tailscale `pkg.repo` → §3.11 |
 | `components/zsh/index.yml` | `os.user` → §3.5; `git.clone` → `shell` + `creates` |
 | `components/tmux/index.yml`, `components/claude/index.yml` | `file.copy` → `file: {src, state: file}`; `git.clone` → `shell` + `creates` |
 | `components/nvim/win32yank.yml` | `file.download` → `shell: curl` + `creates` |
 | `components/nvim/zk_config.toml.j2`, `zk_template_default.md.j2`, `components/zsh/templates/.zshrc.j2` | `{% verbatim %}`/`{% endverbatim %}` → `{% raw %}`/`{% endraw %}` (3 files, 3 blocks) — Jinja2's tag; see §5 |
-| `platforms/windows/packages.yml` | `pkg.upgrade` → decide (drop recommended); PPA → recipe |
+| `platforms/windows/packages.yml` | `pkg.upgrade` → **deleted** (decided 2026-09-08); PPA → §3.3 |
 | `platforms/windows/bootstrap.yml` | drop `run_as_admin`; `shell.cmd` → `shell.script`; typed windows actions → §3.4 PowerShell recipes; the closing `log` banner moves to `platforms/windows/README.md` |
 | `shared/bootstrap.yml` | sudoers drop-in keeps `owner` **and** `group` (now a spec §6.3 field) |
-| `machines/*/vars.yml` | delete `wsl_agentd_port`, `windows_agentd_port`, `fleet_*` |
+| `machines/*/vars.yml` | **keep all of them.** Corrected 2026-09-08: `wsl_agentd_port`, `windows_agentd_port` and `fleet_*` feed the mooncake agentd and fleet, both of which stay. `shared/variables.yml` already defaults `windows_prevent_sleep` and `wsl_networking_mode`, so no machine needs to redeclare them |
+| `components/palette/index.yml` | **`use` → `import`**, and the `props:` block goes. The component's whole job is to put `palette.*` / `editor.*` into the CALLER's scope; under mooncake that worked only because `vars.load` mutated the global table. provision's `use` builds a child scope that does not leak back, so every consumer template (tmux, alacritty, hyprland, waybar, wofi, dunst, hyprlock, zsh) failed with `undefined variable palette`. `import` shares scope by design. The `enum:` prop goes with the block — a bogus variant is now a positioned "no such vars file" error |
+| `components/nvim/copilot.yml` | `when: false` → `when: "false"`. A YAML boolean is not a Jinja2 expression. The file is one permanently-disabled step; kept as parked work rather than deleted |
+| `components/clojure/` | `{{ cognitec_dev_tools_password }}` was **defined nowhere**, so mooncake rendered an empty `<password>` into `~/.m2/settings.xml` on every apply of four machines. Now `{{ env.COGNITECT_DEV_TOOLS_PASSWORD }}` with `when: env.COGNITECT_DEV_TOOLS_PASSWORD is defined`, so the file is written only when the secret is actually present |
+| `platforms/windows/bootstrap.yml` | also gains `- vars_file: ../../shared/variables.yml` as its first step. mooncake needed a second `-v` flag the operator had to remember; the plan is now self-contained apart from the machine's own vars. `{{ user_home }}` → the `home` fact, deleting an undeclared variable |
 | `tasks.yml`, `mgitci.yml` | see §6 |
 
 Expected `plan` diffs on an already-converged machine after migration:
@@ -317,11 +369,27 @@ Expected `plan` diffs on an already-converged machine after migration:
 - **One output line for 14 files.** The nvim config deploy was 14 lines of
   output; it is now one, reading `changed  3 of 14`. Use `plan` for the
   per-file diffs.
+- **`use` does not leak, and one component depended on that.** See the
+  `components/palette/` row in §4. Anything whose purpose is to publish
+  variables to its caller is an `import`, not a `use`.
+- **`validate` is not platform-scoped.** mooncake compiled each step
+  against the *current* platform before evaluating `when:`, so validating
+  `main_pc.yml` on a mac died on `action 'os.systemd' is not supported on
+  platform 'darwin'` — which is why `tasks.yml`'s `ci` task checked each
+  config only on the host that could run it. provision validates all five
+  machine plans from any one box, so `just ci` is a complete gate
+  everywhere.
+- **No `--keep-going`.** mooncake's flag finished every step it could and
+  listed failures at the end, which is what made a first apply on a bare
+  machine survivable. provision has no equivalent yet; the spec should
+  settle one before §7 step 2.
 
 ## 6. Things that move out of dotfiles entirely
 
 - `tasks.yml` (per-machine apply tasks, backup, ci): a five-line
-  `justfile`:
+  `justfile`. **Done on the `provision` branch** (decided 2026-09-08):
+  `tasks.yml` cannot be migrated — task running is a non-goal — so
+  leaving it would only mean excluding a file from `validate`.
 
   ```
   x1:        provision apply x1.yml
@@ -332,7 +400,12 @@ Expected `plan` diffs on an already-converged machine after migration:
 
 - `mgitci.yml`: replace the `mooncake validate` / `mooncake plan --no-inspect`
   steps with `provision validate` / `provision plan --plan-no-probe`. The CI
-  image carries the `provision` binary instead of mooncake.
+  image carries the `provision` binary instead of mooncake. **Not on this
+  branch** (decided 2026-09-08): the CI image has mooncake and no provision
+  binary, so flipping it now breaks CI before provision can apply anything.
+  It moves in §7 step 6, with the release that Phase 1 produces. Until
+  then `mgitci.yml` stays a mooncake file and is not passed to
+  `provision validate`.
 
 - The nine repos with `tasks.yml` (`dex`, `moongit`, `moongit-*`, `cry-aye`)
   and the `go-quality` presets are a separate migration to `just`, outside
@@ -340,12 +413,55 @@ Expected `plan` diffs on an already-converged machine after migration:
 
 ## 7. Order
 
-1. Phase 0 gate: mechanical rewrite of keys across all 64 files in a
+1. Phase 0 gate: mechanical rewrite of keys across all 58 YAML files in a
    `provision` branch of dotfiles. `provision validate` green on all five
-   machine plans.
+   machine plans, and every `.j2` renders under `--plan-no-probe`.
+   `mgitci.yml` is out of scope (§6) and `tasks.yml` is deleted.
 2. x1 first (Arch, most typed actions, no Windows). `plan`, fix `unknown`s,
    `apply`, `plan` again shows nothing.
 3. mac and work_mac.
 4. main_pc and mini_pc WSL side.
 5. Windows bootstrap on mini_pc (the one that matters less if it breaks).
 6. Delete mooncake from every machine. Merge the branch.
+
+## 8. What the rewrite found
+
+Every one of these had been live in `~/dotfiles` and silent under mooncake.
+None was a migration error; strict undefined and positioned validation are
+what surfaced them.
+
+| Where | Latent bug |
+|---|---|
+| `components/clojure/templates/settings.xml` | `~/.m2/settings.xml` written with an empty `<password>` on x1, mac, main_pc and mini_pc since the file was added — the variable was never defined anywhere |
+| `components/nvim/python_venv.yml` | dead since written: its `when:` tested `python3_venv_path`, a path (always truthy), instead of `python3_venv_present`. Also never imported by anything. Deleted |
+| `components/nvim/index.yml` | the `python_libs` / `python3_libs` vars had no reader once `python_venv.yml` went |
+| `platforms/arch/index.yml` | one step silently did both a full `pacman -Syu` and the database refresh every later `pkg` step depends on |
+| `platforms/windows/bootstrap.yml` | rendered `{{ user_home }}`, declared in no file in the repo |
+| `machines/main_pc/vars.yml` | `windows_prevent_sleep` undefined → mooncake read it falsy, so main_pc silently took the *remove-keepalive* branch. Left as-is (`shared/variables.yml` defaults it false); flipping it is its own change |
+| 3 `.j2` templates | `{% verbatim %}`, which is Twig's tag. mooncake's engine accepted it; Jinja2 and minijinja spell it `{% raw %}` |
+
+The gate also found a hole in provision itself: `deny_unknown_keys` was
+applied to step keys but not to action bodies, so `shell: {cmd: …}` and
+`service: {daemon_reload: true}` passed validation silently. Fixed —
+`model::action_body_keys` now checks every action's long form against
+spec §6, and it is what caught the `pkg: {upgrade: true}` above.
+
+## 9. Status
+
+`§7 step 1 is complete` on the `provision` branch of `~/dotfiles`:
+
+```
+x1        ok    165 steps · 144 would run · 21 skipped
+mac       ok    116 steps ·  93 would run · 23 skipped
+work_mac  ok    103 steps ·  83 would run · 20 skipped
+main_pc   ok    153 steps · 132 would run · 21 skipped
+mini_pc   ok    122 steps · 103 would run · 19 skipped
+
+platforms/windows/bootstrap.yml (standalone, --vars-file machines/<m>/vars.yml)
+          ok     18 steps ·  16 would run ·  2 skipped
+```
+
+`validate --strict` still reports ungated `shell` steps — 12 on x1, 8 on
+main_pc, 7 each on mac, work_mac and mini_pc. That is the expected state
+named at the end of §4: each is a hand edit, and they are the work of §7
+step 2, per machine, alongside the first real `apply`.

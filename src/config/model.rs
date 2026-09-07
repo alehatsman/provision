@@ -22,6 +22,20 @@ pub fn all_step_keys() -> Vec<&'static str> {
     ACTION_KEYS.iter().chain(STRUCTURAL_KEYS).chain(MODIFIER_KEYS).copied().collect()
 }
 
+/// The fields each action's long form accepts (spec §6). `cmd` is a
+/// sequence, not a map, and so has no entry.
+pub fn action_body_keys(action: &str) -> Option<&'static [&'static str]> {
+    Some(match action {
+        "shell" => &["script", "interpreter", "login"],
+        "file" => &["path", "state", "content", "src", "mode", "owner", "group", "force"],
+        "template" => &["src", "dest", "mode", "owner", "group"],
+        "pkg" => &["name", "names", "state", "manager", "cask", "update_cache"],
+        "service" => &["name", "state", "enabled", "scope"],
+        "assert" => &["command", "expr", "msg"],
+        _ => return None,
+    })
+}
+
 #[derive(Clone, Copy)]
 pub struct Step<'a> {
     pub at: N<'a>,

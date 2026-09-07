@@ -82,6 +82,18 @@ fn an_unknown_key_is_rejected_and_a_typo_is_suggested() {
 }
 
 #[test]
+fn an_unknown_field_in_an_action_body_is_an_error() {
+    // Step keys were checked from the start; action bodies were not, so
+    // `service: {daemon_reload: true}` and `shell: {cmd: ...}` passed
+    // validation silently. Both are mooncake spellings a migration hits.
+    let (code, out) = validate("unknown_action_field.yml");
+    assert_eq!(code, EXIT_VALIDATION);
+    assert!(out.contains("unknown key `daemon_reload` in `service`"), "{out}");
+    assert!(out.contains("name, state, enabled, scope"), "{out}");
+    assert_positioned(&out);
+}
+
+#[test]
 fn a_step_with_no_action_is_an_error() {
     let (code, out) = validate("no_action.yml");
     assert_eq!(code, EXIT_VALIDATION, "{out}");

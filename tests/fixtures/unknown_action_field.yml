@@ -1,0 +1,6 @@
+---
+- name: A service with a mooncake-only field
+  service:
+    name: ssh
+    state: started
+    daemon_reload: true
