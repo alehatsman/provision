@@ -1,0 +1,12 @@
+---
+source: tests/apply.rs
+expression: text
+---
+  ESC[2mtests/fixtures/apply/failure.ymlESC[0m
+  ESC[32m✓ESC[0m This one works                                   ESC[32mokESC[0m  ESC[2m[t]ESC[0m
+  ESC[1mESC[31m✗ESC[0m This one does not                                ESC[1mESC[31mFAILEDESC[0m  ESC[2m[t]ESC[0m
+    ESC[31m│ESC[0m context line
+    ESC[31m│ESC[0m sed: can't read /etc/pacman.conf: No such file or directory
+    ESC[2m│ (exit 2 · stderr, last 20 lines · --verbose for all)ESC[0m
+
+  tests/fixtures/apply/failure.yml · 2 steps · 1 ok · 1 failed · [t]

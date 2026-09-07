@@ -16,7 +16,7 @@
 
 - name: Identity is readable only by its owner
   assert:
-    command: 'test "$(stat -c %a "{{ ssh_key_path }}")" = "600"'
+    command: 'test "$(stat -c %a "{{ ssh_key_path | expanduser }}")" = "600"'
     msg: "{{ ssh_key_path }} has the wrong mode"
   when: os == "linux"
   tags: [ssh, verify]

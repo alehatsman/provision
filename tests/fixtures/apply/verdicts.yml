@@ -1,0 +1,23 @@
+---
+# One of each verdict, so the output renderers have something to render.
+- name: An ungated shell cannot be judged
+  shell: "true"
+
+- name: A gate that says the work is done
+  shell: "false"
+  unless: "true"
+
+- name: changed_when decides
+  shell: echo hello
+  register: greeting
+  changed_when: "result.stdout | trim == 'hello'"
+
+- name: A later step reads the register
+  shell: echo "{{ greeting.stdout | trim }}"
+  when: "greeting.changed"
+  changed_when: "false"
+
+- name: failed_when forgives a non-zero exit
+  shell: exit 3
+  failed_when: "result.rc not in [0, 3]"
+  changed_when: "false"

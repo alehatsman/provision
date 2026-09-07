@@ -85,25 +85,36 @@ The job is small and stable. The tool should be too.
 
 ## Status
 
-Phase 0 code complete. `validate`, `plan --plan-no-probe` and `facts` work;
-execution lands in phase 1.
+Phase 1 code complete. `validate`, `plan`, `apply` and `facts` all work.
+`shell`, `cmd` and `assert` run for real, with `unless`, `creates`, `timeout`,
+`retry`, `env`, `cwd`, `register`, `changed_when`, `failed_when`, sudo, Ctrl-C
+and `--json`. `file`, `template`, `pkg` and `service` parse and plan today and
+fail loudly under `apply`; they arrive in phase 2.
 
 The spec §11 gate is closed — all 371 steps in the real configs walk against
-the spec with zero unmapped constructs ([docs/audit.md](docs/audit.md)). The
-Phase 0 gate itself is open pending the `~/dotfiles` mechanical rewrite
-(migration.md §7 step 1).
+the spec with zero unmapped constructs ([docs/audit.md](docs/audit.md)) — and
+so is the phase 0 gate: all five `~/dotfiles` machine plans validate and
+render (migration.md §7 step 1).
 
 ```
-$ provision validate examples/x1.yml
-  ok  examples/x1.yml
-
-$ provision plan --plan-no-probe examples/x1.yml
-  examples/x1.yml
-  ? Refuse to run on the wrong machine               would run (unprobed)
+$ provision plan machines/main_pc/index.yml
   ...
-    examples/components/zsh/index.yml
-  ?   Install zsh                                    would run (unprobed)
-  -   Install zsh (brew)                             skipped   when: false
+  ✓   Verify the agentd is listening                 ok  102ms
 
-  examples/x1.yml · 20 steps · 19 would run · 1 skipped
+  machines/main_pc/index.yml · 157 steps · 6 would run · 70 would run (unprobed)
+                             · 20 ok · 53 skipped · 8 unknown · 6.1s
+```
+
+`plan` exits 0 when there is nothing to do, 2 when there is, and 1 when a step
+failed. `unknown` counts as something to do: a step provision cannot judge is
+not a step it may call converged, and `validate --strict` is how that count is
+driven to zero.
+
+```
+$ provision apply examples/x1.yml
+  examples/x1.yml
+  ✗ Refuse to run on the wrong machine               FAILED  0ms
+    │ (exit 1 · hostname mainpc belongs to another machine)
+
+  examples/x1.yml · 1 step · 1 failed · 1ms
 ```

@@ -1,0 +1,4 @@
+---
+- name: Sleeps until something stops it
+  shell: sleep 30
+  changed_when: "false"

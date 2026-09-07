@@ -1,0 +1,13 @@
+---
+- vars:
+    scratch: "{{ env.PROVISION_SCRATCH }}"
+
+- name: cwd and env both reach the step
+  shell: |
+    set -eu
+    test "$GREETING" = hello
+    printf '%s' "$GREETING" > ./from-cwd
+  env:
+    GREETING: hello
+  cwd: "{{ scratch }}"
+  changed_when: "true"

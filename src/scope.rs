@@ -76,6 +76,12 @@ impl Scope {
     /// The rendering context. Built fresh per render; a plan holds tens of
     /// variables, so merging costs nothing worth optimising.
     pub fn ctx(&self) -> Value {
+        Value::from(self.ctx_map())
+    }
+
+    /// The same context before it is sealed into a `Value`. The runner's
+    /// judge needs to add `result` to it, and a `Value` map cannot be extended.
+    pub fn ctx_map(&self) -> Map {
         let mut m = self.globals.facts.clone();
         m.extend(self.inherited.clone());
         m.extend(self.own.clone());
@@ -84,7 +90,7 @@ impl Scope {
         if let Some(p) = &self.props {
             m.insert("props".to_string(), Value::from(p.clone()));
         }
-        Value::from(m)
+        m
     }
 }
 

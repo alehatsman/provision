@@ -1,0 +1,9 @@
+---
+# The child outlives its parent unless the whole process group is killed.
+- name: Spawn a child that outlives its parent
+  shell: |
+    sleep 300 &
+    echo $! > "{{ env.PROVISION_SCRATCH }}/child.pid"
+    sleep 300
+  timeout: 2s
+  changed_when: "false"

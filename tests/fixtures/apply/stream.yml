@@ -1,0 +1,4 @@
+---
+- name: Writes a line of its own
+  shell: echo STREAMED-MARKER
+  changed_when: "false"

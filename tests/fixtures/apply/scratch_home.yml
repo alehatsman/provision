@@ -1,0 +1,27 @@
+---
+# The Phase 1 gate. These are the three shapes components/ssh/index.yml uses,
+# with the `file` step it opens with replaced by the shell equivalent — `file`
+# arrives in phase 2, and this has to pass before then.
+#
+# Applied twice, this must report changed and then skipped. That is the whole
+# definition of idempotent for this project (spec §11).
+
+- vars:
+    scratch: "{{ env.PROVISION_SCRATCH }}"
+    key: "{{ env.PROVISION_SCRATCH }}/id_ed25519"
+
+- name: Ensure the scratch directory exists
+  shell: mkdir -p "{{ scratch }}/.ssh"
+  creates: "{{ scratch }}/.ssh"
+
+- name: Generate the identity key
+  shell: |
+    set -eu
+    printf 'PRIVATE KEY\n' > "{{ key }}"
+  unless: test -f "{{ key }}"
+
+- name: Verify the identity key present
+  assert:
+    command: test -f "{{ key }}"
+    msg: the key was not written
+  retry: { attempts: 3, delay: 1s }

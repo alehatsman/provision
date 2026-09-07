@@ -280,11 +280,20 @@ fn the_readme_example_validates_and_plans() {
 }
 
 #[test]
-fn plan_without_no_probe_says_probing_is_not_implemented() {
+fn a_probed_plan_runs_the_asserts() {
+    // Spec §6.7: plan runs asserts, because an assert failing at plan time is
+    // the cheapest way to learn the plan is aimed at the wrong machine. The
+    // example is x1's, and the test host is not x1.
     let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/x1.yml");
-    let out = run(&["plan", example.to_str().unwrap()]);
-    assert_eq!(out.status.code(), Some(3));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("phase 1"));
+    let out = run(&["plan", example.to_str().unwrap(), "--color", "never"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    let guard = text.lines().find(|l| l.contains("wrong machine")).unwrap();
+    assert!(guard.contains("FAILED"), "{text}");
+    assert_eq!(out.status.code(), Some(1), "{text}");
+    // Spec §6.7: plan reports the failure and keeps walking, so the rest of
+    // the plan is still on screen. Only apply stops at the first failure.
+    assert!(text.contains("Reload shell hint"), "{text}");
+    assert!(text.contains("20 steps"), "{text}");
 }
 
 #[test]

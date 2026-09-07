@@ -1,44 +1,51 @@
 //! The expansion walk: one sequential pass that turns a plan file into a flat
 //! list of steps, evaluating scope as it goes.
 //!
-//! `validate` and `plan` are the same walk with different reporting, which is
-//! the point — a plan cannot succeed on a config validate rejects. Phase 1
-//! builds the runner on top of this by giving the actions something to do.
+//! `validate`, `plan` and `apply` are one walk with three settings. That is
+//! the point: a plan cannot succeed on a config validate rejects, and apply
+//! cannot run a step plan never showed. Execution is interleaved rather than
+//! bolted on afterwards, because a `when` that reads a `register` needs the
+//! registering step to have actually run (D14).
 
+use crate::actions::{Action, Interpreter};
 use crate::config::load::{self, Component, Loader};
 use crate::config::model::{self, Step};
 use crate::error::{Diag, Diags, Result};
+use crate::exec::process::Output;
+use crate::exec::runner::{Judge, Prepared, Runner};
+use crate::output::Sink;
+use crate::output::event::{Event, Status, Summary};
 use crate::scope::{Globals, Map, Scope};
-use crate::template::Engine;
+use crate::template::{Engine, expanduser};
 use crate::yaml::N;
 use minijinja::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
+
+/// Spec §4: a step with no `timeout` gets ten minutes.
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(600);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
-    /// Check everything; produce no step list.
+    /// Check everything; run nothing; produce no step list.
     Validate { strict: bool },
-    /// Check everything and report what would run. No probing yet (phase 0).
-    Plan,
+    /// Check everything and report what would run. `probe` runs the read-only
+    /// questions — `unless`, `creates`, `assert` — and is off under
+    /// `--plan-no-probe`, where no verdict is claimed at all.
+    Plan { probe: bool },
+    /// Check everything, then do it.
+    Apply,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Status {
-    /// Excluded before rendering: by tag, or by a `when` that read false.
-    Skipped(String),
-    /// Would run, but nothing was probed, so no verdict is claimed.
-    WouldRunUnprobed,
-}
-
-/// One step after expansion, ready to report or (from phase 1) to execute.
-#[derive(Debug, Clone)]
-pub struct Flat {
-    pub name: String,
-    pub file: PathBuf,
-    pub depth: usize,
-    pub status: Status,
+impl Mode {
+    fn executes(&self) -> bool {
+        matches!(self, Mode::Apply)
+    }
+    fn reports(&self) -> bool {
+        !matches!(self, Mode::Validate { .. })
+    }
 }
 
 pub struct Selection {
@@ -67,12 +74,21 @@ pub struct Expander {
     mode: Mode,
     selection: Selection,
     pub diags: Diags,
-    pub steps: Vec<Flat>,
+    pub summary: Summary,
+    /// Set by the walk `apply` runs before executing anything, so the sudo
+    /// preflight can happen before the first step (spec §7).
+    pub needs_sudo: bool,
     /// Names bound by `register`. At plan time they hold a placeholder, so a
     /// `when` that reads one cannot be trusted — the step is reported
     /// unprobed rather than skipped.
     registers: BTreeSet<String>,
     stack: Vec<PathBuf>,
+    runner: Option<Runner>,
+    sink: Box<dyn Sink>,
+    index: usize,
+    /// Spec §2: apply stops at the first failure. Nothing after it is run,
+    /// reported, or rendered.
+    stopped: bool,
 }
 
 impl Expander {
@@ -84,10 +100,32 @@ impl Expander {
             mode,
             selection,
             diags: Diags::new(),
-            steps: Vec::new(),
+            summary: Summary::default(),
+            needs_sudo: false,
             registers: BTreeSet::new(),
             stack: Vec::new(),
+            runner: None,
+            sink: Box::new(crate::output::Silent),
+            index: 0,
+            stopped: false,
         }
+    }
+
+    pub fn with_runner(mut self, runner: Runner) -> Expander {
+        self.runner = Some(runner);
+        self
+    }
+
+    pub fn with_sink(mut self, sink: Box<dyn Sink>) -> Expander {
+        self.sink = sink;
+        self
+    }
+
+    /// Emitted once at the end, after the last step's line.
+    pub fn summarize(&mut self, plan: &Path, elapsed: Duration) {
+        self.summary.duration = elapsed;
+        let s = self.summary.clone();
+        self.sink.summary(plan, &s);
     }
 
     pub fn run(&mut self, root: &Path) -> Result<()> {
@@ -103,6 +141,9 @@ impl Expander {
 
     fn walk(&mut self, steps: &[Step<'static>], scope: &mut Scope, depth: usize, inherited: &BTreeSet<String>) {
         for step in steps {
+            if self.stopped {
+                return;
+            }
             if let Err(d) = model::check_modifiers(step) {
                 self.diags.push(d);
                 continue;
@@ -129,13 +170,17 @@ impl Expander {
         // Structural steps are exempt: they build the scope every later step
         // reads, and selecting work must not silently unset variables.
         if !step.is_structural() && !self.selection.selects(&tags) {
-            self.record(step, scope, depth, tags, Status::Skipped("not selected by tags".into()));
+            let status = Status::Skipped("not selected by tags".into());
+            self.bind_register(step, scope, None, &status);
+            self.record(step, scope, depth, tags, status);
             return;
         }
 
         match self.condition(step, scope) {
             Cond::False => {
-                self.record(step, scope, depth, tags, Status::Skipped("when: false".into()));
+                let status = Status::Skipped("when: false".into());
+                self.bind_register(step, scope, None, &status);
+                self.record(step, scope, depth, tags, status);
                 return;
             }
             Cond::Error(d) => {
@@ -176,7 +221,10 @@ impl Expander {
     }
 
     fn reads_a_register(&self, expr: &str) -> bool {
-        if self.registers.is_empty() {
+        // At apply time the registering step has actually run, so the value is
+        // the real one and the condition is answerable. This guard is the
+        // whole difference between D14's placeholder and a real result.
+        if self.mode.executes() || self.registers.is_empty() {
             return false;
         }
         // Top-level names only: `gitcfg.changed` reads the register `gitcfg`.
@@ -400,7 +448,10 @@ impl Expander {
         let ctx = scope.ctx();
 
         // Render every string field. This is where an undefined variable in a
-        // rarely-taken branch surfaces, which is the point of strict mode.
+        // rarely-taken branch surfaces, which is the point of strict mode. It
+        // is also the only place that reports render errors: `prepare` below
+        // renders the same nodes again and stays quiet, so one bad `{{ … }}`
+        // is one diagnostic rather than two.
         let raw = step.mods.raw.map(|n| n.as_bool().unwrap_or(false)).unwrap_or(false);
         let mut fields: Vec<N<'static>> = Vec::new();
         if !raw {
@@ -412,9 +463,11 @@ impl Expander {
         {
             collect_strings(n, &mut fields);
         }
+        let mut renderable = true;
         for f in fields {
             if let Err(d) = self.render_str(f, &ctx) {
                 self.diags.push(d);
+                renderable = false;
             }
         }
 
@@ -425,6 +478,7 @@ impl Expander {
                 let at = |m: String| e.err(m);
                 if let Err(d) = self.engine.check_syntax(src, &at) {
                     self.diags.push(d);
+                    renderable = false;
                 }
             }
         }
@@ -434,6 +488,7 @@ impl Expander {
             && let Err(d) = step.body.deny_unknown_keys(allowed, &format!("`{}`", step.key))
         {
             self.diags.push(d);
+            renderable = false;
         }
 
         if step.key == "template" {
@@ -443,16 +498,209 @@ impl Expander {
             self.check_file_source(step, &ctx);
         }
 
-        if let Some(reg) = step.mods.register.and_then(|n| n.as_str().ok()) {
-            self.registers.insert(reg.to_string());
-            scope.set(reg, placeholder_result());
+        if step.mods.sudo.map(|n| n.as_bool().unwrap_or(false)).unwrap_or(false) {
+            self.needs_sudo = true;
         }
 
         if let Mode::Validate { strict: true } = self.mode {
             self.check_strict_gate(step);
         }
 
-        self.record(step, scope, depth, tags, Status::WouldRunUnprobed);
+        if !self.mode.reports() {
+            // `validate` binds the placeholder so a later `when` that reads
+            // this register still compiles. Nothing runs.
+            self.bind_register(step, scope, None, &Status::WouldRunUnprobed);
+            return;
+        }
+
+        // A step whose fields would not render cannot be run or judged, and
+        // the diagnostic already says why.
+        let prepared = if renderable { self.prepare(step, &ctx, raw) } else { None };
+        let Some(prepared) = prepared else {
+            self.bind_register(step, scope, None, &Status::WouldRunUnprobed);
+            self.record(step, scope, depth, tags, Status::WouldRunUnprobed);
+            return;
+        };
+
+        let unprobed = matches!(self.mode, Mode::Plan { probe: false });
+        if unprobed {
+            self.bind_register(step, scope, None, &Status::WouldRunUnprobed);
+            self.record(step, scope, depth, tags, Status::WouldRunUnprobed);
+            return;
+        }
+
+        let name = self.step_name(step, scope, &Status::WouldRunUnprobed);
+        self.sink.start(&name, depth);
+
+        let started = Instant::now();
+        let done = {
+            let judge = StepJudge {
+                engine: &self.engine,
+                base: scope.ctx_map(),
+                failed_when: step.mods.failed_when.and_then(|n| n.as_str().ok()),
+                changed_when: step.mods.changed_when.and_then(|n| n.as_str().ok()),
+                at: step.at,
+            };
+            let runner = self.runner.as_ref().expect("plan and apply always attach a runner");
+            if self.mode.executes() {
+                runner.apply(&prepared, &judge)
+            } else {
+                runner.probe(&prepared, &judge)
+            }
+        };
+        let elapsed = started.elapsed();
+
+        let done = match done {
+            Ok(d) => d,
+            Err(d) => {
+                self.diags.push(d);
+                self.stopped = true;
+                return;
+            }
+        };
+
+        self.bind_register(step, scope, done.out.as_ref(), &done.status);
+
+        // Spec §8: apply stops at the first failure; plan never does. A plan
+        // walk has not done the work, so an assert about work not yet done is
+        // information, not a reason to hide every step after it.
+        if done.status.failed() && self.mode.executes() {
+            self.stopped = true;
+        }
+        self.emit(step, scope, depth, &tags, done, elapsed);
+    }
+
+    /// Turn a checked step into something the runner can execute.
+    ///
+    /// Renders are silent here on purpose: every node this touches was already
+    /// rendered once above, and anything that failed was reported there.
+    fn prepare(&mut self, step: &Step<'static>, ctx: &Value, raw: bool) -> Option<Prepared> {
+        let action = self.build_action(step, ctx, raw)?;
+
+        let text = |n: Option<N<'static>>| -> Option<String> {
+            let n = n?;
+            let src = n.as_str().ok()?;
+            self.engine.render(src, ctx).ok()
+        };
+
+        let mut env = BTreeMap::new();
+        if let Some(n) = step.mods.env {
+            for (k, v) in n.as_map().ok()? {
+                let key = k.as_scalar_string().ok()?;
+                let val = v.as_str().ok().and_then(|s| self.engine.render(s, ctx).ok());
+                env.insert(key, val.unwrap_or_else(|| v.to_value().map(|x| x.to_string()).unwrap_or_default()));
+            }
+        }
+
+        // Spec §4: `cwd` defaults to the directory of the file the step is in,
+        // never the process cwd — the same rule every path in a plan follows.
+        let cwd = match text(step.mods.cwd) {
+            Some(dir) => Some(load::resolve(step.at.file, &expanduser(&dir))),
+            None => step.at.file.parent().map(Path::to_path_buf),
+        };
+
+        Some(Prepared {
+            action,
+            unless: text(step.mods.unless),
+            creates: text(step.mods.creates),
+            cwd,
+            env,
+            sudo: step.mods.sudo.map(|n| n.as_bool().unwrap_or(false)).unwrap_or(false),
+            timeout: step.mods.timeout.and_then(|n| model::parse_duration(n).ok()).unwrap_or(DEFAULT_TIMEOUT),
+            retry: step.mods.retry.and_then(|n| model::parse_retry(n).ok()),
+            has_changed_when: step.mods.changed_when.is_some(),
+        })
+    }
+
+    fn build_action(&mut self, step: &Step<'static>, ctx: &Value, raw: bool) -> Option<Action> {
+        let body = step.body;
+        let render = |src: &str| -> Option<String> {
+            if raw { Some(src.to_string()) } else { self.engine.render(src, ctx).ok() }
+        };
+        match step.key {
+            "shell" => {
+                let (script_at, long) = match body.as_str() {
+                    Ok(_) => (body, false),
+                    Err(_) => (body.get("script")?, true),
+                };
+                let script = render(script_at.as_str().ok()?)?;
+                let interpreter = match long.then(|| body.get("interpreter")).flatten() {
+                    Some(n) => {
+                        let name = self.engine.render(n.as_str().ok()?, ctx).ok()?;
+                        match Interpreter::parse(&name, n) {
+                            Ok(i) => i,
+                            Err(d) => {
+                                self.diags.push(d);
+                                return None;
+                            }
+                        }
+                    }
+                    None => Interpreter::default_for_host(),
+                };
+                let login = body
+                    .get("login")
+                    .and_then(|n| n.as_bool().ok())
+                    .unwrap_or(false);
+                Some(Action::Shell { script, interpreter, login })
+            }
+            "cmd" => {
+                // A single expression may hold the whole argv, which is how a
+                // list built in `vars` reaches a `cmd` (spec §3.4).
+                let items: Vec<Value> = match body.as_seq() {
+                    Ok(nodes) => nodes
+                        .into_iter()
+                        .map(|n| self.render_value(n, ctx).ok())
+                        .collect::<Option<Vec<_>>>()?,
+                    Err(_) => {
+                        let v = self.render_value(body, ctx).ok()?;
+                        match v.try_iter() {
+                            Ok(it) => it.collect(),
+                            Err(_) => {
+                                self.diags.push(
+                                    body.err("`cmd` is a list of arguments")
+                                        .with_note("cmd: [mv, src, dest] — use `shell` for a script"),
+                                );
+                                return None;
+                            }
+                        }
+                    }
+                };
+                if items.is_empty() {
+                    self.diags.push(body.err("`cmd` is empty"));
+                    return None;
+                }
+                Some(Action::Cmd(items.iter().map(|v| v.to_string()).collect()))
+            }
+            "assert" => {
+                let field = |k: &str| body.get(k).and_then(|n| n.as_str().ok()).and_then(&render);
+                let command = field("command");
+                let expr = body.get("expr").and_then(|n| n.as_str().ok()).map(str::to_string);
+                if command.is_none() && expr.is_none() {
+                    self.diags.push(
+                        body.err("`assert` needs `command` or `expr`")
+                            .with_note("command: a shell command that exits 0 · expr: an expression"),
+                    );
+                    return None;
+                }
+                Some(Action::Assert { command, expr, msg: field("msg") })
+            }
+            other => Some(Action::NotYet(leak(other))),
+        }
+    }
+
+    /// Spec §4: `register` binds `{rc, stdout, stderr, changed, skipped}`. It
+    /// binds on a skip too — that is what the `skipped` field is for, and a
+    /// later `when: r.skipped` must not fail on an undefined name.
+    fn bind_register(
+        &mut self,
+        step: &Step<'static>,
+        scope: &mut Scope,
+        out: Option<&Output>,
+        status: &Status,
+    ) {
+        let Some(reg) = step.mods.register.and_then(|n| n.as_str().ok()) else { return };
+        self.registers.insert(reg.to_string());
+        scope.set(reg, result_value(out, status));
     }
 
     /// The gate for `validate --strict` (D3): a `shell` or `cmd` step with no
@@ -540,18 +788,58 @@ impl Expander {
 
     // ── helpers ───────────────────────────────────────────────────────────
 
+    /// A step that reached a verdict without running: skipped, or unprobed.
     fn record(&mut self, step: &Step<'static>, scope: &Scope, depth: usize, tags: BTreeSet<String>, status: Status) {
-        if let Mode::Validate { .. } = self.mode {
+        let _ = tags;
+        self.finish(step, scope, depth, status, None, 1, 1, Duration::ZERO);
+    }
+
+    /// A step the runner actually reached.
+    fn emit(
+        &mut self,
+        step: &Step<'static>,
+        scope: &Scope,
+        depth: usize,
+        tags: &BTreeSet<String>,
+        done: crate::exec::runner::Done,
+        elapsed: Duration,
+    ) {
+        let _ = tags;
+        self.finish(step, scope, depth, done.status, done.out.as_ref(), done.attempt, done.attempts, elapsed);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn finish(
+        &mut self,
+        step: &Step<'static>,
+        scope: &Scope,
+        depth: usize,
+        status: Status,
+        out: Option<&Output>,
+        attempt: u32,
+        attempts: u32,
+        duration: Duration,
+    ) {
+        if !self.mode.reports() {
             return;
         }
-        let _ = tags;
         let name = self.step_name(step, scope, &status);
-        self.steps.push(Flat {
+        self.summary.count(&status);
+        self.index += 1;
+        let ev = Event {
+            index: self.index,
             name,
             file: step.at.file.to_path_buf(),
+            line: step.at.line(),
             depth,
             status,
-        });
+            duration,
+            attempt,
+            attempts,
+            stdout: out.map(|o| o.stdout.clone()).unwrap_or_default(),
+            stderr: out.map(|o| o.stderr.clone()).unwrap_or_default(),
+        };
+        self.sink.step(&ev);
     }
 
     /// Spec §10: a `name` that renders empty falls back to the action key plus
@@ -630,16 +918,73 @@ enum Cond {
     Error(Diag),
 }
 
-/// What a `register` holds at plan time. Real shape (spec §4), empty values,
-/// so `when: r.changed` reads false and the reader is told it is unprobed.
-fn placeholder_result() -> Value {
-    let mut m = std::collections::BTreeMap::new();
-    m.insert("rc".to_string(), Value::from(0));
-    m.insert("stdout".to_string(), Value::from(""));
-    m.insert("stderr".to_string(), Value::from(""));
-    m.insert("changed".to_string(), Value::from(false));
-    m.insert("skipped".to_string(), Value::from(false));
+/// What a `register` holds. Spec §4 fixes the shape; with no output it is
+/// D14's placeholder — real shape, empty values — so `when: r.changed` reads
+/// false and the reader is reported unprobed rather than skipped.
+fn result_value(out: Option<&Output>, status: &Status) -> Value {
+    let mut m = BTreeMap::new();
+    m.insert("rc".to_string(), Value::from(out.map(|o| o.rc).unwrap_or(0)));
+    m.insert("stdout".to_string(), Value::from(out.map(|o| o.stdout.as_str()).unwrap_or("")));
+    m.insert("stderr".to_string(), Value::from(out.map(|o| o.stderr.as_str()).unwrap_or("")));
+    m.insert("changed".to_string(), Value::from(matches!(status, Status::Changed)));
+    m.insert("skipped".to_string(), Value::from(matches!(status, Status::Skipped(_))));
     Value::from(m)
+}
+
+/// The action key, for an action whose runner arrives in phase 2. Every key is
+/// one of a fixed set from `model::ACTION_KEYS`, so this leaks nothing that
+/// was not already static.
+fn leak(key: &str) -> &'static str {
+    model::ACTION_KEYS
+        .iter()
+        .chain(model::STRUCTURAL_KEYS)
+        .find(|k| **k == key)
+        .copied()
+        .unwrap_or("action")
+}
+
+/// The runner's three questions, answered from the expander's engine and
+/// scope. `result` is bound here and nowhere else — it exists for exactly the
+/// lifetime of one expression.
+struct StepJudge<'a> {
+    engine: &'a Engine,
+    base: Map,
+    failed_when: Option<&'a str>,
+    changed_when: Option<&'a str>,
+    at: N<'a>,
+}
+
+impl StepJudge<'_> {
+    fn ctx(&self, out: &Output) -> Value {
+        let mut m = self.base.clone();
+        m.insert("result".to_string(), result_value(Some(out), &Status::Ok));
+        Value::from(m)
+    }
+
+    fn eval(&self, src: &str, ctx: &Value) -> Result<bool> {
+        let at = |m: String| self.at.err(m);
+        self.engine.eval_bool(src, ctx, &at)
+    }
+}
+
+impl Judge for StepJudge<'_> {
+    fn failed(&self, out: &Output) -> Result<bool> {
+        match self.failed_when {
+            Some(src) => self.eval(src, &self.ctx(out)),
+            None => Ok(out.rc != 0),
+        }
+    }
+
+    fn changed(&self, out: &Output) -> Result<Option<bool>> {
+        match self.changed_when {
+            Some(src) => self.eval(src, &self.ctx(out)).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    fn expr(&self, src: &str) -> Result<bool> {
+        self.eval(src, &Value::from(self.base.clone()))
+    }
 }
 
 fn describe_value(v: &Value) -> String {

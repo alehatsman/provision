@@ -20,3 +20,13 @@ saphyr = "0.0.12"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 which = "8.0.6"
+
+[target.'cfg(unix)'.dependencies]
+# Only for what std does not expose: killing a process *group*, and reading a
+# sudo password without echo. `Command::process_group` is std; the kill is not.
+libc = "0.2"
+
+[dev-dependencies]
+insta = { version = "1", features = ["filters"] }
+tempfile = "3"
+

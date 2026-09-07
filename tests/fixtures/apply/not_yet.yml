@@ -1,0 +1,5 @@
+---
+- name: A phase 2 action
+  file:
+    path: "{{ env.PROVISION_SCRATCH }}/somewhere"
+    state: dir

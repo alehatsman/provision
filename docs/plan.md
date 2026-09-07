@@ -24,9 +24,9 @@ from the non-goals crept in. Stop and cut.
 | YAML | `saphyr` (`MarkedYaml`) | spanned nodes, map keys included — the only way the "every error carries file:line" gate holds. Replaces the planned `serde_yaml`; see D13 |
 | Templates + expressions | `minijinja` | Jinja2-compatible, evaluates `when` expressions too, one engine for both |
 | Errors | one `Diag` type (`file:line:col` + message + note) | no `anyhow`/`thiserror`: every user-facing error is positional, and a collector reports all of them in one pass rather than the first |
-| Process | `std::process` + `wait-timeout` | no tokio |
+| Process | `std::process` + `libc` (unix) | no tokio. `wait-timeout` was dropped: a watchdog thread gives one kill path for both `timeout` and Ctrl-C, and the kill itself needs `libc::killpg` either way. `Command::process_group` is std |
 | Diff | `similar` | unified diffs with color |
-| Terminal | `anstyle` + `anstream`, `indicatif` for the spinner | NO_COLOR, non-TTY fallback for free |
+| Terminal | `anstyle` + `anstream` | NO_COLOR, non-TTY fallback for free. `indicatif` was dropped: the spinner is one live line, and `\r` + erase is 40 lines against several transitive deps |
 | Paths | `home`/`dirs` for `~`, `which` for manager detection | |
 | Temp files | `tempfile` | atomic writes |
 | Tests | `assert_cmd`, `insta`, `tempfile` | |
@@ -109,6 +109,24 @@ Gate
 
 ### Phase 1 — execution core, `shell`, `cmd`, `assert`
 
+**Status: done. Phase 1 is closed.** 65 tests green. Four things differ from
+the plan below, each recorded:
+
+- `output/tty.rs` and `output/plain.rs` are one `output/text.rs` with two
+  switches. §9.1 and §9.2 describe the same lines twice — once with a spinner
+  and color, once without — and two renderers for that would drift apart.
+- `actions/{shell,cmd,assert}.rs` are one `actions/mod.rs`. In phase 1 the
+  three genuinely are one thing: build an argv, judge it by its exit code.
+  Phase 2's actions each need real state inspection and get their own files.
+- `trait Action { plan, apply }` became `trait Judge` pointing the other way.
+  The runner asks the expander to evaluate `failed_when` *inside* the retry
+  loop, which is what makes `retry` on an `assert` a readiness gate rather
+  than a rerun of something already deemed fine.
+- Expansion and execution interleave rather than running as two passes,
+  because a `when` that reads a `register` needs the registering step to have
+  actually run (D14). `apply` still walks twice: once exactly as `validate`
+  does, which is what lets the sudo preflight happen before the first step.
+
 Deliverables
 
 - `runner`: sequential execution, `unless`, `creates`, `timeout` with
@@ -125,8 +143,20 @@ Gate
 - Idempotency tests for `shell` with `creates` and with `unless`.
 - Snapshot tests: TTY, plain, json, failure block, retry rendering.
 - Timeout test proves the child's children die.
-- `~/dotfiles/components/ssh/index.yml` applies on a scratch `$HOME` twice:
-  changed, then ok.
+- A scratch-`$HOME` fixture applies twice — changed, then ok — carrying the
+  three shapes `components/ssh/index.yml` uses: an `unless`-gated shell, a
+  `creates`-gated shell, and an `assert` with `retry`.
+
+Not covered by a test, and said plainly rather than counted as green: the
+sudo path. `sudo -n` preflight, `--ask-sudo-pass`, `--preserve-env` and the
+`-S` stdin feed are implemented and exercised by hand, but a test for them
+needs a privileged container, which is phase 2's `pkg` work. Ctrl-C, the
+timeout process-group kill, `--stream`, `env` and `cwd` all have tests.
+
+The ssh component itself is a **Phase 2** gate, not this one: its first step
+is `file: {path: ~/.ssh, state: dir, mode: '0700'}`, and `file` does not
+exist until Phase 2. Gating Phase 1 on it would mean shipping `file` half
+built across two phases. Decided 2026-09-08.
 
 ### Phase 2 — `file`, `template`, `pkg`, `service`
 
@@ -146,6 +176,8 @@ Gate
   and documented as such.
 - `provision plan` on x1 (already converged by mooncake) shows zero changes
   except the predicted list from migration.md §4.
+- `~/dotfiles/components/ssh/index.yml` applies on a scratch `$HOME` twice:
+  changed, then ok. Moved here from Phase 1 with `file`.
 
 ### Phase 3 — tags, polish, Windows
 

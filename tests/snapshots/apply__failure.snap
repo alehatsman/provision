@@ -1,0 +1,12 @@
+---
+source: tests/apply.rs
+expression: out
+---
+  tests/fixtures/apply/failure.yml
+  ✓ This one works                                   ok  [t]
+  ✗ This one does not                                FAILED  [t]
+    │ context line
+    │ sed: can't read /etc/pacman.conf: No such file or directory
+    │ (exit 2 · stderr, last 20 lines · --verbose for all)
+
+  tests/fixtures/apply/failure.yml · 2 steps · 1 ok · 1 failed · [t]

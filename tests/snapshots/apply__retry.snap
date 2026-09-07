@@ -1,0 +1,8 @@
+---
+source: tests/apply.rs
+expression: out
+---
+  tests/fixtures/apply/retry.yml
+  ~ Succeeds on the third attempt                    changed   attempt 3/3  [t]
+
+  tests/fixtures/apply/retry.yml · 1 step · 1 changed · [t]
