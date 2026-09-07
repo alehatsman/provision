@@ -54,6 +54,85 @@ pub struct Spec {
     pub owner: Option<String>,
     pub group: Option<String>,
     pub force: bool,
+    /// Create the destination's leading directories, at `0755`. `file` does
+    /// not; `template` in directory mode has to.
+    pub make_parents: bool,
+    /// What to call this file in a diff header. `template` in directory mode
+    /// sets the path relative to `src`, which is what §6.4 asks a per-file
+    /// diff to be headed by; everything else uses the destination.
+    pub label: Option<String>,
+}
+
+/// The `mode`/`owner`/`group` trio. `template` takes all three with the same
+/// meaning and the same sudo requirement (spec §6.4), so it parses them here
+/// rather than growing a second set of rules.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Metadata {
+    pub mode: Option<u32>,
+    pub owner: Option<String>,
+    pub group: Option<String>,
+}
+
+impl Metadata {
+    /// A rendered template is a `file` whose content was computed.
+    pub fn into_file(self, path: String, content: Vec<u8>, label: Option<String>) -> Spec {
+        Spec {
+            path,
+            state: State::File,
+            content: Some(content),
+            link_to: None,
+            mode: self.mode,
+            owner: self.owner,
+            group: self.group,
+            force: false,
+            make_parents: true,
+            label,
+        }
+    }
+}
+
+/// Parse `mode`, `owner` and `group` from any action body that takes them.
+pub fn parse_metadata(
+    step: &Step<'_>,
+    engine: &Engine,
+    ctx: &Value,
+    raw: bool,
+) -> Result<Option<Metadata>> {
+    let body = step.body;
+    let render = |src: &str| -> Option<String> {
+        if raw { Some(src.to_string()) } else { engine.render(src, ctx).ok() }
+    };
+
+    let mode = match body.get("mode") {
+        Some(n) => {
+            // `mode: 0644` unquoted is a number, and which number depends on
+            // whether the reader thinks it is YAML 1.1 (octal 420) or 1.2
+            // (decimal 644). Neither is what was meant, so the error says to
+            // quote it rather than picking one.
+            let Ok(raw_text) = n.as_str() else {
+                return Err(n.err("`mode` must be a quoted string").with_note(
+                    "octal, quoted so YAML keeps the leading zero \
+                     and does not read it as a number: \"0644\"",
+                ));
+            };
+            let Some(text) = render(raw_text) else { return Ok(None) };
+            Some(parse_mode(&text, n)?)
+        }
+        None => None,
+    };
+
+    // Spec §6.3: owner and group are independent, and both need sudo.
+    let sudo = step.mods.sudo.map(|n| n.as_bool().unwrap_or(false)).unwrap_or(false);
+    for (name, node) in [("owner", body.get("owner")), ("group", body.get("group"))] {
+        if let Some(n) = node.filter(|_| !sudo) {
+            return Err(n
+                .err(format!("`{name}` requires `sudo: true`"))
+                .with_note("only root may change a file's owner or group"));
+        }
+    }
+
+    let field = |k: &str| body.get(k).and_then(|n| n.as_str().ok()).and_then(&render);
+    Ok(Some(Metadata { mode, owner: field("owner"), group: field("group") }))
 }
 
 // ── parsing ───────────────────────────────────────────────────────────────
@@ -63,10 +142,6 @@ pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result
     let render = |src: &str| -> Option<String> {
         if raw { Some(src.to_string()) } else { engine.render(src, ctx).ok() }
     };
-    let field = |k: &str| -> Option<String> {
-        body.get(k).and_then(|n| n.as_str().ok()).and_then(&render)
-    };
-
     let Some(path_at) = body.get("path") else {
         return Err(body.err("`file` requires `path`"));
     };
@@ -80,25 +155,8 @@ pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result
         None => State::File,
     };
 
-    let sudo = step.mods.sudo.map(|n| n.as_bool().unwrap_or(false)).unwrap_or(false);
-    let mode = match body.get("mode") {
-        Some(n) => {
-            let Some(text) = render(n.as_str()?) else { return Ok(None) };
-            Some(parse_mode(&text, n)?)
-        }
-        None => None,
-    };
-    let owner = field("owner");
-    let group = field("group");
-
-    // Spec §6.3: owner and group are independent, and both need sudo.
-    for (name, node) in [("owner", body.get("owner")), ("group", body.get("group"))] {
-        if let Some(n) = node.filter(|_| !sudo) {
-            return Err(n
-                .err(format!("`{name}` requires `sudo: true`"))
-                .with_note("only root may change a file's owner or group"));
-        }
-    }
+    let Some(meta) = parse_metadata(step, engine, ctx, raw)? else { return Ok(None) };
+    let (mode, owner, group) = (meta.mode, meta.owner, meta.group);
 
     let src_at = body.get("src");
     let content_at = body.get("content");
@@ -143,7 +201,13 @@ pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result
                     .with_note("src is what the link points at"));
             };
             let Some(target) = render(s.as_str()?) else { return Ok(None) };
-            link_to = Some(target);
+            // Spec §3: `~` expands in every path field the tool owns, and
+            // `src` is one of them. "Stored as given" in §6.3 rules out
+            // canonicalising — resolving `..`, following links, making a
+            // relative target absolute — not this. Without it a link written
+            // `~/.local/bin/moongit` never matches the absolute target on
+            // disk and the step reports changed forever.
+            link_to = Some(expanduser(&target));
             // Spec §6.3: a symlink has no mode of its own worth setting, and
             // silently ignoring one is how a plan grows a line that does
             // nothing for a year.
@@ -173,6 +237,8 @@ pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result
         owner,
         group,
         force,
+        make_parents: false,
+        label: None,
     }))
 }
 
@@ -418,7 +484,11 @@ impl Spec {
                 if act && let Err(e) = self.write(ctx, want, mode) {
                     return failed(e);
                 }
-                Effect::Changed(Some(diff("", &String::from_utf8_lossy(want), &self.path)))
+                Effect::Changed(Some(diff(
+                    "",
+                    &String::from_utf8_lossy(want),
+                    self.label.as_deref().unwrap_or(&self.path),
+                )))
             }
             Kind::File => {
                 let have = match self.read(ctx) {
@@ -442,7 +512,7 @@ impl Spec {
                 Effect::Changed(Some(diff(
                     &String::from_utf8_lossy(&have),
                     &String::from_utf8_lossy(want),
-                    &self.path,
+                    self.label.as_deref().unwrap_or(&self.path),
                 )))
             }
             _ => failed(format!("{} exists and is not a regular file", self.path)),
@@ -525,6 +595,20 @@ impl Spec {
         let e = |what: &str, err: std::io::Error| format!("cannot {what}: {err}");
 
         if ctx.sudo {
+            // `install -D` would do this, but BSD install has no -D. Two
+            // portable calls beat one that works on only half the fleet.
+            if self.make_parents
+                && let Some(parent) = Path::new(&self.path).parent()
+                && !parent.as_os_str().is_empty()
+            {
+                let dir = parent.display().to_string();
+                let got = ctx
+                    .as_root(&["install", "-d", "-m", "0755", &dir])
+                    .map_err(|x| e("run install -d", x))?;
+                if got.rc != 0 {
+                    return Err(format!("cannot create {dir}: {}", trim(&got.stderr)));
+                }
+            }
             // Not next to the destination: being unable to create a file
             // there is usually the reason the step said sudo. `install`
             // copies, so nothing here depends on a shared filesystem.
@@ -554,6 +638,9 @@ impl Spec {
         // No sudo: the temp file goes next to the destination, because rename
         // is only atomic within one filesystem.
         let dir = Path::new(&self.path).parent().unwrap_or(Path::new("."));
+        if self.make_parents && !dir.exists() {
+            create_dirs(dir, 0o755).map_err(|x| e(&format!("create {}", dir.display()), x))?;
+        }
         let mut tmp = tempfile::NamedTempFile::new_in(dir)
             .map_err(|x| e(&format!("make a temp file in {}", dir.display()), x))?;
         tmp.write_all(bytes).map_err(|x| e("write the temp file", x))?;
@@ -581,10 +668,8 @@ impl Spec {
             }
             return Ok(());
         }
-        std::fs::create_dir_all(&self.path)
-            .map_err(|e| format!("cannot create {}: {e}", self.path))?;
-        set_mode(Path::new(&self.path), mode)
-            .map_err(|e| format!("cannot set the mode on {}: {e}", self.path))
+        create_dirs(Path::new(&self.path), mode)
+            .map_err(|e| format!("cannot create {}: {e}", self.path))
     }
 
     fn make_link(&self, ctx: &Ctx<'_>, target: &str) -> std::result::Result<(), String> {
@@ -680,6 +765,30 @@ fn diff(old: &str, new: &str, path: &str) -> String {
     let d = similar::TextDiff::from_lines(old, new);
     let text = d.unified_diff().context_radius(3).header("current", path).to_string();
     if text.trim().is_empty() { format!("{path}: content differs") } else { text }
+}
+
+/// Create the target and any missing parents, giving the parents `0755` and
+/// the leaf `mode`.
+///
+/// `create_dir_all` would give every level a umask-derived mode, which is
+/// what §6.3 says modes are not. GNU `install -d -m` already behaves this
+/// way — intermediates are 0755 under any umask, the mode lands on the leaf —
+/// so this is the non-sudo path matching the sudo one rather than a third
+/// rule. Only directories this creates are touched; an existing parent keeps
+/// whatever it has.
+fn create_dirs(path: &Path, leaf_mode: u32) -> std::io::Result<()> {
+    let mut missing = Vec::new();
+    let mut cur = Some(path);
+    while let Some(p) = cur.filter(|p| !p.exists()) {
+        missing.push(p);
+        cur = p.parent();
+    }
+    for (i, dir) in missing.iter().rev().enumerate() {
+        std::fs::create_dir(dir)?;
+        let mode = if i + 1 == missing.len() { leaf_mode } else { 0o755 };
+        set_mode(dir, mode)?;
+    }
+    Ok(())
 }
 
 #[cfg(unix)]

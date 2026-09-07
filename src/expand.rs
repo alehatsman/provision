@@ -724,7 +724,7 @@ impl Expander {
     /// A step that reached a verdict without running: skipped, or unprobed.
     fn record(&mut self, step: &Step<'static>, scope: &Scope, depth: usize, tags: BTreeSet<String>, status: Status) {
         let _ = tags;
-        self.finish(step, scope, depth, status, None, 1, 1, Duration::ZERO, None);
+        self.finish(step, scope, depth, status, None, 1, 1, Duration::ZERO, None, None);
     }
 
     /// A step the runner actually reached.
@@ -738,8 +738,8 @@ impl Expander {
         elapsed: Duration,
     ) {
         let _ = tags;
-        let detail = done.detail.clone();
-        self.finish(step, scope, depth, done.status, done.out.as_ref(), done.attempt, done.attempts, elapsed, detail);
+        let (detail, note) = (done.detail.clone(), done.note.clone());
+        self.finish(step, scope, depth, done.status, done.out.as_ref(), done.attempt, done.attempts, elapsed, detail, note);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -754,6 +754,7 @@ impl Expander {
         attempts: u32,
         duration: Duration,
         detail: Option<String>,
+        note: Option<String>,
     ) {
         if !self.mode.reports() {
             return;
@@ -774,6 +775,7 @@ impl Expander {
             stdout: out.map(|o| o.stdout.clone()).unwrap_or_default(),
             stderr: out.map(|o| o.stderr.clone()).unwrap_or_default(),
             detail,
+            note,
         };
         self.sink.step(&ev);
     }

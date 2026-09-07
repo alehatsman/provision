@@ -1,0 +1,15 @@
+---
+- vars:
+    scratch: "{{ env.PROVISION_SCRATCH }}"
+
+- name: A single template
+  template:
+    src: ./one.j2
+    dest: "{{ scratch }}/one"
+    mode: "0640"
+
+- name: A whole tree
+  template:
+    src: ./tree
+    dest: "{{ scratch }}/rendered"
+    mode: "0644"

@@ -287,6 +287,17 @@ file:
 `mode` gets `0644` and a new directory `0755`. A target that already exists
 keeps the mode it has unless `mode` says otherwise.
 
+`mode` applies to the target, and directories created on the way to it get
+`0755`. That is what GNU `install -d -m` already does — intermediates are
+`0755` whatever the umask, and the mode lands on the last component — so the
+non-sudo path matches it rather than inventing a third rule. A parent that
+already exists is not touched.
+
+`mode` is a **quoted** string. Unquoted, `0644` is a number, and which number
+depends on whether the reader believes it is YAML 1.1 (octal, 420) or YAML
+1.2 (decimal, 644). Neither is what was meant, so an unquoted mode is an
+error that says to quote it rather than guessing which dialect was intended.
+
 - `owner` and `group` are independent; either may be set alone. Both require
   `sudo: true` and are a validation error without it.
 

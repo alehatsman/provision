@@ -34,3 +34,9 @@
   file:
     path: "{{ scratch }}/conf/gone"
     state: absent
+
+- name: A symlink whose target has a tilde in it
+  file:
+    path: "{{ scratch }}/conf/home-link"
+    state: link
+    src: "~/.bashrc"

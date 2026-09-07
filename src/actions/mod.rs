@@ -7,6 +7,7 @@
 //! inspection and get their own modules then.
 
 pub mod file;
+pub mod template;
 
 use crate::config::model::{self, Step};
 use crate::error::Result;
@@ -22,6 +23,7 @@ pub enum Action {
     Cmd(Vec<String>),
     Assert { command: Option<String>, expr: Option<String>, msg: Option<String> },
     File(file::Spec),
+    Template(template::Spec),
     /// Parsed and validated, but with no runner until phase 2. `plan` reports
     /// it unprobed; `apply` refuses rather than pretending it converged.
     NotYet(&'static str),
@@ -115,7 +117,7 @@ impl Action {
     /// An action that inspects and changes state itself, rather than reporting
     /// through an exit code. It never reaches the runner's argv path.
     pub fn is_typed(&self) -> bool {
-        matches!(self, Action::File(_))
+        matches!(self, Action::File(_) | Action::Template(_))
     }
 }
 
@@ -215,6 +217,11 @@ impl Action {
 
             "file" => match file::parse(step, engine, ctx, raw)? {
                 Some(spec) => Action::File(spec),
+                None => return Ok(None),
+            },
+
+            "template" => match template::parse(step, engine, ctx, raw)? {
+                Some(spec) => Action::Template(spec),
                 None => return Ok(None),
             },
 

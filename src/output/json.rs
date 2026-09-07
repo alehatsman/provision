@@ -52,6 +52,9 @@ impl Sink for Json {
                 m.insert("interrupted".into(), json!(true));
             }
         }
+        if let Some(n) = &ev.note {
+            m.insert("note".into(), json!(n));
+        }
         if let Some(d) = &ev.detail {
             m.insert("diff".into(), json!(d));
         }

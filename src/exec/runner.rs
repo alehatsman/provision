@@ -62,11 +62,13 @@ pub struct Done {
     pub attempts: u32,
     /// A typed action's diff or metadata delta. Never set by `shell`.
     pub detail: Option<String>,
+    /// Extra words for the status column, like `template`'s `3 of 14`.
+    pub note: Option<String>,
 }
 
 impl Done {
     fn one(status: Status) -> Done {
-        Done { status, out: None, attempt: 1, attempts: 1, detail: None }
+        Done { status, out: None, attempt: 1, attempts: 1, detail: None, note: None }
     }
 }
 
@@ -267,7 +269,7 @@ impl Runner {
                 None => Status::Unknown,
             },
         };
-        Ok(Done { status, out: Some(out), attempt, attempts, detail: None })
+        Ok(Done { status, out: Some(out), attempt, attempts, detail: None, note: None })
     }
 
     /// A typed action inspects and changes state itself, so there is no exit
@@ -280,8 +282,11 @@ impl Runner {
             root_available: self.root_available,
             escalate: &self.sudo,
         };
-        let effect = match &p.action {
+        let (effect, mut note) = match &p.action {
             Action::File(spec) => {
+                (if act { spec.apply(&ctx) } else { spec.plan(&ctx) }, None)
+            }
+            Action::Template(spec) => {
                 if act {
                     spec.apply(&ctx)
                 } else {
@@ -310,6 +315,9 @@ impl Runner {
             how: How::Exited,
         };
         // The overrides only speak where the action reached a verdict at all.
+        if status.failed() || matches!(status, Status::WouldRunUnprobed) {
+            note = None;
+        }
         if !status.failed() && !matches!(status, Status::WouldRunUnprobed) {
             if judge.failed(&out)? {
                 status = Status::Failed(Failure {
@@ -327,7 +335,7 @@ impl Runner {
             }
         }
 
-        Ok(Done { status, out: Some(out), attempt: 1, attempts: 1, detail })
+        Ok(Done { status, out: Some(out), attempt: 1, attempts: 1, detail, note })
     }
 
     fn gate(&self, p: &Prepared) -> R<Gate> {

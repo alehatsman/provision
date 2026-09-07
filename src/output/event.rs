@@ -100,6 +100,9 @@ pub struct Event {
     /// A diff, or a metadata delta like `mode 0644 → 0600`. Printed under the
     /// step's line, and carried in `--json` as `diff`.
     pub detail: Option<String>,
+    /// Extra words for the status column: `3 of 14`. Spec §6.4 wants the
+    /// count on the line, not buried in the diff underneath it.
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Default, Clone)]

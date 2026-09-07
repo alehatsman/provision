@@ -439,11 +439,19 @@ fn every_file_state_applies_twice_changed_then_ok() {
     assert_eq!(std::fs::read_to_string(conf.join("copied")).unwrap(), "copied from src\n");
     // Stored exactly as written: a relative link stays relative.
     assert_eq!(std::fs::read_link(conf.join("link")).unwrap().to_str().unwrap(), "./hello.txt");
+    // But `~` is a path field the tool owns (spec §3), so it expands. Without
+    // this the link never matches what is on disk and the step reports
+    // changed on every run — which is how this was found, on a real plan.
+    let home = std::env::var("HOME").unwrap();
+    assert_eq!(
+        std::fs::read_link(conf.join("home-link")).unwrap().to_str().unwrap(),
+        format!("{home}/.bashrc")
+    );
 
     let (code, second) = apply(dir.path(), "file_states.yml", &[]);
     assert_eq!(code, 0, "{second}");
     assert!(!second.contains("changed"), "nothing should change twice:\n{second}");
-    assert!(second.contains("5 ok"), "{second}");
+    assert!(second.contains("6 ok"), "{second}");
 }
 
 #[test]
@@ -582,4 +590,132 @@ fn mode_of(p: &Path) -> u32 {
 fn set_mode(p: &Path, mode: u32) {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode)).unwrap();
+}
+
+#[test]
+fn parent_directories_are_deterministic_not_umask_derived() {
+    // create_dir_all would give every level a umask-derived mode. §6.3 says
+    // `mode` lands on the leaf and parents get 0755, which is what GNU
+    // `install -d -m` does under any umask.
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("nested.yml");
+    std::fs::write(
+        &plan,
+        "- name: A directory three levels down\n  file:\n    path: \"{{ env.PROVISION_SCRATCH }}/a/b/c\"\n    state: dir\n    mode: \"0700\"\n",
+    )
+    .unwrap();
+
+    let out = run_in(dir.path(), &["apply", plan.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stdout));
+    assert_eq!(mode_of(&dir.path().join("a")), 0o755, "parent took the umask");
+    assert_eq!(mode_of(&dir.path().join("a/b")), 0o755, "parent took the umask");
+    assert_eq!(mode_of(&dir.path().join("a/b/c")), 0o700, "the mode missed the leaf");
+}
+
+#[test]
+fn an_unquoted_mode_says_to_quote_it() {
+    // `mode: 0644` is octal 420 in YAML 1.1 and decimal 644 in YAML 1.2.
+    // Neither is what was meant, so provision refuses rather than picking.
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("unquoted.yml");
+    std::fs::write(
+        &plan,
+        "- name: An unquoted mode\n  file:\n    path: \"{{ env.PROVISION_SCRATCH }}/f\"\n    state: file\n    content: x\n    mode: 0644\n",
+    )
+    .unwrap();
+
+    let out = run_in(dir.path(), &["apply", plan.to_str().unwrap()]);
+    let text = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert_eq!(out.status.code(), Some(3), "{text}");
+    assert!(text.contains("`mode` must be a quoted string"), "{text}");
+    assert!(text.contains("\"0644\""), "the note does not show the fix: {text}");
+    assert!(text.contains("unquoted.yml:6:11"), "{text}");
+}
+
+
+// ── template ──────────────────────────────────────────────────────────────
+
+#[test]
+fn a_template_and_a_tree_apply_twice_changed_then_ok() {
+    let dir = tempfile::tempdir().unwrap();
+
+    let (code, first) = apply(dir.path(), "template.yml", &[]);
+    assert_eq!(code, 0, "{first}");
+    assert!(line_for(&first, "single template").contains("changed"), "{first}");
+    // Spec §6.4: one step, one line, and the line carries the count.
+    assert!(line_for(&first, "whole tree").contains("3 of 3"), "{first}");
+
+    let out = dir.path().join("rendered");
+    assert_eq!(std::fs::read_to_string(dir.path().join("one")).unwrap(), "single file for linux\n");
+    // The `.j2` comes off the destination name; a file without one is still
+    // rendered.
+    assert!(out.join("top.conf").is_file(), "the .j2 suffix was not stripped");
+    assert!(std::fs::read_to_string(out.join("nested/inner.conf")).unwrap().contains("linux"));
+    // Spec §6.4: a file that is not valid UTF-8 is placed byte for byte.
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/apply/tree/nested/blob.bin");
+    assert_eq!(
+        std::fs::read(out.join("nested/blob.bin")).unwrap(),
+        std::fs::read(src).unwrap(),
+        "the binary file was rendered instead of copied"
+    );
+    assert_eq!(mode_of(&dir.path().join("one")), 0o640);
+    assert_eq!(mode_of(&out.join("top.conf")), 0o644);
+    // Directories made on the way are 0755, not the mode of the files in them.
+    assert_eq!(mode_of(&out.join("nested")), 0o755);
+
+    let (code, second) = apply(dir.path(), "template.yml", &[]);
+    assert_eq!(code, 0, "{second}");
+    assert!(!second.contains("changed"), "nothing should change twice:\n{second}");
+}
+
+#[test]
+fn a_tree_reports_only_the_files_that_changed() {
+    let dir = tempfile::tempdir().unwrap();
+    apply(dir.path(), "template.yml", &[]);
+    std::fs::write(dir.path().join("rendered/top.conf"), "drifted\n").unwrap();
+
+    let (code, out) = apply(dir.path(), "template.yml", &[]);
+    assert_eq!(code, 0, "{out}");
+    assert!(line_for(&out, "whole tree").contains("1 of 3"), "{out}");
+    // Spec §6.4: each diff is headed by the path relative to the tree root.
+    assert!(out.contains("+++ top.conf"), "{out}");
+    assert!(!out.contains("inner.conf"), "an unchanged file was reported:\n{out}");
+}
+
+#[test]
+fn a_regular_file_where_the_tree_should_go_is_a_failure() {
+    // Spec §6.4: rendering a tree over one file would place the last file and
+    // silently drop the rest.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("rendered"), "in the way").unwrap();
+
+    let (code, out) = apply(dir.path(), "template.yml", &[]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("is a regular file, not a directory"), "{out}");
+}
+
+#[test]
+fn a_symlink_in_the_source_tree_is_an_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src");
+    std::fs::create_dir(&src).unwrap();
+    std::fs::write(src.join("real.conf"), "hello\n").unwrap();
+    std::os::unix::fs::symlink("real.conf", src.join("aliased.conf")).unwrap();
+
+    let plan = dir.path().join("linked.yml");
+    std::fs::write(
+        &plan,
+        format!(
+            "- name: A tree with a symlink in it\n  template:\n    src: {}\n    dest: {}/out\n",
+            src.display(),
+            dir.path().display()
+        ),
+    )
+    .unwrap();
+
+    let out = run_in(dir.path(), &["apply", plan.to_str().unwrap()]);
+    let text = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert_eq!(out.status.code(), Some(3), "{text}");
+    assert!(text.contains("is a symlink"), "{text}");
+    assert!(text.contains("does not follow symlinks"), "{text}");
 }

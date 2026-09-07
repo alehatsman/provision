@@ -124,6 +124,9 @@ impl Sink for Text {
         let style = style_for(&ev.status);
         let name = truncate(&format!("{}{}", indent(ev.depth), ev.name), NAME_WIDTH);
         let mut label = ev.status.label();
+        if let Some(n) = &ev.note {
+            label.push_str(&format!("   {n}"));
+        }
         if ev.attempts > 1 {
             label.push_str(&format!("   attempt {}/{}", ev.attempt, ev.attempts));
         }
