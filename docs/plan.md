@@ -109,7 +109,7 @@ Gate
 
 ### Phase 1 — execution core, `shell`, `cmd`, `assert`
 
-**Status: done. Phase 1 is closed.** 65 tests green. Four things differ from
+**Status: done. Phase 1 is closed.** 69 tests green. Four things differ from
 the plan below, each recorded:
 
 - `output/tty.rs` and `output/plain.rs` are one `output/text.rs` with two
@@ -117,7 +117,8 @@ the plan below, each recorded:
   and color, once without — and two renderers for that would drift apart.
 - `actions/{shell,cmd,assert}.rs` are one `actions/mod.rs`. In phase 1 the
   three genuinely are one thing: build an argv, judge it by its exit code.
-  Phase 2's actions each need real state inspection and get their own files.
+  Phase 2's actions each need real state inspection and get their own files;
+  `Action::parse` is where their bodies go, and it already lives there.
 - `trait Action { plan, apply }` became `trait Judge` pointing the other way.
   The runner asks the expander to evaluate `failed_when` *inside* the retry
   loop, which is what makes `retry` on an `assert` a readiness gate rather
@@ -140,18 +141,26 @@ Deliverables
 
 Gate
 
-- Idempotency tests for `shell` with `creates` and with `unless`.
-- Snapshot tests: TTY, plain, json, failure block, retry rendering.
+- Idempotency tests for `shell` with `creates` and with `unless`, and for
+  `cmd` — applied twice, changed then skipped.
+- Snapshot tests: plain, json, failure block, retry rendering. The TTY
+  snapshot is not part of the gate: a captured run has no terminal, so what
+  it would pin is the color mapping, not the spinner. That test exists
+  anyway, because the color mapping is worth pinning.
 - Timeout test proves the child's children die.
+- `env` reaches the step and, under `sudo`, nothing else does.
+- `cwd` defaults to the plan file's own directory and `cwd:` overrides it.
 - A scratch-`$HOME` fixture applies twice — changed, then ok — carrying the
   three shapes `components/ssh/index.yml` uses: an `unless`-gated shell, a
   `creates`-gated shell, and an `assert` with `retry`.
 
-Not covered by a test, and said plainly rather than counted as green: the
-sudo path. `sudo -n` preflight, `--ask-sudo-pass`, `--preserve-env` and the
-`-S` stdin feed are implemented and exercised by hand, but a test for them
-needs a privileged container, which is phase 2's `pkg` work. Ctrl-C, the
-timeout process-group kill, `--stream`, `env` and `cwd` all have tests.
+Two things are not covered by a test, and are said plainly rather than counted
+as green. `--ask-sudo-pass` needs a terminal to type into. And `plan`'s soft
+sudo preflight — the path where root is *not* reachable and a root gate leaves
+its step unprobed — could not be exercised on the development machine, which
+is configured `NOPASSWD`, so `sudo -n` succeeds even after `sudo -k`. Both
+want the privileged container phase 2's `pkg` tests bring. `--preserve-env` is
+tested where a warm `sudo -n` exists and skips itself where it does not.
 
 The ssh component itself is a **Phase 2** gate, not this one: its first step
 is `file: {path: ~/.ssh, state: dir, mode: '0700'}`, and `file` does not

@@ -205,9 +205,10 @@ will actually run. D11 already says plan is best-effort and must say so;
 
 ## D15 — `unknown` counts as a change for `plan`'s exit code
 
-**Decision.** `plan` exits 2 when any step is `would change`, `would run`, or
-`unknown`. Only `ok` and `skipped` exit 0. `--plan-no-probe` probes nothing,
-claims nothing, and exits 0 unless validation failed.
+**Decision.** `plan` exits 2 for any step that is not `ok` or `skipped` —
+`would change`, `would run`, `unknown` and `would run (unprobed)` alike.
+`--plan-no-probe` probes nothing, claims nothing, and exits 0 unless
+validation failed.
 
 **Why.** Spec §8 said "0 if nothing would change, 2 if something would" and
 never said which side `unknown` falls on. It has to be 2. An ungated `shell`
@@ -216,6 +217,11 @@ a machine full of ungated shell steps report identically — and `plan` stops
 being a drift check on exactly the steps most likely to drift. Counting it as
 2 gives `--strict` (D3) something to be *for*: driving the unknown count to
 zero is what makes exit 0 mean something. plan.md already measures it.
+
+`unprobed` counts for the same reason `unknown` does. In a probed plan it
+means an action whose runner does not exist yet, or a root gate this run could
+not reach — both are provision admitting it does not know, and neither is
+"nothing to do".
 
 `--plan-no-probe` is the exception because it is the one mode that inspects
 nothing. Exiting 2 there would be a claim it did not earn, and dotfiles CI

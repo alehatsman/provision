@@ -7,7 +7,7 @@
 //! bolted on afterwards, because a `when` that reads a `register` needs the
 //! registering step to have actually run (D14).
 
-use crate::actions::{Action, Interpreter};
+use crate::actions::Action;
 use crate::config::load::{self, Component, Loader};
 use crate::config::model::{self, Step};
 use crate::error::{Diag, Diags, Result};
@@ -241,7 +241,7 @@ impl Expander {
         for (k, v) in pairs {
             let Some(name) = self.diags.absorb(k.as_scalar_string()) else { continue };
             let ctx = scope.ctx();
-            match self.render_value(v, &ctx) {
+            match self.engine.render_node(v, &ctx) {
                 Ok(value) => scope.set(name, value),
                 Err(d) => self.diags.push(d),
             }
@@ -396,7 +396,7 @@ impl Expander {
                 );
                 continue;
             };
-            match self.render_value(*v, &ctx) {
+            match self.engine.render_node(*v, &ctx) {
                 Ok(value) => {
                     if !schema.ty.accepts(&value) {
                         errors.push(v.err(format!(
@@ -575,7 +575,16 @@ impl Expander {
     /// Renders are silent here on purpose: every node this touches was already
     /// rendered once above, and anything that failed was reported there.
     fn prepare(&mut self, step: &Step<'static>, ctx: &Value, raw: bool) -> Option<Prepared> {
-        let action = self.build_action(step, ctx, raw)?;
+        let action = match Action::parse(&self.engine, step, ctx, raw) {
+            Ok(Some(a)) => a,
+            // A field would not render. The sweep above already said so, with
+            // a position; saying it twice is one typo, two diagnostics.
+            Ok(None) => return None,
+            Err(d) => {
+                self.diags.push(d);
+                return None;
+            }
+        };
 
         let text = |n: Option<N<'static>>| -> Option<String> {
             let n = n?;
@@ -610,82 +619,6 @@ impl Expander {
             retry: step.mods.retry.and_then(|n| model::parse_retry(n).ok()),
             has_changed_when: step.mods.changed_when.is_some(),
         })
-    }
-
-    fn build_action(&mut self, step: &Step<'static>, ctx: &Value, raw: bool) -> Option<Action> {
-        let body = step.body;
-        let render = |src: &str| -> Option<String> {
-            if raw { Some(src.to_string()) } else { self.engine.render(src, ctx).ok() }
-        };
-        match step.key {
-            "shell" => {
-                let (script_at, long) = match body.as_str() {
-                    Ok(_) => (body, false),
-                    Err(_) => (body.get("script")?, true),
-                };
-                let script = render(script_at.as_str().ok()?)?;
-                let interpreter = match long.then(|| body.get("interpreter")).flatten() {
-                    Some(n) => {
-                        let name = self.engine.render(n.as_str().ok()?, ctx).ok()?;
-                        match Interpreter::parse(&name, n) {
-                            Ok(i) => i,
-                            Err(d) => {
-                                self.diags.push(d);
-                                return None;
-                            }
-                        }
-                    }
-                    None => Interpreter::default_for_host(),
-                };
-                let login = body
-                    .get("login")
-                    .and_then(|n| n.as_bool().ok())
-                    .unwrap_or(false);
-                Some(Action::Shell { script, interpreter, login })
-            }
-            "cmd" => {
-                // A single expression may hold the whole argv, which is how a
-                // list built in `vars` reaches a `cmd` (spec §3.4).
-                let items: Vec<Value> = match body.as_seq() {
-                    Ok(nodes) => nodes
-                        .into_iter()
-                        .map(|n| self.render_value(n, ctx).ok())
-                        .collect::<Option<Vec<_>>>()?,
-                    Err(_) => {
-                        let v = self.render_value(body, ctx).ok()?;
-                        match v.try_iter() {
-                            Ok(it) => it.collect(),
-                            Err(_) => {
-                                self.diags.push(
-                                    body.err("`cmd` is a list of arguments")
-                                        .with_note("cmd: [mv, src, dest] — use `shell` for a script"),
-                                );
-                                return None;
-                            }
-                        }
-                    }
-                };
-                if items.is_empty() {
-                    self.diags.push(body.err("`cmd` is empty"));
-                    return None;
-                }
-                Some(Action::Cmd(items.iter().map(|v| v.to_string()).collect()))
-            }
-            "assert" => {
-                let field = |k: &str| body.get(k).and_then(|n| n.as_str().ok()).and_then(&render);
-                let command = field("command");
-                let expr = body.get("expr").and_then(|n| n.as_str().ok()).map(str::to_string);
-                if command.is_none() && expr.is_none() {
-                    self.diags.push(
-                        body.err("`assert` needs `command` or `expr`")
-                            .with_note("command: a shell command that exits 0 · expr: an expression"),
-                    );
-                    return None;
-                }
-                Some(Action::Assert { command, expr, msg: field("msg") })
-            }
-            other => Some(Action::NotYet(leak(other))),
-        }
     }
 
     /// Spec §4: `register` binds `{rc, stdout, stderr, changed, skipped}`. It
@@ -867,33 +800,6 @@ impl Expander {
         self.engine.render(s, ctx).map_err(|e| at.err(self.engine.describe_with(s, ctx, &e)))
     }
 
-    fn render_value(&self, at: N<'static>, ctx: &Value) -> Result<Value> {
-        match at.as_str() {
-            Ok(s) => self
-                .engine
-                .render_field(s, ctx)
-                .map_err(|e| at.err(self.engine.describe_with(s, ctx, &e))),
-            // Non-strings are taken as written, but their strings are rendered.
-            Err(_) => match at.as_seq() {
-                Ok(items) => {
-                    let vs: Result<Vec<Value>> =
-                        items.into_iter().map(|i| self.render_value(i, ctx)).collect();
-                    Ok(Value::from(vs?))
-                }
-                Err(_) => match at.as_map() {
-                    Ok(pairs) => {
-                        let mut m = std::collections::BTreeMap::new();
-                        for (k, v) in pairs {
-                            m.insert(k.as_scalar_string()?, self.render_value(v, ctx)?);
-                        }
-                        Ok(Value::from(m))
-                    }
-                    Err(_) => at.to_value(),
-                },
-            },
-        }
-    }
-
     /// Push a file onto the include stack, reporting a cycle by naming it.
     fn enter(&mut self, path: &Path, at: N<'static>) -> Option<()> {
         if let Some(i) = self.stack.iter().position(|p| p == path) {
@@ -929,18 +835,6 @@ fn result_value(out: Option<&Output>, status: &Status) -> Value {
     m.insert("changed".to_string(), Value::from(matches!(status, Status::Changed)));
     m.insert("skipped".to_string(), Value::from(matches!(status, Status::Skipped(_))));
     Value::from(m)
-}
-
-/// The action key, for an action whose runner arrives in phase 2. Every key is
-/// one of a fixed set from `model::ACTION_KEYS`, so this leaks nothing that
-/// was not already static.
-fn leak(key: &str) -> &'static str {
-    model::ACTION_KEYS
-        .iter()
-        .chain(model::STRUCTURAL_KEYS)
-        .find(|k| **k == key)
-        .copied()
-        .unwrap_or("action")
 }
 
 /// The runner's three questions, answered from the expander's engine and

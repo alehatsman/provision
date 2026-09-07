@@ -1,6 +1,6 @@
 # provision — specification
 
-Status: v0.3 · 2026-09-08 · owner: aleh
+Status: v0.4 · 2026-09-08 · owner: aleh
 
 This is the contract. Code that disagrees with it is wrong, or this file is.
 Fix one.
@@ -168,7 +168,7 @@ changed_when: result.rc == 0
 |---|---|---|---|
 | `name` | string | action key + first arg | Shown in output. Templated. |
 | `when` | expr | true | Skip the step when false. Evaluated before `unless`/`creates`. |
-| `unless` | string | — | A shell command, run through the interpreter `shell` defaults to (bash on unix, powershell on Windows). Exit 0 means "already done", step skipped. Non-zero means run. A failure to spawn at all is an error. |
+| `unless` | string | — | A shell command, run through the interpreter `shell` defaults to (bash on unix, powershell on Windows), and with the step's own `sudo`, `env` and `cwd` — a root step's gate has to see root's view. Exit 0 means "already done", step skipped. Non-zero means run, **except** a gate that could not run at all: a spawn failure, or `126`/`127` from the interpreter. That fails the step (§10). |
 | `creates` | path | — | Skip when the path exists. |
 | `sudo` | bool | false | Run the action as root (§7). Windows: error; use `shell` from an elevated prompt. |
 | `timeout` | duration | 10m | Kill the step and fail. `30s`, `5m`, `1h`. |
@@ -377,6 +377,9 @@ assert:
 - `retry` (§4) composes with `assert`, and is how a readiness gate is
   written: the assert is re-run on failure until it passes or attempts run
   out. `retry: {attempts: 30, delay: 2s}` is a 60-second wait-for-ready.
+- **`retry` belongs to `apply`. `plan` evaluates an assert exactly once.**
+  That same 60-second wait would otherwise be spent, on every plan, waiting
+  for work plan has not done and is not about to do.
 
 ## 7. Privilege escalation
 
@@ -394,6 +397,11 @@ assert:
 - That first walk cannot know a `when` that reads a `register`, so it
   over-approximates: a sudo step the real walk will skip still arms the
   preflight. Asking for a password that goes unused beats failing halfway in.
+- `plan` runs gates too (§4), so it also needs to know whether root is
+  reachable — but it **asks rather than insists**. `plan` is the read-only
+  command and must still work on a machine with a cold sudo credential, so a
+  root gate it cannot run leaves its step `would run (unprobed)` rather than
+  failing the run. D11 already has the word for what plan cannot see.
 
 ## 8. Commands
 
@@ -435,11 +443,13 @@ Tag selection (Ansible semantics, deliberately):
 Exit codes: `0` ok / nothing to do · `1` failure · `2` plan found changes ·
 `3` usage or validation error.
 
-`plan` exits 2 when any step is reported `would change`, `would run`, or
-`unknown` — anything that is not `ok` or `skipped`. **`unknown` counts.** A
-step provision cannot judge is not a step it may call converged, and driving
-that count to zero is precisely what `--strict` is for. `--plan-no-probe`
-probes nothing and so claims nothing: it exits 0 unless validation failed.
+`plan` exits 2 when any step is reported `would change`, `would run`,
+`unknown`, or `would run (unprobed)` — anything that is not `ok` or `skipped`.
+**`unknown` counts, and so does `unprobed`.** Both are provision saying it does
+not know, which is not the same as nothing to do; a step provision cannot judge
+is not a step it may call converged, and driving that count to zero is
+precisely what `--strict` is for. `--plan-no-probe` is the one exception: it
+inspects nothing, so it claims nothing, and exits 0 unless validation failed.
 
 `apply` exits 1 on the first failed step, 0 otherwise. It does not exit 2;
 having done the work, "changes were found" is not news. `plan` also exits 1
@@ -494,7 +504,7 @@ One JSON object per line on stdout, human output goes to stderr:
 | Step has two action keys | Validation error with file:line |
 | `import` cycle | Error naming the cycle |
 | Template renders to empty `name` | Falls back to action + first arg |
-| `unless` command not found | Error, not "run the step" |
+| `unless` command not found | Error, not "run the step". `127` (not found) and `126` (not executable) from the interpreter fail the step, naming the gate |
 | `creates` path contains `~` or template | Expanded, rendered, then checked |
 | `sudo: true` on macOS with `pkg: brew` | Validation error |
 | `retry` on a step that changed on attempt 2 | Reported changed, `attempt 2/3` in output |
@@ -511,6 +521,8 @@ One JSON object per line on stdout, human output goes to stderr:
 | `--stream` and `register` on one step | Output is teed: streamed live *and* captured |
 | `assert` fails | `rc: 1` in `register`; the run stops like any other failure |
 | A step's `env` names a key `sudo` must preserve | `sudo --preserve-env` is given exactly the step's own `env` keys, nothing more |
+| `--ask-sudo-pass` and a step that reads stdin | The wrapped command is `sudo -k -S`, so the timestamp is invalidated and sudo consumes the password line before the child is started. The child sees EOF, never the password |
+| A `sudo: true` step's `unless` under `plan`, with no sudo | The gate is not run and the step is `would run (unprobed)`. Under `apply` this cannot arise: the preflight already failed |
 
 ## 11. Validation of this spec
 

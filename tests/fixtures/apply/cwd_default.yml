@@ -1,0 +1,14 @@
+---
+# Spec §4: with no `cwd:`, a step runs in the directory of the file it is in,
+# never the process cwd. This file proves it by looking for itself.
+- name: The default cwd is the plan file's own directory
+  shell: test -f ./cwd_default.yml
+  changed_when: "false"
+
+- name: An explicit cwd overrides it
+  shell: |
+    set -eu
+    test ! -f ./cwd_default.yml
+    printf 'here' > ./from-cwd-override
+  cwd: "{{ env.PROVISION_SCRATCH }}"
+  changed_when: "true"

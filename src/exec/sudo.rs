@@ -48,20 +48,17 @@ impl Sudo {
             return Ok(Sudo { password: Some(password) });
         }
 
-        let ok = std::process::Command::new("sudo")
-            .args(["-n", "--", "true"])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|st| st.success())
-            .unwrap_or(false);
-        if ok {
+        if root_is_reachable() {
             Ok(Sudo { password: None })
         } else {
             Err(Diag::file_level("sudo", "this plan has steps with `sudo: true` and sudo wants a password")
                 .with_note("re-run with --ask-sudo-pass, or warm the credential with `sudo -v` first"))
         }
+    }
+
+    /// No escalation, for a run that needs none.
+    pub fn none() -> Sudo {
+        Sudo { password: None }
     }
 
     /// Wrap an argv so it runs as root. `env_keys` are the step's own `env`
@@ -70,7 +67,16 @@ impl Sudo {
     pub fn wrap(&self, argv: Vec<String>, env_keys: &[String]) -> Vec<String> {
         let mut out = vec!["sudo".to_string()];
         match &self.password {
-            Some(_) => out.extend(["-S".to_string(), "-p".to_string(), String::new()]),
+            // `-k` first, so sudo always reads the password line this run
+            // feeds it. Without it a still-valid timestamp makes sudo skip the
+            // read, and the password stays in the pipe for the child to find
+            // on its own stdin (spec §10).
+            Some(_) => out.extend([
+                "-k".to_string(),
+                "-S".to_string(),
+                "-p".to_string(),
+                String::new(),
+            ]),
             None => out.push("-n".to_string()),
         }
         if !env_keys.is_empty() {
@@ -124,4 +130,17 @@ fn read_password() -> Result<String, Diag> {
 #[cfg(not(unix))]
 fn read_password() -> Result<String, Diag> {
     Err(Diag::file_level("sudo", "`sudo` is not supported on Windows"))
+}
+
+/// Can sudo escalate right now without asking for anything? `apply` turns a
+/// `false` here into a hard stop before the first step; `plan` only records it.
+pub fn root_is_reachable() -> bool {
+    std::process::Command::new("sudo")
+        .args(["-n", "--", "true"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|st| st.success())
+        .unwrap_or(false)
 }

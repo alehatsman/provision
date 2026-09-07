@@ -1,0 +1,5 @@
+---
+- name: A gate whose command does not exist
+  shell: echo this must never run
+  unless: definitely-not-a-real-command-xyzzy
+  changed_when: "false"

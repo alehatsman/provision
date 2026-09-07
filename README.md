@@ -106,9 +106,11 @@ $ provision plan machines/main_pc/index.yml
 ```
 
 `plan` exits 0 when there is nothing to do, 2 when there is, and 1 when a step
-failed. `unknown` counts as something to do: a step provision cannot judge is
+failed. Anything that is not `ok` or `skipped` counts as something to do,
+`unknown` and `would run (unprobed)` included: a step provision cannot judge is
 not a step it may call converged, and `validate --strict` is how that count is
-driven to zero.
+driven to zero. `--plan-no-probe` inspects nothing, so it claims nothing, and
+exits 0.
 
 ```
 $ provision apply examples/x1.yml

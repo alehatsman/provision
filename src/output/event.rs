@@ -124,11 +124,13 @@ impl Summary {
         }
     }
 
-    /// D15: `plan` exits 2 for anything it cannot call converged, and
-    /// `unknown` is one of those. `--plan-no-probe` produces none of the three
-    /// because it asked the machine nothing.
+    /// D15: `plan` exits 2 for anything it cannot call converged. Only `ok`
+    /// and `skipped` are converged; `unknown` and `would run (unprobed)` are
+    /// both provision admitting it does not know, which is not the same as
+    /// nothing to do. `--plan-no-probe` is handled a level up: it inspected
+    /// nothing, so it claims nothing.
     pub fn has_changes(&self) -> bool {
-        self.changed + self.would_run + self.unknown > 0
+        self.total - (self.ok + self.skipped) > 0
     }
 
     /// The counts worth printing, in the order §9.1 shows them. A count of

@@ -17,7 +17,7 @@ mod yaml;
 use clap::{Parser, Subcommand};
 use error::Diag;
 use exec::runner::Runner;
-use exec::sudo::Sudo;
+use exec::sudo::{self, Sudo};
 use expand::{Expander, Mode, Selection};
 use output::Sink;
 use output::text::{Target, Text};
@@ -236,7 +236,15 @@ fn run() -> Result<u8, Diag> {
             let base = cwd();
             let mode = Mode::Plan { probe: !plan_no_probe };
             let mut ex = expander(&run.vars, mode, run.selection())?
-                .with_runner(Runner { sudo: Sudo::preflight(false, false)?, stream: false })
+                // Gates run with their step's sudo (§4), so plan has to know
+                // whether root is reachable. Unlike apply it must not fail
+                // when it is not: plan is the read-only command, and a root
+                // gate it cannot run is reported unprobed rather than fatal.
+                .with_runner(Runner {
+                    sudo: Sudo::none(),
+                    stream: false,
+                    root_available: sudo::root_is_reachable(),
+                })
                 .with_sink(run.sink(base.clone(), false, false));
 
             let started = Instant::now();
@@ -248,11 +256,15 @@ fn run() -> Result<u8, Diag> {
                 report(&ex, &base, None);
                 return Ok(EXIT_USAGE);
             }
-            // A failed `assert` at plan time means the plan is aimed at the
-            // wrong machine, and the walk already stopped. That is a failure,
-            // not "changes were found".
+            // Only an `assert` can fail at plan time. The walk kept going
+            // (§6.7), so this is the whole plan's verdict, not the first
+            // step's — and it is a failure, not "changes were found".
             if ex.summary.failed > 0 {
                 return Ok(EXIT_FAILED);
+            }
+            // D15: `--plan-no-probe` inspected nothing, so it claims nothing.
+            if plan_no_probe {
+                return Ok(EXIT_OK);
             }
             Ok(if ex.summary.has_changes() { EXIT_CHANGES } else { EXIT_OK })
         }
@@ -276,7 +288,7 @@ fn run() -> Result<u8, Diag> {
 
             exec::process::catch_interrupts();
             let mut ex = expander(&run.vars, Mode::Apply, run.selection())?
-                .with_runner(Runner { sudo, stream })
+                .with_runner(Runner { sudo, stream, root_available: true })
                 .with_sink(run.sink(base.clone(), verbose, stream));
 
             let started = Instant::now();

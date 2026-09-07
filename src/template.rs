@@ -4,6 +4,7 @@
 //! the variable's name, not an empty string (D6).
 
 use crate::error::{Diag, Result};
+use crate::yaml::N;
 use minijinja::value::{Value, ValueKind as Kind};
 use minijinja::{Environment, UndefinedBehavior};
 use std::error::Error as _;
@@ -76,6 +77,35 @@ impl Engine {
     /// Top-level names, so `r.changed` reports `r`.
     pub fn undeclared(&self, expr: &str) -> Option<std::collections::HashSet<String>> {
         self.env.compile_expression(expr).ok().map(|e| e.undeclared_variables(false))
+    }
+
+    /// Render a spanned node into a value: strings through the field rule of
+    /// §3.4, sequences and mappings element by element, everything else as
+    /// written. Errors are anchored at the node that failed, not the root.
+    pub fn render_node<'a>(&self, at: N<'a>, ctx: &Value) -> Result<Value> {
+        match at.as_str() {
+            Ok(s) => self
+                .render_field(s, ctx)
+                .map_err(|e| at.err(self.describe_with(s, ctx, &e))),
+            // Non-strings are taken as written, but their strings are rendered.
+            Err(_) => match at.as_seq() {
+                Ok(items) => {
+                    let vs: Result<Vec<Value>> =
+                        items.into_iter().map(|i| self.render_node(i, ctx)).collect();
+                    Ok(Value::from(vs?))
+                }
+                Err(_) => match at.as_map() {
+                    Ok(pairs) => {
+                        let mut m = std::collections::BTreeMap::new();
+                        for (k, v) in pairs {
+                            m.insert(k.as_scalar_string()?, self.render_node(v, ctx)?);
+                        }
+                        Ok(Value::from(m))
+                    }
+                    Err(_) => at.to_value(),
+                },
+            },
+        }
     }
 
     /// Check template syntax without a context. Used by `validate`.

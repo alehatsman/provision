@@ -1,0 +1,11 @@
+---
+# Spec §7: sudo is given exactly the step's own `env` keys and nothing more.
+- name: sudo sees the step env and nothing else of the caller's
+  shell: |
+    set -eu
+    test "$GREETING" = hello
+    test -z "${PROVISION_SCRATCH:-}"
+  env:
+    GREETING: hello
+  sudo: true
+  changed_when: "false"

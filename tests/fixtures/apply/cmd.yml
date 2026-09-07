@@ -1,0 +1,14 @@
+---
+# `cmd` is for arguments that contain spaces or come from variables — the two
+# cases where handing a string to a shell is how a plan grows a quoting bug.
+- vars:
+    scratch: "{{ env.PROVISION_SCRATCH }}"
+    argv: [touch, "{{ env.PROVISION_SCRATCH }}/from-a-list"]
+
+- name: A directory whose name has spaces in it
+  cmd: [mkdir, "-p", "{{ scratch }}/a dir with spaces"]
+  creates: "{{ scratch }}/a dir with spaces"
+
+- name: An argv built in vars and passed whole
+  cmd: "{{ argv }}"
+  creates: "{{ scratch }}/from-a-list"

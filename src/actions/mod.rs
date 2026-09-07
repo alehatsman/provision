@@ -6,8 +6,11 @@
 //! actions (`file`, `template`, `pkg`, `service`) each need real state
 //! inspection and get their own modules then.
 
+use crate::config::model::{self, Step};
 use crate::error::Result;
+use crate::template::Engine;
 use crate::yaml::N;
+use minijinja::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
@@ -103,4 +106,115 @@ impl Action {
     pub fn never_changes(&self) -> bool {
         matches!(self, Action::Assert { .. })
     }
+}
+
+impl Action {
+    /// Parse and render one step's action body.
+    ///
+    /// `Ok(None)` means a field would not render. The expander's own sweep has
+    /// already reported that, with a position — reporting it again here would
+    /// turn one bad `{{ … }}` into two diagnostics.
+    pub fn parse(
+        engine: &Engine,
+        step: &Step<'_>,
+        ctx: &Value,
+        raw: bool,
+    ) -> Result<Option<Action>> {
+        let body = step.body;
+        // `raw: true` means the body is not a template (spec §4). It still
+        // reaches the action; it just arrives as written.
+        let render = |src: &str| -> Option<String> {
+            if raw { Some(src.to_string()) } else { engine.render(src, ctx).ok() }
+        };
+
+        let action = match step.key {
+            "shell" => {
+                let long = body.as_str().is_err();
+                let script_at = if long {
+                    match body.get("script") {
+                        Some(n) => n,
+                        None => {
+                            return Err(body
+                                .err("`shell` requires `script`")
+                                .with_note("or write the script directly: `shell: |`"));
+                        }
+                    }
+                } else {
+                    body
+                };
+                let Some(script) = render(script_at.as_str()?) else { return Ok(None) };
+                let interpreter = match long.then(|| body.get("interpreter")).flatten() {
+                    Some(n) => {
+                        let Some(name) = render(n.as_str()?) else { return Ok(None) };
+                        Interpreter::parse(&name, n)?
+                    }
+                    None => Interpreter::default_for_host(),
+                };
+                let login = body.get("login").and_then(|n| n.as_bool().ok()).unwrap_or(false);
+                Action::Shell { script, interpreter, login }
+            }
+
+            "cmd" => {
+                // A single expression may hold the whole argv, which is how a
+                // list built in `vars` reaches a `cmd` (spec §3.4).
+                let items: Vec<Value> = match body.as_seq() {
+                    Ok(nodes) => {
+                        let mut v = Vec::with_capacity(nodes.len());
+                        for n in nodes {
+                            match engine.render_node(n, ctx) {
+                                Ok(x) => v.push(x),
+                                Err(_) => return Ok(None),
+                            }
+                        }
+                        v
+                    }
+                    Err(_) => {
+                        let Ok(value) = engine.render_node(body, ctx) else { return Ok(None) };
+                        match value.try_iter() {
+                            Ok(it) => it.collect(),
+                            Err(_) => {
+                                return Err(body
+                                    .err("`cmd` is a list of arguments")
+                                    .with_note("cmd: [mv, src, dest] — use `shell` for a script"));
+                            }
+                        }
+                    }
+                };
+                if items.is_empty() {
+                    return Err(body.err("`cmd` is empty"));
+                }
+                Action::Cmd(items.iter().map(|v| v.to_string()).collect())
+            }
+
+            "assert" => {
+                let field = |k: &str| -> Option<String> {
+                    body.get(k).and_then(|n| n.as_str().ok()).and_then(&render)
+                };
+                let command = field("command");
+                // An `expr` is an expression, not a template: it is evaluated
+                // against the scope at run time, not rendered into text first.
+                let expr = body.get("expr").and_then(|n| n.as_str().ok()).map(str::to_string);
+                if command.is_none() && expr.is_none() {
+                    return Err(body.err("`assert` needs `command` or `expr`").with_note(
+                        "command: a shell command that exits 0 · expr: an expression",
+                    ));
+                }
+                Action::Assert { command, expr, msg: field("msg") }
+            }
+
+            other => Action::NotYet(static_key(other)),
+        };
+        Ok(Some(action))
+    }
+}
+
+/// The action key, for an action whose runner arrives in phase 2. Every key is
+/// one of a fixed set, so this borrows nothing that was not already static.
+fn static_key(key: &str) -> &'static str {
+    model::ACTION_KEYS
+        .iter()
+        .chain(model::STRUCTURAL_KEYS)
+        .find(|k| **k == key)
+        .copied()
+        .unwrap_or("action")
 }

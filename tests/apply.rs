@@ -353,3 +353,65 @@ fn snapshot_colored_output() {
     let text = String::from_utf8_lossy(&out.stdout).replace('\x1b', "ESC");
     snapshot!("colored", text);
 }
+
+// ── cmd, cwd, and the env sudo passes through ─────────────────────────────
+
+#[test]
+fn cmd_runs_an_argv_and_is_idempotent() {
+    let dir = tempfile::tempdir().unwrap();
+
+    let (code, first) = apply(dir.path(), "cmd.yml", &[]);
+    assert_eq!(code, 0, "{first}");
+    assert!(line_for(&first, "spaces in it").contains("changed"), "{first}");
+    assert!(line_for(&first, "built in vars").contains("changed"), "{first}");
+    // No shell means no quoting: the space survives as one argument.
+    assert!(dir.path().join("a dir with spaces").is_dir(), "{first}");
+    assert!(dir.path().join("from-a-list").is_file(), "{first}");
+
+    let (code, second) = apply(dir.path(), "cmd.yml", &[]);
+    assert_eq!(code, 0, "{second}");
+    assert!(!second.contains("changed"), "nothing should change twice:\n{second}");
+    assert!(second.contains("2 skipped"), "{second}");
+}
+
+#[test]
+fn cwd_defaults_to_the_plan_files_directory_and_can_be_overridden() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(dir.path(), "cwd_default.yml", &[]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(std::fs::read_to_string(dir.path().join("from-cwd-override")).unwrap(), "here");
+}
+
+#[test]
+fn a_gate_that_cannot_run_fails_the_step() {
+    // Spec §10: "the check is broken" and "the work is not done" are not the
+    // same answer, and only one of them is safe to assume.
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(dir.path(), "broken_gate.yml", &[]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("`unless` could not run"), "{out}");
+    assert!(out.contains("exit 127"), "{out}");
+    assert!(!out.contains("this must never run"), "the step ran anyway:\n{out}");
+}
+
+#[test]
+fn sudo_passes_the_steps_env_and_nothing_else() {
+    if !root_is_reachable() {
+        eprintln!("skipped: needs a warm `sudo -n`");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(dir.path(), "sudo_env.yml", &[]);
+    // The step asserts both halves itself: GREETING arrived, and
+    // PROVISION_SCRATCH — set for provision, never declared by the step — did
+    // not. --preserve-env is given the step's own keys and no others.
+    assert_eq!(code, 0, "{out}");
+}
+
+fn root_is_reachable() -> bool {
+    Command::new("sudo")
+        .args(["-n", "--", "true"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}

@@ -87,11 +87,18 @@ type R<T> = std::result::Result<T, Stop>;
 pub struct Runner {
     pub sudo: Sudo,
     pub stream: bool,
+    /// Whether `sudo` can actually escalate right now. `apply` proves this in
+    /// its preflight and it is always true there. `plan` only asks — it is the
+    /// read-only command and must still work on a machine with a cold sudo
+    /// credential, so a root gate it cannot run is reported unprobed (D11).
+    pub root_available: bool,
 }
 
 enum Gate {
     Run,
     Skip(String),
+    /// A gate that needs root on a run that has none. Not an answer.
+    NoRoot,
 }
 
 impl Runner {
@@ -121,14 +128,27 @@ impl Runner {
 
         match self.gate(p)? {
             Gate::Skip(why) => return Ok(Done::one(Status::Skipped(why))),
+            Gate::NoRoot => return Err(Stop::Fail(no_root())),
             Gate::Run => {}
         }
-
         let (attempts, delay) = match p.retry {
             Some(r) => (r.attempts, r.delay),
             None => (1, Duration::ZERO),
         };
+        self.attempt_loop(p, judge, attempts, delay)
+    }
 
+    /// The retry loop. `attempts` is a parameter rather than read from `p`
+    /// because `plan` runs asserts with exactly one attempt: a
+    /// `retry: {attempts: 30, delay: 2s}` readiness gate is a sixty-second
+    /// wait for work plan has not done and is not about to do.
+    fn attempt_loop(
+        &self,
+        p: &Prepared,
+        judge: &dyn Judge,
+        attempts: u32,
+        delay: Duration,
+    ) -> R<Done> {
         for attempt in 1..=attempts {
             if process::interrupted() {
                 return Err(Stop::Fail(interrupted()));
@@ -152,10 +172,12 @@ impl Runner {
         }
         match self.gate(p)? {
             Gate::Skip(why) => return Ok(Done::one(Status::Skipped(why))),
+            // A gate that needs root when there is none is not a verdict.
+            Gate::NoRoot => return Ok(Done::one(Status::WouldRunUnprobed)),
             Gate::Run => {}
         }
         if let Action::Assert { .. } = &p.action {
-            return self.apply_inner(p, judge);
+            return self.attempt_loop(p, judge, 1, Duration::ZERO);
         }
         // A gate that said "run" is a verdict; no gate at all is not.
         Ok(Done::one(if p.gated() { Status::WouldRun } else { Status::Unknown }))
@@ -242,13 +264,30 @@ impl Runner {
 
     fn gate(&self, p: &Prepared) -> R<Gate> {
         if let Some(cmd) = &p.unless {
+            // Spec §4: the gate runs with the step's sudo, env and cwd. A root
+            // step's `unless: test -f /root/.x` has to see root's view, or the
+            // gate answers a question nobody asked.
+            if p.sudo && !self.root_available {
+                return Ok(Gate::NoRoot);
+            }
             let argv = Interpreter::default_for_host().argv(cmd, false);
-            // Spec §10: an `unless` that cannot be spawned at all is an error,
-            // not a licence to run the step. "The check is broken" and "the
-            // work is not done" are not the same answer.
-            let out = self.spawn(&gate_context(p), argv, false)?;
+            let out = self.spawn(&gate_context(p), argv, p.sudo)?;
             match out.how {
                 How::Exited if out.rc == 0 => return Ok(Gate::Skip("unless".into())),
+                // Spec §10: an `unless` that cannot run is an error, not a
+                // licence to run the step. 127 is the interpreter saying it
+                // could not find the command and 126 that it could not execute
+                // it; either way "the check is broken" and "the work is not
+                // done" are not the same answer, and only one of them is safe
+                // to assume.
+                How::Exited if out.rc == 126 || out.rc == 127 => {
+                    return Err(Stop::Fail(Failure {
+                        msg: format!("`unless` could not run: {}", cmd.lines().next().unwrap_or("")),
+                        rc: Some(out.rc),
+                        stderr: out.stderr,
+                        interrupted: false,
+                    }));
+                }
                 How::Interrupted => return Err(Stop::Fail(interrupted())),
                 _ => {}
             }
@@ -262,8 +301,8 @@ impl Runner {
     }
 }
 
-/// A gate command runs with the step's `env` and `cwd` (spec §4) and nothing
-/// else of the step's: never its sudo, never its retry.
+/// A gate command runs with the step's `sudo`, `env` and `cwd` (spec §4), and
+/// nothing else of the step's: never its retry, never its own gates.
 fn gate_context(p: &Prepared) -> Prepared {
     Prepared {
         action: Action::NotYet("unless"),
@@ -271,10 +310,19 @@ fn gate_context(p: &Prepared) -> Prepared {
         creates: None,
         cwd: p.cwd.clone(),
         env: p.env.clone(),
-        sudo: false,
+        sudo: p.sudo,
         timeout: p.timeout,
         retry: None,
         has_changed_when: false,
+    }
+}
+
+fn no_root() -> Failure {
+    Failure {
+        msg: "this step's `unless` needs root and sudo is not available".into(),
+        rc: None,
+        stderr: String::new(),
+        interrupted: false,
     }
 }
 
