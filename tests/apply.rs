@@ -175,7 +175,7 @@ fn an_unimplemented_action_says_which_phase_brings_it() {
     let dir = tempfile::tempdir().unwrap();
     let (code, out) = apply(dir.path(), "not_yet.yml", &[]);
     assert_eq!(code, 1, "{out}");
-    assert!(out.contains("`file` is not implemented yet (phase 2)"), "{out}");
+    assert!(out.contains("is not implemented yet (phase 2)"), "{out}");
     // But it still plans, which is what keeps the dotfiles tree usable today.
     let path = fixture("not_yet.yml");
     let out = run_in(dir.path(), &["plan", "--plan-no-probe", path.to_str().unwrap()]);
@@ -414,4 +414,172 @@ fn root_is_reachable() -> bool {
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
+}
+
+
+// ── file ──────────────────────────────────────────────────────────────────
+
+#[test]
+fn every_file_state_applies_twice_changed_then_ok() {
+    let dir = tempfile::tempdir().unwrap();
+
+    let (code, first) = apply(dir.path(), "file_states.yml", &[]);
+    assert_eq!(code, 0, "{first}");
+    for name in ["directory with an explicit mode", "inline content", "copied from src", "symlink"] {
+        assert!(line_for(&first, name).contains("changed"), "{name}:\n{first}");
+    }
+    // Spec §6.3: `absent` on a path that was never there is ok, not changed.
+    // This is the case the second run of an idempotency test lands on, and
+    // here it is already true on the first.
+    assert_eq!(verdict(&first, "never there"), "ok", "{first}");
+
+    let conf = dir.path().join("conf");
+    assert_eq!(mode_of(&conf), 0o700, "the explicit mode was not applied");
+    assert_eq!(std::fs::read_to_string(conf.join("hello.txt")).unwrap(), "one\ntwo\n");
+    assert_eq!(std::fs::read_to_string(conf.join("copied")).unwrap(), "copied from src\n");
+    // Stored exactly as written: a relative link stays relative.
+    assert_eq!(std::fs::read_link(conf.join("link")).unwrap().to_str().unwrap(), "./hello.txt");
+
+    let (code, second) = apply(dir.path(), "file_states.yml", &[]);
+    assert_eq!(code, 0, "{second}");
+    assert!(!second.contains("changed"), "nothing should change twice:\n{second}");
+    assert!(second.contains("5 ok"), "{second}");
+}
+
+#[test]
+fn a_mode_that_drifts_is_brought_back() {
+    let dir = tempfile::tempdir().unwrap();
+    apply(dir.path(), "file_states.yml", &[]);
+
+    let conf = dir.path().join("conf");
+    set_mode(&conf, 0o755);
+
+    let (code, out) = apply(dir.path(), "file_states.yml", &[]);
+    assert_eq!(code, 0, "{out}");
+    let line = line_for(&out, "directory with an explicit mode");
+    assert!(line.contains("changed"), "{out}");
+    assert!(out.contains("mode 0755 → 0700"), "the delta is not reported:\n{out}");
+    assert_eq!(mode_of(&conf), 0o700);
+}
+
+#[test]
+fn plan_shows_a_diff_and_no_diff_suppresses_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture("file_states.yml");
+
+    let out = run_in(dir.path(), &["plan", path.to_str().unwrap()]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(2), "{text}");
+    assert!(line_for(&text, "inline content").contains("would change"), "{text}");
+    assert!(text.contains("+one"), "the diff is missing:\n{text}");
+    assert!(!dir.path().join("conf").exists(), "plan created something");
+
+    let out = run_in(dir.path(), &["plan", path.to_str().unwrap(), "--no-diff"]);
+    let quiet = String::from_utf8_lossy(&out.stdout);
+    assert!(quiet.contains("would change"), "{quiet}");
+    assert!(!quiet.contains("+one"), "--no-diff did not suppress it:\n{quiet}");
+}
+
+#[test]
+fn a_file_that_cannot_be_read_says_sudo_is_how() {
+    // Spec §10: guessing "it must differ" would rewrite a file nobody could
+    // compare. The step fails and names the way to read it.
+    if root_is_reachable() {
+        let dir = tempfile::tempdir().unwrap();
+        let secret = dir.path().join("secret");
+        std::fs::write(&secret, "x").unwrap();
+        set_mode(&secret, 0o000);
+        assert!(Command::new("sudo")
+            .args(["-n", "chown", "root:root", secret.to_str().unwrap()])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false));
+
+        let plan = dir.path().join("unreadable.yml");
+        std::fs::write(
+            &plan,
+            format!(
+                "- name: Rewrite a file nobody can read
+  file:
+    path: {}
+    state: file
+    content: \"y\"
+",
+                secret.display()
+            ),
+        )
+        .unwrap();
+        let out = run_in(dir.path(), &["apply", plan.to_str().unwrap()]);
+        let text = String::from_utf8_lossy(&out.stdout).into_owned();
+        let _ = Command::new("sudo").args(["-n", "rm", "-f", secret.to_str().unwrap()]).status();
+
+        assert_eq!(out.status.code(), Some(1), "{text}");
+        assert!(text.contains("sudo: true"), "{text}");
+    } else {
+        eprintln!("skipped: needs a warm `sudo -n`");
+    }
+}
+
+#[test]
+fn the_sudo_write_path_stages_outside_the_destination() {
+    // The destination directory is root-owned and unwritable by the user,
+    // which is exactly why a temp file "next to dest" cannot work.
+    if !root_is_reachable() {
+        eprintln!("skipped: needs a warm `sudo -n`");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let root_dir = dir.path().join("etc");
+    std::fs::create_dir(&root_dir).unwrap();
+    let owned = root_dir.to_str().unwrap().to_string();
+    assert!(sudo(&["chown", "root:root", &owned]) && sudo(&["chmod", "0755", &owned]));
+
+    let run = |extra: &[&str]| {
+        let path = fixture("file_sudo.yml");
+        let mut args = vec!["apply", path.to_str().unwrap()];
+        args.extend_from_slice(extra);
+        let out = Command::new(env!("CARGO_BIN_EXE_provision"))
+            .args(&args)
+            .env("PROVISION_SCRATCH", dir.path())
+            .env("PROVISION_ROOT_DIR", &owned)
+            .env("NO_COLOR", "1")
+            .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")))
+            .output()
+            .unwrap();
+        (
+            out.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+        )
+    };
+
+    let (code, first) = run(&[]);
+    let (code2, second) = run(&[]);
+    let stat = Command::new("sudo")
+        .args(["-n", "stat", "-c%a %U %G", &format!("{owned}/provision.conf")])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    let _ = sudo(&["rm", "-rf", &owned]);
+
+    assert_eq!(code, 0, "{first}");
+    assert!(line_for(&first, "root-owned config").contains("changed"), "{first}");
+    assert_eq!(stat, "440 root root", "install did not land the metadata");
+    assert_eq!(code2, 0, "{second}");
+    assert!(!second.contains("changed"), "the sudo path is not idempotent:\n{second}");
+}
+
+fn sudo(args: &[&str]) -> bool {
+    let mut all = vec!["-n"];
+    all.extend_from_slice(args);
+    Command::new("sudo").args(&all).status().map(|s| s.success()).unwrap_or(false)
+}
+
+fn mode_of(p: &Path) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(p).unwrap().permissions().mode() & 0o7777
+}
+
+fn set_mode(p: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode)).unwrap();
 }

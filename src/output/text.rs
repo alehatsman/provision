@@ -29,6 +29,9 @@ pub struct Text {
     spinner: bool,
     verbose: bool,
     hide_skipped: bool,
+    /// Spec §9.1. The flag exists on `apply` too, where there is no diff to
+    /// suppress, so a script can pass both commands the same arguments.
+    no_diff: bool,
     base: PathBuf,
     /// The file whose header was printed last, so nested `import`/`use` shows
     /// as one dim header rather than a path on every line.
@@ -47,6 +50,7 @@ impl Text {
             spinner: tty,
             verbose: false,
             hide_skipped: false,
+            no_diff: false,
             base,
             current: None,
             live: None,
@@ -60,6 +64,11 @@ impl Text {
 
     pub fn hide_skipped(mut self, on: bool) -> Text {
         self.hide_skipped = on;
+        self
+    }
+
+    pub fn no_diff(mut self, on: bool) -> Text {
+        self.no_diff = on;
         self
     }
 
@@ -125,6 +134,9 @@ impl Sink for Text {
             human(ev.duration),
         ));
 
+        if let Some(detail) = ev.detail.as_ref().filter(|_| !self.no_diff) {
+            self.detail(detail);
+        }
         if let Status::Failed(f) = &ev.status {
             self.failure(ev, f);
         } else if self.verbose {
@@ -148,6 +160,23 @@ impl Sink for Text {
 }
 
 impl Text {
+    /// A diff, or a metadata delta, under the step's own line. Unified diffs
+    /// arrive already marked up; `+`/`-` get their color here so the diff
+    /// itself stays plain text everywhere else (json, tests).
+    fn detail(&self, text: &str) {
+        let dim = Style::new().dimmed();
+        let green = Style::new().fg_color(Some(AnsiColor::Green.into()));
+        let red = Style::new().fg_color(Some(AnsiColor::Red.into()));
+        for line in text.lines() {
+            let style = match line.as_bytes().first() {
+                Some(b'+') => green,
+                Some(b'-') => red,
+                _ => dim,
+            };
+            self.write(format_args!("    {dim}│{dim:#} {style}{line}{style:#}\n"));
+        }
+    }
+
     fn failure(&self, ev: &Event, f: &super::event::Failure) {
         let dim = Style::new().dimmed();
         let red = Style::new().fg_color(Some(AnsiColor::Red.into()));
@@ -180,7 +209,7 @@ fn style_for(s: &Status) -> Style {
     let c = |c: AnsiColor| Style::new().fg_color(Some(c.into()));
     match s {
         Status::Ok => c(AnsiColor::Green),
-        Status::Changed | Status::WouldRun => c(AnsiColor::Yellow),
+        Status::Changed | Status::WouldChange | Status::WouldRun => c(AnsiColor::Yellow),
         Status::Unknown | Status::WouldRunUnprobed => c(AnsiColor::Magenta),
         Status::Skipped(_) => Style::new().dimmed(),
         Status::Failed(_) => c(AnsiColor::Red).bold(),

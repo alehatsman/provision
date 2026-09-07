@@ -94,6 +94,10 @@ struct RunArgs {
     /// Drop skipped steps from the output. The summary still counts them.
     #[arg(long)]
     hide_skipped: bool,
+    /// Do not print diffs. Accepted by `apply`, which has none to print, so
+    /// a script can pass both commands the same arguments.
+    #[arg(long)]
+    no_diff: bool,
     /// One JSON object per line on stdout; human output moves to stderr.
     #[arg(long)]
     json: bool,
@@ -129,8 +133,10 @@ impl RunArgs {
 
     fn sink(&self, base: PathBuf, verbose: bool, stream: bool) -> Box<dyn Sink> {
         let target = if self.json { Target::Err } else { Target::Out };
-        let mut text =
-            Text::new(target, base.clone()).verbose(verbose).hide_skipped(self.hide_skipped);
+        let mut text = Text::new(target, base.clone())
+            .verbose(verbose)
+            .hide_skipped(self.hide_skipped)
+            .no_diff(self.no_diff);
         if stream {
             // The child owns the terminal now; a spinner would fight it.
             text = text.no_spinner();

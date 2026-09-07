@@ -16,6 +16,9 @@ pub enum Status {
     Unknown,
     Skipped(String),
     Failed(Failure),
+    /// plan: the target was probed and differs. The plan-time twin of
+    /// `Changed`, and it carries the same glyph and color.
+    WouldChange,
     /// plan: a gate was probed and says the step has work to do.
     WouldRun,
     /// plan: nothing was probed, so no verdict is claimed (D11, D14).
@@ -39,6 +42,7 @@ impl Status {
             Status::Unknown => "unknown".into(),
             Status::Skipped(why) => format!("skipped   {why}"),
             Status::Failed(_) => "FAILED".into(),
+            Status::WouldChange => "would change".into(),
             Status::WouldRun => "would run".into(),
             Status::WouldRunUnprobed => "would run (unprobed)".into(),
         }
@@ -51,6 +55,7 @@ impl Status {
             Status::Unknown => "?",
             Status::Skipped(_) => "-",
             Status::Failed(_) => "✗",
+            Status::WouldChange => "~",
             Status::WouldRun => "→",
             Status::WouldRunUnprobed => "?",
         }
@@ -68,6 +73,7 @@ impl Status {
             Status::Unknown => "unknown",
             Status::Skipped(_) => "skipped",
             Status::Failed(_) => "failed",
+            Status::WouldChange => "would_change",
             Status::WouldRun => "would_run",
             Status::WouldRunUnprobed => "would_run_unprobed",
         }
@@ -91,6 +97,9 @@ pub struct Event {
     /// without the runner having to guess in advance which will be wanted.
     pub stdout: String,
     pub stderr: String,
+    /// A diff, or a metadata delta like `mode 0644 → 0600`. Printed under the
+    /// step's line, and carried in `--json` as `diff`.
+    pub detail: Option<String>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -101,6 +110,7 @@ pub struct Summary {
     pub skipped: usize,
     pub unknown: usize,
     pub failed: usize,
+    pub would_change: usize,
     pub would_run: usize,
     pub unprobed: usize,
     pub duration: Duration,
@@ -119,6 +129,7 @@ impl Summary {
                 self.failed += 1;
                 self.interrupted |= f.interrupted;
             }
+            Status::WouldChange => self.would_change += 1,
             Status::WouldRun => self.would_run += 1,
             Status::WouldRunUnprobed => self.unprobed += 1,
         }
@@ -143,6 +154,7 @@ impl Summary {
             }
         };
         add(self.changed, "changed");
+        add(self.would_change, "would change");
         add(self.would_run, "would run");
         add(self.unprobed, "would run (unprobed)");
         add(self.ok, "ok");

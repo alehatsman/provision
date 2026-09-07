@@ -1,0 +1,36 @@
+---
+# One step per state, in dependency order. Applied twice this must report
+# changed then ok — `absent` on a path that was never there is ok on both.
+- vars:
+    scratch: "{{ env.PROVISION_SCRATCH }}"
+
+- name: A directory with an explicit mode
+  file:
+    path: "{{ scratch }}/conf"
+    state: dir
+    mode: "0700"
+
+- name: A file with inline content
+  file:
+    path: "{{ scratch }}/conf/hello.txt"
+    state: file
+    content: |
+      one
+      two
+
+- name: A file copied from src
+  file:
+    path: "{{ scratch }}/conf/copied"
+    state: file
+    src: ./files/sample.txt
+
+- name: A symlink kept relative
+  file:
+    path: "{{ scratch }}/conf/link"
+    state: link
+    src: ./hello.txt
+
+- name: Something that was never there
+  file:
+    path: "{{ scratch }}/conf/gone"
+    state: absent

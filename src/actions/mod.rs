@@ -6,8 +6,12 @@
 //! actions (`file`, `template`, `pkg`, `service`) each need real state
 //! inspection and get their own modules then.
 
+pub mod file;
+
 use crate::config::model::{self, Step};
 use crate::error::Result;
+use crate::exec::process;
+use crate::exec::sudo::Sudo;
 use crate::template::Engine;
 use crate::yaml::N;
 use minijinja::Value;
@@ -17,6 +21,7 @@ pub enum Action {
     Shell { script: String, interpreter: Interpreter, login: bool },
     Cmd(Vec<String>),
     Assert { command: Option<String>, expr: Option<String>, msg: Option<String> },
+    File(file::Spec),
     /// Parsed and validated, but with no runner until phase 2. `plan` reports
     /// it unprobed; `apply` refuses rather than pretending it converged.
     NotYet(&'static str),
@@ -105,6 +110,12 @@ impl Action {
     /// and never `changed`. `shell` and `cmd` are judged by their gate.
     pub fn never_changes(&self) -> bool {
         matches!(self, Action::Assert { .. })
+    }
+
+    /// An action that inspects and changes state itself, rather than reporting
+    /// through an exit code. It never reaches the runner's argv path.
+    pub fn is_typed(&self) -> bool {
+        matches!(self, Action::File(_))
     }
 }
 
@@ -202,6 +213,11 @@ impl Action {
                 Action::Assert { command, expr, msg: field("msg") }
             }
 
+            "file" => match file::parse(step, engine, ctx, raw)? {
+                Some(spec) => Action::File(spec),
+                None => return Ok(None),
+            },
+
             other => Action::NotYet(static_key(other)),
         };
         Ok(Some(action))
@@ -217,4 +233,50 @@ fn static_key(key: &str) -> &'static str {
         .find(|k| **k == key)
         .copied()
         .unwrap_or("action")
+}
+
+// ── typed actions ─────────────────────────────────────────────────────────
+
+/// What a typed action did, or would do.
+///
+/// Phase 1's three actions report through an exit code, which is why they run
+/// through the runner's argv path. These four do their own work and have to
+/// say what they did in their own words.
+pub enum Effect {
+    /// Already as declared.
+    Ok,
+    /// Differs. The string is the diff or the metadata delta, if there is one
+    /// worth printing.
+    Changed(Option<String>),
+    Failed { msg: String, detail: String },
+    /// Could not look: the answer needs a root this run does not have. Plan
+    /// only — `apply` proved sudo works before the first step.
+    Unprobed,
+}
+
+/// The part of the run a typed action needs. Two questions and a way to ask
+/// them as root; nothing about scopes, templates, or the walk.
+pub struct Ctx<'a> {
+    /// The step's own `sudo: true`.
+    pub sudo: bool,
+    /// Whether escalation works at all. Only `plan` ever sees this false.
+    pub root_available: bool,
+    pub escalate: &'a Sudo,
+}
+
+impl Ctx<'_> {
+    /// Run a command as root and capture its bytes exactly.
+    pub fn as_root(&self, argv: &[&str]) -> std::io::Result<process::Captured> {
+        let argv: Vec<String> = argv.iter().map(|s| (*s).to_string()).collect();
+        let argv = self.escalate.wrap(argv, &[]);
+        let stdin = self.escalate.stdin();
+        process::capture(&argv, stdin.as_deref())
+    }
+
+    /// Spec §6.3: with `sudo: true` every probe of the target runs as root,
+    /// because a target the step needs root to write is usually one it needs
+    /// root to read.
+    pub fn reads_as_root(&self) -> bool {
+        self.sudo
+    }
 }

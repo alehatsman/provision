@@ -1,0 +1,12 @@
+---
+# Writes into a directory the invoking user cannot write, which is the case
+# the temp-file staging rule exists for.
+- name: A root-owned config file
+  file:
+    path: "{{ env.PROVISION_ROOT_DIR }}/provision.conf"
+    state: file
+    content: "owned by root\n"
+    mode: "0440"
+    owner: root
+    group: root
+  sudo: true

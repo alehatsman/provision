@@ -11,7 +11,7 @@
 //! `retry` on an `assert` a readiness gate (spec §6.7) rather than a rerun of
 //! something already deemed fine.
 
-use crate::actions::{Action, Interpreter};
+use crate::actions::{self, Action, Effect, Interpreter};
 use crate::config::model::Retry;
 use crate::error::{Diag, Result};
 use crate::exec::process::{self, How, Output, Spawn};
@@ -60,11 +60,13 @@ pub struct Done {
     pub out: Option<Output>,
     pub attempt: u32,
     pub attempts: u32,
+    /// A typed action's diff or metadata delta. Never set by `shell`.
+    pub detail: Option<String>,
 }
 
 impl Done {
     fn one(status: Status) -> Done {
-        Done { status, out: None, attempt: 1, attempts: 1 }
+        Done { status, out: None, attempt: 1, attempts: 1, detail: None }
     }
 }
 
@@ -131,6 +133,9 @@ impl Runner {
             Gate::NoRoot => return Err(Stop::Fail(no_root())),
             Gate::Run => {}
         }
+        if p.action.is_typed() {
+            return self.typed(p, judge, true);
+        }
         let (attempts, delay) = match p.retry {
             Some(r) => (r.attempts, r.delay),
             None => (1, Duration::ZERO),
@@ -175,6 +180,9 @@ impl Runner {
             // A gate that needs root when there is none is not a verdict.
             Gate::NoRoot => return Ok(Done::one(Status::WouldRunUnprobed)),
             Gate::Run => {}
+        }
+        if p.action.is_typed() {
+            return self.typed(p, judge, false);
         }
         if let Action::Assert { .. } = &p.action {
             return self.attempt_loop(p, judge, 1, Duration::ZERO);
@@ -259,7 +267,67 @@ impl Runner {
                 None => Status::Unknown,
             },
         };
-        Ok(Done { status, out: Some(out), attempt, attempts })
+        Ok(Done { status, out: Some(out), attempt, attempts, detail: None })
+    }
+
+    /// A typed action inspects and changes state itself, so there is no exit
+    /// code to judge. It is still given one — `0` or `1` — so that
+    /// `changed_when`, `failed_when` and `register` mean the same thing on a
+    /// `file` step as they do on a `shell` step.
+    fn typed(&self, p: &Prepared, judge: &dyn Judge, act: bool) -> R<Done> {
+        let ctx = actions::Ctx {
+            sudo: p.sudo,
+            root_available: self.root_available,
+            escalate: &self.sudo,
+        };
+        let effect = match &p.action {
+            Action::File(spec) => {
+                if act {
+                    spec.apply(&ctx)
+                } else {
+                    spec.plan(&ctx)
+                }
+            }
+            _ => unreachable!("is_typed and this match are the same set"),
+        };
+
+        let (mut status, detail) = match effect {
+            Effect::Ok => (Status::Ok, None),
+            Effect::Changed(d) => {
+                (if act { Status::Changed } else { Status::WouldChange }, d)
+            }
+            Effect::Unprobed => (Status::WouldRunUnprobed, None),
+            Effect::Failed { msg, detail } => (
+                Status::Failed(Failure { msg, rc: Some(1), stderr: detail, interrupted: false }),
+                None,
+            ),
+        };
+
+        let out = Output {
+            rc: i32::from(status.failed()),
+            stdout: String::new(),
+            stderr: String::new(),
+            how: How::Exited,
+        };
+        // The overrides only speak where the action reached a verdict at all.
+        if !status.failed() && !matches!(status, Status::WouldRunUnprobed) {
+            if judge.failed(&out)? {
+                status = Status::Failed(Failure {
+                    msg: "failed_when".into(),
+                    rc: Some(0),
+                    stderr: String::new(),
+                    interrupted: false,
+                });
+            } else if let Some(changed) = judge.changed(&out)? {
+                status = match (changed, act) {
+                    (true, true) => Status::Changed,
+                    (true, false) => Status::WouldChange,
+                    (false, _) => Status::Ok,
+                };
+            }
+        }
+
+        Ok(Done { status, out: Some(out), attempt: 1, attempts: 1, detail })
     }
 
     fn gate(&self, p: &Prepared) -> R<Gate> {

@@ -254,3 +254,38 @@ fn kill_group(pid: u32) {
         .stderr(Stdio::null())
         .status();
 }
+
+/// Run a command and capture its bytes.
+///
+/// Deliberately not `run`: reading state needs the exact bytes, and `run`
+/// hands back lossy `String`s because that is what a `register` can hold. It
+/// also needs none of the machinery around it — no process group, no
+/// watchdog, no streaming — because it is asking a question, not doing work.
+pub fn capture(argv: &[String], stdin: Option<&str>) -> std::io::Result<Captured> {
+    let (program, args) = argv.split_first().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty command")
+    })?;
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    if let Some(text) = stdin
+        && let Some(mut pipe) = child.stdin.take()
+    {
+        let _ = pipe.write_all(text.as_bytes());
+    }
+    let out = child.wait_with_output()?;
+    Ok(Captured {
+        rc: out.status.code().unwrap_or(-1),
+        stdout: out.stdout,
+        stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+    })
+}
+
+pub struct Captured {
+    pub rc: i32,
+    pub stdout: Vec<u8>,
+    pub stderr: String,
+}
