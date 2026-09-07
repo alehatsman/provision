@@ -719,3 +719,159 @@ fn a_symlink_in_the_source_tree_is_an_error() {
     assert!(text.contains("is a symlink"), "{text}");
     assert!(text.contains("does not follow symlinks"), "{text}");
 }
+
+
+// ── service ───────────────────────────────────────────────────────────────
+
+/// A throwaway systemd user unit in the **runtime** unit directory.
+///
+/// Never `~/.config/systemd/user`: that holds real units, and a test killed
+/// between writing and cleaning up would leave a stray one there forever.
+/// Runtime units live in the session and vanish with it, so the worst case
+/// cleans itself up.
+struct Unit {
+    name: String,
+    path: std::path::PathBuf,
+}
+
+impl Unit {
+    fn new() -> Option<Unit> {
+        let runtime = std::env::var("XDG_RUNTIME_DIR").ok()?;
+        let dir = Path::new(&runtime).join("systemd/user");
+        std::fs::create_dir_all(&dir).ok()?;
+        // Tests share one process, so the pid alone is not unique enough:
+        // two of them would build the same unit name and each Drop would
+        // remove the other's file.
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let name = format!("provision-test-{}-{n}.service", std::process::id());
+        let path = dir.join(&name);
+        std::fs::write(
+            &path,
+            "[Unit]\nDescription=provision test unit\n\n\
+             [Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/bin/true\n\n\
+             [Install]\nWantedBy=default.target\n",
+        )
+        .ok()?;
+        if !systemctl(&["daemon-reload"]) {
+            let _ = std::fs::remove_file(&path);
+            return None;
+        }
+        Some(Unit { name, path })
+    }
+}
+
+impl Drop for Unit {
+    fn drop(&mut self) {
+        let _ = systemctl(&["stop", &self.name]);
+        let _ = std::fs::remove_file(&self.path);
+        let _ = systemctl(&["daemon-reload"]);
+    }
+}
+
+fn systemctl(args: &[&str]) -> bool {
+    let mut all = vec!["--user"];
+    all.extend_from_slice(args);
+    Command::new("systemctl")
+        .args(&all)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn service_plan(dir: &Path, name: &str, body: &str) -> std::path::PathBuf {
+    let plan = dir.join("service.yml");
+    std::fs::write(
+        &plan,
+        format!("- name: The test unit\n  service:\n    name: {name}\n    scope: user\n{body}"),
+    )
+    .unwrap();
+    plan
+}
+
+#[test]
+fn a_user_unit_starts_stops_and_restarts_idempotently() {
+    let Some(unit) = Unit::new() else {
+        eprintln!("skipped: no systemd user manager reachable");
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+
+    let run = |body: &str| {
+        let plan = service_plan(dir.path(), &unit.name, body);
+        let out = run_in(dir.path(), &["apply", plan.to_str().unwrap()]);
+        (out.status.code().unwrap_or(-1), String::from_utf8_lossy(&out.stdout).into_owned())
+    };
+
+    let (code, first) = run("    state: started\n");
+    assert_eq!(code, 0, "{first}");
+    assert!(line_for(&first, "test unit").contains("changed"), "{first}");
+    assert!(first.contains(&format!("start {}", unit.name)), "{first}");
+
+    let (code, second) = run("    state: started\n");
+    assert_eq!(code, 0, "{second}");
+    assert_eq!(verdict(&second, "test unit"), "ok", "already started:\n{second}");
+
+    // Spec §6.6: `restarted` has no before-state, so it is always changed.
+    let (code, restarted) = run("    state: restarted\n");
+    assert_eq!(code, 0, "{restarted}");
+    assert!(line_for(&restarted, "test unit").contains("changed"), "{restarted}");
+
+    let (code, stopped) = run("    state: stopped\n");
+    assert_eq!(code, 0, "{stopped}");
+    assert!(line_for(&stopped, "test unit").contains("changed"), "{stopped}");
+    let (code, again) = run("    state: stopped\n");
+    assert_eq!(code, 0, "{again}");
+    assert_eq!(verdict(&again, "test unit"), "ok", "already stopped:\n{again}");
+}
+
+#[test]
+fn enabled_is_probed_without_being_set() {
+    // `systemctl --user enable` writes its symlink into ~/.config/systemd/user,
+    // which no test of ours may touch, so the *setting* of `enabled` is
+    // manual (plan.md says so). The probe is read-only and tested here.
+    let Some(unit) = Unit::new() else {
+        eprintln!("skipped: no systemd user manager reachable");
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+
+    let plan = service_plan(dir.path(), &unit.name, "    enabled: true\n");
+    let out = run_in(dir.path(), &["plan", plan.to_str().unwrap()]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(2), "{text}");
+    assert!(text.contains(&format!("enable {}", unit.name)), "{text}");
+
+    let plan = service_plan(dir.path(), &unit.name, "    enabled: false\n");
+    let out = run_in(dir.path(), &["plan", plan.to_str().unwrap()]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "a disabled unit is already so:\n{text}");
+}
+
+#[test]
+fn a_user_scope_service_may_not_ask_for_sudo() {
+    // Spec §6.6: a user unit belongs to the invoking user's manager, and root
+    // has a different one. The two together mean opposite things.
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("bad.yml");
+    std::fs::write(
+        &plan,
+        "- name: Both at once\n  service:\n    name: x.service\n    state: started\n    scope: user\n  sudo: true\n",
+    )
+    .unwrap();
+    let out = run_in(dir.path(), &["apply", plan.to_str().unwrap()]);
+    let text = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert_eq!(out.status.code(), Some(3), "{text}");
+    assert!(text.contains("mean opposite things"), "{text}");
+}
+
+#[test]
+fn a_service_that_declares_nothing_is_an_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("empty.yml");
+    std::fs::write(&plan, "- name: Nothing\n  service:\n    name: x.service\n").unwrap();
+    let out = run_in(dir.path(), &["apply", plan.to_str().unwrap()]);
+    let text = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert_eq!(out.status.code(), Some(3), "{text}");
+    assert!(text.contains("needs `state` or `enabled`"), "{text}");
+}

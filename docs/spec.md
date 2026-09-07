@@ -293,6 +293,13 @@ keeps the mode it has unless `mode` says otherwise.
 non-sudo path matches it rather than inventing a third rule. A parent that
 already exists is not touched.
 
+A relative `path` resolves against the process's working directory, not the
+plan file's. §3's "resolved relative to the file that names them" governs the
+files provision *reads out of the plan tree* — `src`, `import`, `use`,
+`vars_file` — because those live beside the plan. A `path` names a location on
+the machine being converged, and resolving one into the dotfiles repo would
+be a surprise nobody asked for.
+
 `mode` is a **quoted** string. Unquoted, `0644` is a number, and which number
 depends on whether the reader believes it is YAML 1.1 (octal, 420) or YAML
 1.2 (decimal, 644). Neither is what was meant, so an unquoted mode is an

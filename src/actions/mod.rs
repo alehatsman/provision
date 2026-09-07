@@ -7,6 +7,7 @@
 //! inspection and get their own modules then.
 
 pub mod file;
+pub mod service;
 pub mod template;
 
 use crate::config::model::{self, Step};
@@ -24,6 +25,7 @@ pub enum Action {
     Assert { command: Option<String>, expr: Option<String>, msg: Option<String> },
     File(file::Spec),
     Template(template::Spec),
+    Service(service::Spec),
     /// Parsed and validated, but with no runner until phase 2. `plan` reports
     /// it unprobed; `apply` refuses rather than pretending it converged.
     NotYet(&'static str),
@@ -117,7 +119,7 @@ impl Action {
     /// An action that inspects and changes state itself, rather than reporting
     /// through an exit code. It never reaches the runner's argv path.
     pub fn is_typed(&self) -> bool {
-        matches!(self, Action::File(_) | Action::Template(_))
+        matches!(self, Action::File(_) | Action::Template(_) | Action::Service(_))
     }
 }
 
@@ -220,6 +222,11 @@ impl Action {
                 None => return Ok(None),
             },
 
+            "service" => match service::parse(step, engine, ctx, raw)? {
+                Some(spec) => Action::Service(spec),
+                None => return Ok(None),
+            },
+
             "template" => match template::parse(step, engine, ctx, raw)? {
                 Some(spec) => Action::Template(spec),
                 None => return Ok(None),
@@ -274,9 +281,20 @@ pub struct Ctx<'a> {
 impl Ctx<'_> {
     /// Run a command as root and capture its bytes exactly.
     pub fn as_root(&self, argv: &[&str]) -> std::io::Result<process::Captured> {
+        self.exec(argv, true)
+    }
+
+    /// Run a command, escalating only when asked. Probes usually should not:
+    /// `systemctl is-active` answers for anyone, and asking for root to read
+    /// a state that is world-readable is how `plan` stops working on a
+    /// machine with a cold credential.
+    pub fn exec(&self, argv: &[&str], as_root: bool) -> std::io::Result<process::Captured> {
         let argv: Vec<String> = argv.iter().map(|s| (*s).to_string()).collect();
-        let argv = self.escalate.wrap(argv, &[]);
-        let stdin = self.escalate.stdin();
+        let (argv, stdin) = if as_root {
+            (self.escalate.wrap(argv, &[]), self.escalate.stdin())
+        } else {
+            (argv, None)
+        };
         process::capture(&argv, stdin.as_deref())
     }
 

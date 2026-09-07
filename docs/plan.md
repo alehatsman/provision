@@ -199,9 +199,16 @@ Gate
   (`$XDG_RUNTIME_DIR/systemd/user`), never `~/.config/systemd/user` — that
   directory holds the owner's live units, and a test process killed between
   writing and cleaning up would leave a stray unit in his config forever.
-  Runtime state disappears at logout, so the worst case cleans itself. One
-  attempt: if systemd does not pick the unit up there, the test skips with a
-  message and `service` joins launchd and winget as manual.
+  Runtime state disappears at logout, so the worst case cleans itself. It
+  works: systemd reads `$XDG_RUNTIME_DIR/systemd/user`, and start, stop and
+  restart are all covered, applied twice.
+
+  Setting `enabled` is **not** covered and is manual. `systemctl --user
+  enable` writes its symlink into `~/.config/systemd/user` whatever the unit's
+  own directory, and no test of ours may write there. `--runtime` would move
+  the symlink but also change the meaning — enablement that does not survive a
+  reboot is not what a provisioning tool means by enabled — so the action does
+  not pass it. The `enabled` *probe* is read-only and is tested.
 - launchd is manual. There is no mac in this loop.
 
 Not part of the gate, and said plainly rather than counted green: `provision

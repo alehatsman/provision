@@ -637,7 +637,13 @@ impl Spec {
 
         // No sudo: the temp file goes next to the destination, because rename
         // is only atomic within one filesystem.
-        let dir = Path::new(&self.path).parent().unwrap_or(Path::new("."));
+        let parent = Path::new(&self.path).parent();
+        let dir = match parent {
+            Some(p) if !p.as_os_str().is_empty() => p,
+            // A bare relative path has `Some("")` for a parent, which is the
+            // current directory said the long way.
+            _ => Path::new("."),
+        };
         if self.make_parents && !dir.exists() {
             create_dirs(dir, 0o755).map_err(|x| e(&format!("create {}", dir.display()), x))?;
         }
@@ -779,7 +785,11 @@ fn diff(old: &str, new: &str, path: &str) -> String {
 fn create_dirs(path: &Path, leaf_mode: u32) -> std::io::Result<()> {
     let mut missing = Vec::new();
     let mut cur = Some(path);
-    while let Some(p) = cur.filter(|p| !p.exists()) {
+    // `Path::new("foo").parent()` is `Some("")`, not `None`, and `""` never
+    // exists — so an unguarded walk ends up asking for `create_dir("")`,
+    // which is ENOENT. A bare relative path is odd in a plan but not
+    // forbidden, and it should not crash.
+    while let Some(p) = cur.filter(|p| !p.as_os_str().is_empty() && !p.exists()) {
         missing.push(p);
         cur = p.parent();
     }

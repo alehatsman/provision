@@ -286,6 +286,9 @@ impl Runner {
             Action::File(spec) => {
                 (if act { spec.apply(&ctx) } else { spec.plan(&ctx) }, None)
             }
+            Action::Service(spec) => {
+                (if act { spec.apply(&ctx) } else { spec.plan(&ctx) }, None)
+            }
             Action::Template(spec) => {
                 if act {
                     spec.apply(&ctx)
