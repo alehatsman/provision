@@ -1,0 +1,22 @@
+# A plain plan file, entered with `import:` — it shares the caller's scope,
+# so `ssh_key_path` comes from the machine's vars and the key it registers
+# is visible to the steps after the import.
+
+- name: SSH config dir
+  file:
+    path: ~/.ssh
+    state: dir
+    mode: "0700"
+  tags: [ssh]
+
+- name: Generate SSH identity
+  shell: ssh-keygen -t ed25519 -C "{{ email }}" -f "{{ ssh_key_path }}" -N ""
+  creates: "{{ ssh_key_path }}"
+  tags: [ssh]
+
+- name: Identity is readable only by its owner
+  assert:
+    command: 'test "$(stat -c %a "{{ ssh_key_path }}")" = "600"'
+    msg: "{{ ssh_key_path }} has the wrong mode"
+  when: os == "linux"
+  tags: [ssh, verify]

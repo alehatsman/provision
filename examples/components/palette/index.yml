@@ -1,0 +1,17 @@
+# A component: a mapping with declared props, entered with `use:`. It runs in
+# a child scope — it sees the caller's variables read-only, and its own `vars`
+# do not leak back.
+
+props:
+  variant:
+    type: string
+    default: monokai_dark
+    description: which palette to render
+
+steps:
+  - name: Render {{ props.variant }}
+    template:
+      src: ./templates/{{ props.variant }}.j2
+      dest: ~/.config/palette.conf
+      mode: "0644"
+    tags: [palette]

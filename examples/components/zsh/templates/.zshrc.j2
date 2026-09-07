@@ -1,0 +1,13 @@
+# Managed by provision. Do not edit by hand.
+# Rendered for {{ username }}@{{ hostname }} ({{ os }}/{{ arch }}).
+
+{% if props.install_zplug %}
+source {{ zsh_plugin_dir | expanduser }}/init.zsh
+{% endif %}
+
+# `{% raw %}` keeps a shell expansion the template engine would otherwise eat.
+{% raw %}
+precmd() { print -Pn "\e]0;${PWD/#$HOME/~}\a" }
+{% endraw %}
+
+alias e={{ editor }}

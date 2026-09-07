@@ -1,0 +1,2 @@
+zsh_shell_path: /opt/homebrew/bin/zsh
+zsh_plugin_dir: ~/.zplug

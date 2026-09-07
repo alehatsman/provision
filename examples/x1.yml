@@ -1,0 +1,82 @@
+# Example machine plan — an Arch laptop. Illustrates every construct in the
+# spec once. Not a real machine config.
+
+- name: Refuse to run on the wrong machine
+  assert:
+    expr: hostname not in ["mainpc", "minipc", "mac"]
+    msg: "hostname {{ hostname }} belongs to another machine"
+  tags: [always]
+
+- vars_file:
+    - ./shared/variables.yml
+    - ./machines/x1/vars.yml
+
+- vars:
+    palette_variant: monokai_dark
+
+- name: Upgrade system
+  pkg:
+    manager: pacman
+    state: latest
+    update_cache: true
+  sudo: true
+  timeout: 15m
+  retry: { attempts: 3, delay: 10s }
+  tags: [system]
+
+- name: Enable multilib
+  shell: sed -i 's/^#\[multilib\]/[multilib]/; /^\[multilib\]/{n;s/^#Include/Include/}' /etc/pacman.conf
+  unless: grep -qx '\[multilib\]' /etc/pacman.conf
+  sudo: true
+  tags: [system]
+
+- name: Base packages
+  pkg:
+    names: [base-devel, git, zsh, tmux, neovim, tailscale]
+  sudo: true
+  tags: [system, packages]
+
+- name: Build yay
+  shell: |
+    set -euo pipefail
+    git clone https://aur.archlinux.org/yay.git ~/.cache/yay-build
+    cd ~/.cache/yay-build && makepkg -si --noconfirm
+  creates: /usr/bin/yay
+  timeout: 20m
+  tags: [system, packages]
+
+- name: Tailscale daemon
+  service: { name: tailscaled, state: started, enabled: true }
+  sudo: true
+  tags: [system, tailscale]
+
+- name: Set hostname
+  cmd: [hostnamectl, set-hostname, "{{ computer_name }}"]
+  unless: test "$(hostnamectl hostname)" = "{{ computer_name }}"
+  sudo: true
+  tags: [system]
+
+- name: SSH identity
+  import: ./components/ssh/index.yml
+  tags: [core, ssh]
+
+- name: Palette
+  use: ./components/palette/index.yml
+  props: { variant: "{{ palette_variant }}" }
+  tags: [core, palette]
+
+- name: zsh
+  use: ./components/zsh/index.yml
+  tags: [core, shell]
+
+- name: Record that git is configured
+  shell: git config --global user.email "{{ email }}"
+  unless: test "$(git config --global user.email)" = "{{ email }}"
+  register: gitcfg
+  tags: [core, git]
+
+- name: Reload shell hint
+  shell: echo "restart your shell"
+  when: gitcfg.changed
+  changed_when: false
+  tags: [core, git]

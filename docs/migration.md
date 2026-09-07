@@ -1,0 +1,351 @@
+# Migrating `~/dotfiles` from mooncake to provision
+
+Status: v1.0 · 2026-09-07 · measured against `~/dotfiles` at commit `9548bbd`
+(58 YAML files, 371 steps, 27 `.j2` templates, 18 components, 5 machines).
+
+Counts below are the audited ones from [audit.md](audit.md), which closed the
+spec §11 gate. The earlier hand counts in draft v0.1 were taken before the
+dex drop and are corrected here.
+
+## 1. Principle
+
+The dotfiles stay YAML, stay Jinja2, keep their layout
+(`machines/`, `platforms/`, `components/`, `shared/`). Most steps change
+only their action key. The migration is a mechanical rewrite plus a short
+list of hand edits, done once per file, verified by `provision plan`
+against a machine mooncake has already converged.
+
+## 2. Key mapping
+
+### Structural
+
+| mooncake | provision | Notes |
+|---|---|---|
+| `vars:` | `vars:` | unchanged |
+| `vars.load: path` | `vars_file: path` | rename |
+| `import: path` | `import: path` | unchanged; `when`/`tags` on it still apply to all imported steps |
+| `use: path` + `props:` | `use: path` + `props:` | unchanged; component files keep `props:` + `steps:` |
+| `tasks.yml` | delete | task runner is a non-goal; see §6 |
+
+### Modifiers
+
+| mooncake | provision | Notes |
+|---|---|---|
+| `as_user: root` | `sudo: true` | 77 sites, mechanical |
+| `unless_command: X` | `unless: X` | 39 sites, mechanical |
+| `creates:` | `creates:` | unchanged |
+| `timeout:` | `timeout:` | unchanged, same duration syntax |
+| `retry: {attempts, delay}` | `retry: {attempts, delay}` | unchanged |
+| `as: name` | `register: name` | 3 sites |
+| `changed_when` / `failed_when` | same | `result` stays in scope |
+| `on_change:` | — | **zero sites**; dex took the only one. Nothing to migrate. |
+| `for_each:` (2) | a literal `for` loop inside one `shell` | loops are a non-goal; see §3.6 |
+| `for_each_file:` (1) | `template` directory mode (spec §6.4) | see §3.7 |
+| `env:` | `env:` | unchanged |
+| `tags:` | `tags:` | unchanged; **semantics change**, see §5 |
+| `-K` / `--ask-become-pass` | `--ask-sudo-pass` | |
+
+### Actions
+
+| mooncake | provision | Notes |
+|---|---|---|
+| `shell: "..."` | `shell: "..."` | unchanged |
+| `shell: {cmd, interpreter: powershell, run_as_admin: true}` | `shell: {script, interpreter: powershell}` | `cmd` → `script`; drop `run_as_admin`; run from an elevated prompt (already the documented practice) |
+| `shell: {cmd, creates}` (2) | `shell: …` with `creates` as a step modifier | lift `creates` one level out of the action body |
+| `cmd: {argv: [...]}` | `cmd: [...]` | flatten |
+| `file.write: {path, content, state: directory, mode, owner, group}` | `file: {path, content, state: dir, mode, owner, group}` | `directory` → `dir`; 52 sites. `group` is now a spec §6.3 field (2 sites) |
+| `file.copy: {src, dest}` | `file: {path: dest, src, state: file}` | 3 sites |
+| `file.download` (1) | `shell: curl -fsSL URL -o PATH` + `creates: PATH` | |
+| `file.template: {src, dest}` | `template: {src, dest}` | 32 sites, rename |
+| `pkg: {name/names, state, manager, cask, update_cache}` | `pkg:` same | unchanged; `manager: yay` supported |
+| `pkg.upgrade: {}` (1) | `shell: apt-get upgrade -y` with `changed_when` on output | or drop; a full upgrade on every apply is a choice, not a state |
+| `pkg.repo` (4: brew taps) | `shell: brew tap X` + `unless: brew tap \| grep -qx X` | recipe below |
+| `os.service` (10) | `service: {name, state, enabled, scope}` | `daemon_reload: true` (1 site) becomes a preceding `cmd: [systemctl, daemon-reload]` |
+| `os.systemd` (5) — `unit`/`service`/`install` blocks | `template` + `cmd: [systemctl, daemon-reload]` + `service` | **writes a unit file**; `service` does not. Recipe in §3.8. `reload_on_change` becomes `register` + `when` |
+| `os.user` (2) | `shell: chsh` + `unless` | recipe in §3.5 |
+| `stat` (2) + `pip` (2) | delete | only in `components/nvim/python_venv.yml`, which is deleted; see §4 |
+| `log` (2) | `shell: echo` + `changed_when: false`, or move to a README | recipe in §3.9 |
+| `text.replace` (3) | `shell` with sed + `unless: grep -q` | recipe below |
+| `text.line` (1) | `shell: grep -qxF LINE FILE \|\| echo LINE >> FILE` + `unless` | |
+| `git.clone` (2) | `shell: git clone URL DEST` + `creates: DEST` | |
+| `assert: {command: {cmd}}` | `assert: {command: "..."}` | flatten, 24 sites |
+| `wait.http` (1) | `assert: {command: curl -fsS …}` + `retry` | the one site is in `moongit`, which is **kept**, not `fleet-peer`. Recipe in §3.10 |
+| `container.image` | — | **zero sites**; dex took both. Nothing to migrate. |
+| `windows.scheduled_task` (4), `windows.firewall_rule` (3), `windows.hyperv_firewall_rule` (3) | `shell` PowerShell with an `if (-not (Get-…))` guard and `changed_when` | the bootstrap already does this pattern for every other step |
+
+### Facts
+
+| mooncake | provision |
+|---|---|
+| `os`, `arch`, `hostname`, `username` | same names |
+| `apt_available`, `pacman_available`, `brew_available` | same names; add `yay_available`, `winget_available` |
+| `is_wsl` (set as a var per machine) | now a fact, computed; delete the `vars:` lines that set it |
+
+## 3. Recipes for dropped actions
+
+Each numbered recipe is the agreed replacement for one mooncake action.
+Section numbers match the audit ([audit.md](audit.md) §3) where they overlap.
+
+### 3.1 Brew tap
+
+```yaml
+- name: Tap hashicorp
+  shell: brew tap hashicorp/tap
+  unless: brew tap | grep -qx hashicorp/tap
+```
+
+### 3.2 Uncomment a block in pacman.conf
+
+```yaml
+- name: Enable multilib
+  shell: sed -i 's/^#\[multilib\]/[multilib]/; /^\[multilib\]/{n;s/^#Include/Include/}' /etc/pacman.conf
+  unless: grep -qx '\[multilib\]' /etc/pacman.conf
+  sudo: true
+```
+
+### 3.3 Apt PPA
+
+```yaml
+- name: Add neovim PPA
+  shell: add-apt-repository -y ppa:neovim-ppa/unstable && apt-get update
+  unless: ls /etc/apt/sources.list.d | grep -q neovim-ppa
+  sudo: true
+```
+
+### 3.4 Windows firewall rule — honest `changed`
+
+```yaml
+- name: Open agentd port
+  shell:
+    interpreter: powershell
+    script: |
+      if (Get-NetFirewallRule -DisplayName "agentd" -ErrorAction SilentlyContinue) { exit 3 }
+      New-NetFirewallRule -DisplayName "agentd" -Direction Inbound -LocalPort 7878 -Protocol TCP -Action Allow
+  failed_when: result.rc not in [0, 3]
+  changed_when: result.rc == 0
+```
+
+The same shape covers `windows.scheduled_task` (`Get-ScheduledTask`) and
+`windows.hyperv_firewall_rule` (`Get-NetFirewallHyperVRule`).
+
+### 3.5 `os.user` — set the login shell
+
+Replaces `platforms/arch/index.yml:130` and `components/zsh/index.yml:105`.
+The `unless` differs by platform because macOS keeps the shell in Directory
+Services, not `/etc/passwd`:
+
+```yaml
+- name: Default shell (linux)
+  shell: chsh -s "{{ zsh_shell_path }}" "{{ username }}"
+  unless: 'test "$(getent passwd {{ username }} | cut -d: -f7)" = "{{ zsh_shell_path }}"'
+  sudo: true
+  when: os == "linux"
+
+- name: Default shell (macos)
+  shell: chsh -s "{{ zsh_shell_path }}" "{{ username }}"
+  unless: "test \"$(dscl . -read /Users/{{ username }} UserShell | awk '{print $2}')\" = \"{{ zsh_shell_path }}\""
+  sudo: true
+  when: os == "darwin"
+```
+
+`components/zsh/index.yml:114` already asserts the macOS form; that assert
+stays and now verifies a step it sits next to.
+
+### 3.6 `for_each` over brew taps
+
+`platforms/macos/packages.yml:141,151` iterate the same 4-element `taps`
+var — once for `pkg.repo`, once for `brew trust`. With `pkg.repo` gone
+(§3.1), both collapse into one shell step over a literal list. No loop
+construct, and the `taps` var (whose `name` field existed only to feed
+`pkg.repo`) is deleted:
+
+```yaml
+- name: Tap and trust brew taps
+  shell: |
+    set -euo pipefail
+    for t in hashicorp/tap borkdude/brew wata727/tflint wagoodman/dive; do
+      brew tap | grep -qx "$t" || brew tap "$t"
+      brew trust "$t"
+    done
+  changed_when: false
+  timeout: 5m
+```
+
+### 3.7 `for_each_file` — the nvim template tree
+
+`components/nvim/index.yml:65` renders 14 files across 3 levels. This is the
+one construct that earned a spec change: `template` now takes a directory as
+`src` (spec §6.4). One step replaces the loop:
+
+```yaml
+- name: Deploy nvim config
+  template:
+    src: ./templates/
+    dest: "{{ config_path }}/"
+    mode: "0644"
+  tags: [nvim, config]
+```
+
+The `when: not item.IsDir` guard goes away — directory mode only renders
+files. Note this is **not** a sync: a template deleted from the source tree
+leaves its rendered file on disk.
+
+### 3.8 `os.systemd` — unit file, reload, service
+
+Replaces the 5 sites in `machines/x1/thermal.yml` and
+`components/moongit/index.yml`. The unit body moves into a `.j2` file next
+to the component, so `plan` shows a real diff of it — which `os.systemd`
+never did:
+
+```yaml
+- name: intel-rapl-cap unit
+  template:
+    src: ./units/intel-rapl-cap.service.j2
+    dest: /etc/systemd/system/intel-rapl-cap.service
+    mode: "0644"
+  sudo: true
+  register: rapl_unit
+
+- name: Reload systemd
+  cmd: [systemctl, daemon-reload]
+  when: rapl_unit.changed
+  sudo: true
+
+- name: intel-rapl-cap
+  service: { name: intel-rapl-cap.service, state: started, enabled: true }
+  sudo: true
+```
+
+- `scope: user` units render to `~/.config/systemd/user/<name>` with no
+  `sudo`, and the reload is `[systemctl, --user, daemon-reload]`.
+- `started: true` is `state: started`. `enabled: true` is unchanged.
+- `reload_on_change: true` (moongit) becomes a fourth step:
+  `service: {state: restarted}` with `when: <unit>.changed`. This is the
+  same `register` + `when` substitution D5 prescribes for `on_change`.
+- `os.service`'s `daemon_reload: true` (`platforms/windows/index.yml:89`)
+  uses the middle step alone, unconditionally.
+
+### 3.9 `log`
+
+```yaml
+- name: "Note: mint an API token to use /api/*"
+  shell: echo "moongit up on {{ props.moongit_addr }}. If /api/* 401s, run: {{ moongit_bin_path }} token create <name>"
+  changed_when: false
+```
+
+`shell` + `changed_when: false` is a `log` action and costs nothing. The
+other site (`platforms/windows/bootstrap.yml:352`, a next-steps banner) is
+operator documentation, not state — it moves to
+`platforms/windows/README.md` and is deleted from the run.
+
+### 3.10 `wait.http` — readiness gate
+
+`components/moongit/index.yml:237` polls `/healthz` before the steps that
+mint a token against the daemon. `retry` composes with `assert` (spec §6.7):
+
+```yaml
+- name: Wait for moongit to become ready
+  assert:
+    command: curl -fsS -o /dev/null http://127.0.0.1{{ props.moongit_addr }}/healthz
+    msg: "moongit did not become ready"
+  retry: { attempts: 30, delay: 2s }
+```
+
+30 attempts × 2s is the 60s timeout the original declared.
+
+## 4. Hand edits, by file
+
+Complete. The spec §11 gate ([audit.md](audit.md)) walked all 371 steps and
+extended this list; every construct in `~/dotfiles` now has a mapping.
+
+| File | Edit |
+|---|---|
+| `mooncake.yml` (root dispatcher) | rename to `provision.yml`; keeps `import` + `when: hostname == …` |
+| `machines/*/index.yml` | delete the `vars: is_wsl:` block (fact now); `as_user` → `sudo`; assert flatten |
+| `shared/bootstrap.yml` | delete the systemd-linger step's agentd justification comment; delete the sudoers step's mooncake-specific comment; keep the steps |
+| `components/fleet-peer/` | delete the component and its `use` sites |
+| `components/mooncake/` | delete; replace with a `components/provision/` that installs the binary from a release URL with `creates` |
+| `components/moongit/` | keep; `os.systemd` → §3.8 recipe with `scope: user` + a `reload_on_change` restart step; `wait.http` → §3.10; `log` → §3.9 |
+| `components/nvim/python_venv.yml` | **delete**, and its `import`. Sole user of `stat` and `pip`; its `when:` on line 14 tests `python3_venv_path` (a path, always truthy) instead of `python3_venv_present`, so it has been dead since it was written |
+| `components/nvim/index.yml` | `for_each_file` → §3.7 one-step directory template; delete the `python_venv.yml` import |
+| `machines/x1/thermal.yml` | 4 × `os.systemd` → §3.8; add `units/*.service.j2` next to it |
+| `platforms/macos/packages.yml` | `pkg.repo` + `for_each` taps → §3.6 single shell step; delete the `taps` var; `shell` xcode/rosetta/brew steps unchanged |
+| `platforms/arch/index.yml` | `text.replace` multilib → §3.2; `text.line` → recipe; `os.user` → §3.5; yay build step unchanged |
+| `platforms/windows/index.yml` | `os.service` `daemon_reload: true` → a preceding `cmd: [systemctl, daemon-reload]` (§3.8) |
+| `components/zsh/index.yml` | `os.user` → §3.5; `git.clone` → `shell` + `creates` |
+| `components/tmux/index.yml`, `components/claude/index.yml` | `file.copy` → `file: {src, state: file}`; `git.clone` → `shell` + `creates` |
+| `components/nvim/win32yank.yml` | `file.download` → `shell: curl` + `creates` |
+| `components/nvim/zk_config.toml.j2`, `zk_template_default.md.j2`, `components/zsh/templates/.zshrc.j2` | `{% verbatim %}`/`{% endverbatim %}` → `{% raw %}`/`{% endraw %}` (3 files, 3 blocks) — Jinja2's tag; see §5 |
+| `platforms/windows/packages.yml` | `pkg.upgrade` → decide (drop recommended); PPA → recipe |
+| `platforms/windows/bootstrap.yml` | drop `run_as_admin`; `shell.cmd` → `shell.script`; typed windows actions → §3.4 PowerShell recipes; the closing `log` banner moves to `platforms/windows/README.md` |
+| `shared/bootstrap.yml` | sudoers drop-in keeps `owner` **and** `group` (now a spec §6.3 field) |
+| `machines/*/vars.yml` | delete `wsl_agentd_port`, `windows_agentd_port`, `fleet_*` |
+| `tasks.yml`, `mgitci.yml` | see §6 |
+
+Expected `plan` diffs on an already-converged machine after migration:
+
+- Windows bootstrap steps that were `changed: true` forever now report
+  `ok` or `skipped`. Good.
+- Any step that was gated only by mooncake's shell `changed` heuristic now
+  reports `unknown` until it gets a gate. Each is a hand edit. Target zero.
+
+## 5. Behavior changes to know about
+
+- **Tags.** `--tags x` now runs *only* `x`-tagged steps (plus `always`).
+  Under mooncake it ran untagged steps too. Audit the `tags:` on
+  `shared/bootstrap.yml` imports: anything that must always run gets
+  `always`.
+- **Strict templates.** An undefined variable fails `validate`. Expect a
+  handful in rarely-run branches (`when: false` blocks). Fix or delete.
+- **`sudo -n` preflight.** On mac and x1, without NOPASSWD, `apply` fails
+  immediately unless `--ask-sudo-pass` is given. This replaces `-K`.
+- **No `changed` for gate-less shell.** It shows as `unknown`, in magenta.
+  This is a feature.
+- **Template directory mode is not a sync.** `for_each_file` re-rendered the
+  tree each run and so did nothing on deletion either, but the new one-step
+  form makes it look like a directory is being managed. It is not: removing
+  a template leaves its rendered file behind. Delete it explicitly.
+- **`{% verbatim %}` is not Jinja2.** It is Twig's tag; Jinja2 and minijinja
+  spell it `{% raw %}`. mooncake's engine accepted `verbatim`, so three
+  templates use it. One-word rewrite in each, listed in §4. Nothing else in
+  the 27 templates changes.
+- **Booleans render `True`, not `true`.** Jinja2 is Python, and provision
+  renders as Jinja2 does. No current template interpolates a boolean, so this
+  is inert today; a future one needs `{{ flag | to_json }}` to get `true`.
+- **A field that is one `{{ … }}` keeps its type.** `names: "{{ apps }}"` is
+  the list, as it was under mooncake. Spec §3.4 now states the rule.
+- **One output line for 14 files.** The nvim config deploy was 14 lines of
+  output; it is now one, reading `changed  3 of 14`. Use `plan` for the
+  per-file diffs.
+
+## 6. Things that move out of dotfiles entirely
+
+- `tasks.yml` (per-machine apply tasks, backup, ci): a five-line
+  `justfile`:
+
+  ```
+  x1:        provision apply x1.yml
+  main_pc:   provision apply main_pc.yml
+  plan m:    provision plan {{m}}.yml
+  ci:        for m in main_pc mini_pc x1 mac work_mac; do provision plan --plan-no-probe $m.yml; done
+  ```
+
+- `mgitci.yml`: replace the `mooncake validate` / `mooncake plan --no-inspect`
+  steps with `provision validate` / `provision plan --plan-no-probe`. The CI
+  image carries the `provision` binary instead of mooncake.
+
+- The nine repos with `tasks.yml` (`dex`, `moongit`, `moongit-*`, `cry-aye`)
+  and the `go-quality` presets are a separate migration to `just`, outside
+  this project's scope. They keep working on mooncake until then.
+
+## 7. Order
+
+1. Phase 0 gate: mechanical rewrite of keys across all 64 files in a
+   `provision` branch of dotfiles. `provision validate` green on all five
+   machine plans.
+2. x1 first (Arch, most typed actions, no Windows). `plan`, fix `unknown`s,
+   `apply`, `plan` again shows nothing.
+3. mac and work_mac.
+4. main_pc and mini_pc WSL side.
+5. Windows bootstrap on mini_pc (the one that matters less if it breaks).
+6. Delete mooncake from every machine. Merge the branch.

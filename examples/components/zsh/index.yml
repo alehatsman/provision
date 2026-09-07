@@ -1,0 +1,50 @@
+# Example component — a mapping with `props` and `steps`.
+# Called with `use: ./components/zsh/index.yml`.
+
+props:
+  config_dir:
+    type: string
+    default: "~/.config/zsh"
+    description: where zsh config lives
+  install_zplug:
+    type: bool
+    default: true
+
+steps:
+  - name: Install zsh
+    pkg: { names: [zsh] }
+    sudo: true
+    when: os == "linux"
+    tags: [zsh, install]
+
+  - name: Install zsh (brew)
+    pkg: { names: [zsh], manager: brew }
+    when: os == "darwin"
+    tags: [zsh, install]
+
+  - vars_file: ./vars/{{ distro if os == "linux" else "macos_" ~ arch }}.yml
+
+  - name: Config dir
+    file: { path: "{{ props.config_dir }}", state: dir }
+    tags: [zsh, config]
+
+  - name: .zshenv
+    template: { src: ./templates/.zshenv.j2, dest: ~/.zshenv }
+    tags: [zsh, config]
+
+  - name: .zshrc
+    template: { src: ./templates/.zshrc.j2, dest: ~/.zshrc }
+    tags: [zsh, config]
+
+  - name: zplug
+    shell: git clone https://github.com/zplug/zplug.git ~/.zplug
+    creates: ~/.zplug
+    when: props.install_zplug
+    tags: [zsh, plugins]
+
+  - name: Default shell
+    shell: chsh -s "$(command -v zsh)" "{{ username }}"
+    unless: 'test "$(getent passwd {{ username }} | cut -d: -f7)" = "$(command -v zsh)"'
+    sudo: true
+    when: os == "linux"
+    tags: [zsh, config]
