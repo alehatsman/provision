@@ -1,0 +1,7 @@
+---
+# Container only: this installs. Mounted into a throwaway archlinux:latest.
+- name: A tiny package
+  pkg:
+    name: tree
+    manager: pacman
+    update_cache: true

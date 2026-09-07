@@ -1,0 +1,8 @@
+---
+# Container only. `nano` has been installed and then removed without --purge,
+# so dpkg still lists it as `deinstall ok config-files`. Plain `dpkg-query -W`
+# would read that as present; the status filter must not (spec §6.5).
+- name: A package that is only config files
+  pkg:
+    name: nano
+    manager: apt

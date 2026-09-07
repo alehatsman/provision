@@ -319,7 +319,12 @@ impl Ctx<'_> {
     pub fn exec(&self, argv: &[&str], as_root: bool) -> std::io::Result<process::Raw> {
         let argv: Vec<String> = argv.iter().map(|s| (*s).to_string()).collect();
         let (argv, stdin) = if as_root {
-            (self.escalate.wrap(argv, &[]), self.escalate.stdin())
+            // The step's own `env` keys, exactly as the shell path passes
+            // them (spec §7). Without this a `file` step with `sudo` and
+            // `env` loses its keys where a `shell` step with the same two
+            // modifiers keeps them.
+            let keys: Vec<String> = self.env.keys().cloned().collect();
+            (self.escalate.wrap(argv, &keys), self.escalate.stdin())
         } else {
             (argv, None)
         };
@@ -342,7 +347,9 @@ impl Ctx<'_> {
     pub fn perform(&self, argv: &[&str], as_root: bool) -> Option<Effect> {
         let got = match self.exec(argv, as_root) {
             Ok(g) => g,
-            Err(e) => return Some(Effect::fail(format!("cannot run {}: {e}", argv[0]))),
+            Err(e) => {
+                return Some(Effect::fail(format!("cannot run {}: {e}", command_name(argv))));
+            }
         };
         if let Some(bad) = self.stopped(&got) {
             return Some(bad);
@@ -356,7 +363,7 @@ impl Ctx<'_> {
                 .unwrap_or("failed")
                 .to_string();
             return Some(Effect::Failed {
-                msg: format!("{} failed: {why}", argv[0]),
+                msg: format!("{} failed: {why}", command_name(argv)),
                 detail: stderr.trim().to_string(),
                 interrupted: false,
             });
@@ -396,4 +403,17 @@ impl Effect {
     pub fn fail(msg: impl Into<String>) -> Effect {
         Effect::Failed { msg: msg.into(), detail: String::new(), interrupted: false }
     }
+}
+
+/// The command a failure should be named after. `env VAR=… prog` is a way of
+/// setting the environment, not a program anyone means to read about.
+fn command_name<'a>(argv: &[&'a str]) -> &'a str {
+    let mut i = 0;
+    if argv.first() == Some(&"env") {
+        i = 1;
+        while i < argv.len() && argv[i].contains('=') {
+            i += 1;
+        }
+    }
+    argv.get(i).copied().unwrap_or("")
 }

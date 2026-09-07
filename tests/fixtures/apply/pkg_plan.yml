@@ -1,0 +1,14 @@
+---
+# PLAN ONLY. Under `apply` the first step would install a package and the
+# second would upgrade coreutils. Tests run this through `plan`, which reads
+# the dpkg database and runs no manager command (spec §6.5).
+- name: A package that is not installed
+  pkg:
+    name: provision-no-such-package
+    manager: apt
+
+- name: An installed package asked for latest
+  pkg:
+    name: coreutils
+    state: latest
+    manager: apt

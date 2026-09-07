@@ -21,6 +21,7 @@ pub enum State {
 }
 
 /// Everything that differs between managers, and nothing that does not.
+#[derive(Debug)]
 pub struct Manager {
     pub name: &'static str,
     /// The binary that must be on PATH.
@@ -36,6 +37,9 @@ pub struct Manager {
     /// `update_cache: true`. None where the manager has no such thing.
     refresh: Option<&'static [&'static str]>,
     cask_flag: Option<&'static str>,
+    /// winget installs and uninstalls exactly one id per invocation, so a
+    /// `names:` list is a loop rather than one call.
+    one_per_call: bool,
     /// Refuses to run as root, so `sudo: true` is a validation error.
     rejects_root: bool,
     /// Never chosen when `manager` is absent (spec §6.5: the AUR is a
@@ -57,6 +61,7 @@ pub const MANAGERS: &[Manager] = &[
         upgrade: &["pacman", "-S", "--noconfirm"],
         refresh: Some(&["pacman", "-Sy"]),
         cask_flag: None,
+        one_per_call: false,
         rejects_root: false,
         never_default: false,
     },
@@ -72,6 +77,7 @@ pub const MANAGERS: &[Manager] = &[
         upgrade: &["yay", "-S", "--noconfirm"],
         refresh: Some(&["yay", "-Sy"]),
         cask_flag: None,
+        one_per_call: false,
         rejects_root: true,
         never_default: true,
     },
@@ -84,11 +90,18 @@ pub const MANAGERS: &[Manager] = &[
         query: &["dpkg-query", "-W", "-f", "${Package}\\t${Version}\\t${Status}\\n"],
         query_cask: None,
         parse: parse_dpkg,
-        install: &["apt-get", "install", "-y"],
-        remove: &["apt-get", "remove", "-y"],
-        upgrade: &["apt-get", "install", "-y", "--only-upgrade"],
-        refresh: Some(&["apt-get", "update"]),
+        // `env VAR=…` in front rather than a row field: it survives the
+        // sudo wrapper with no new machinery. Without it a fresh machine
+        // hits a debconf prompt, which waits on a stdin nobody is holding
+        // until the watchdog kills the step ten minutes later.
+        install: &["env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y"],
+        remove: &["env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "remove", "-y"],
+        upgrade: &[
+            "env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y", "--only-upgrade",
+        ],
+        refresh: Some(&["env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "update"]),
         cask_flag: None,
+        one_per_call: false,
         rejects_root: false,
         never_default: false,
     },
@@ -103,6 +116,7 @@ pub const MANAGERS: &[Manager] = &[
         upgrade: &["brew", "upgrade"],
         refresh: Some(&["brew", "update"]),
         cask_flag: Some("--cask"),
+        one_per_call: false,
         rejects_root: true,
         never_default: false,
     },
@@ -120,10 +134,22 @@ pub const MANAGERS: &[Manager] = &[
         upgrade: &["winget", "upgrade", "-e", "--id"],
         refresh: None,
         cask_flag: None,
+        one_per_call: true,
         rejects_root: false,
         never_default: false,
     },
 ];
+
+/// Rows are unique by name and live in one static table, so the name is the
+/// identity. Deriving this would compare the parser function pointers, which
+/// the compiler rightly says means nothing.
+impl PartialEq for Manager {
+    fn eq(&self, other: &Manager) -> bool {
+        self.name == other.name
+    }
+}
+
+impl Eq for Manager {}
 
 fn find(name: &str) -> Option<&'static Manager> {
     MANAGERS.iter().find(|m| m.name == name)
@@ -158,26 +184,38 @@ fn parse_dpkg(out: &str) -> BTreeMap<String, String> {
         .collect()
 }
 
-/// winget's table is columns of text with a header. Matched by id, which is
-/// the second column. Untested: there is no Windows box in this loop, and
-/// plan.md says so.
+/// winget prints a fixed-width table. Splitting on whitespace would take the
+/// second *word* of the name — "Google Chrome" and "Visual Studio Code" are
+/// the common case — so the columns are cut at the offsets the header gives.
+/// Untested: there is no Windows box in this loop, and plan.md says so.
 fn parse_winget(out: &str) -> BTreeMap<String, String> {
-    out.lines()
-        .skip_while(|l| !l.starts_with('-'))
-        .skip(1)
+    let mut lines = out.lines();
+    let Some(header) = lines.find(|l| l.contains("Id") && l.contains("Version")) else {
+        return BTreeMap::new();
+    };
+    let (Some(id_at), Some(version_at)) = (header.find("Id"), header.find("Version")) else {
+        return BTreeMap::new();
+    };
+    let cut = |l: &str, from: usize, to: Option<usize>| -> String {
+        let chars: Vec<char> = l.chars().collect();
+        if from >= chars.len() {
+            return String::new();
+        }
+        let end = to.unwrap_or(chars.len()).min(chars.len());
+        chars[from..end.max(from)].iter().collect::<String>().trim().to_string()
+    };
+    lines
+        .skip_while(|l| l.starts_with('-'))
         .filter_map(|l| {
-            let cols: Vec<&str> = l.split_whitespace().collect();
-            match cols.len() {
-                0 | 1 => None,
-                2 => Some((cols[1].to_string(), String::new())),
-                _ => Some((cols[1].to_string(), cols[2].to_string())),
-            }
+            let id = cut(l, id_at, Some(version_at));
+            (!id.is_empty()).then(|| (id, cut(l, version_at, None)))
         })
         .collect()
 }
 
 // ── parsing ───────────────────────────────────────────────────────────────
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Spec {
     pub names: Vec<String>,
     pub state: State,
@@ -185,39 +223,6 @@ pub struct Spec {
     pub cask: bool,
     pub update_cache: bool,
 }
-
-impl std::fmt::Debug for Spec {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Spec")
-            .field("names", &self.names)
-            .field("state", &self.state)
-            .field("manager", &self.manager.name)
-            .finish()
-    }
-}
-
-impl Clone for Spec {
-    fn clone(&self) -> Spec {
-        Spec {
-            names: self.names.clone(),
-            state: self.state,
-            manager: self.manager,
-            cask: self.cask,
-            update_cache: self.update_cache,
-        }
-    }
-}
-
-impl PartialEq for Spec {
-    fn eq(&self, other: &Spec) -> bool {
-        self.names == other.names
-            && self.state == other.state
-            && self.manager.name == other.manager.name
-            && self.cask == other.cask
-    }
-}
-
-impl Eq for Spec {}
 
 pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result<Option<Spec>> {
     let body = step.body;
@@ -326,11 +331,11 @@ impl Spec {
         if which::which(m.bin).is_err() {
             return Effect::fail(format!("`{}` is not on PATH", m.bin));
         }
-        // Spec §6.5: a step that needs root and cannot have it is unprobed
-        // under plan, like a gate.
-        if ctx.sudo && !ctx.root_available {
-            return Effect::Unprobed;
-        }
+        // No unprobed guard here, unlike `file`: the query reads a local
+        // database and never escalates, plan never mutates, and
+        // `update_cache` never runs under plan. There is nothing for root to
+        // protect, so plan answers even with a cold credential — the same as
+        // `service`, which probes this situation identically.
 
         let before = match self.installed(ctx) {
             Ok(map) => map,
@@ -370,7 +375,18 @@ impl Spec {
                         Effect::Changed(Some(format!("install {}", missing.join(" "))))
                     };
                 }
-                if let Err(bad) = self.run_on(ctx, m.upgrade, &self.names) {
+                // Install what is absent before upgrading what is not.
+                // `apt-get install --only-upgrade` silently skips a package
+                // that is not installed, and brew and winget error on one, so
+                // upgrading the whole list would return ok with the missing
+                // package still missing — plan saying `install X` and apply
+                // quietly not doing it.
+                if !missing.is_empty() && let Err(bad) = self.run_on(ctx, m.install, &missing) {
+                    return bad;
+                }
+                let held: Vec<String> =
+                    self.names.iter().filter(|n| !missing.contains(n)).cloned().collect();
+                if !held.is_empty() && let Err(bad) = self.run_on(ctx, m.upgrade, &held) {
                     return bad;
                 }
                 let after = match self.installed(ctx) {
@@ -380,7 +396,7 @@ impl Spec {
                 let moved: Vec<String> = self
                     .names
                     .iter()
-                    .filter(|n| before.get(*n) != after.get(*n))
+                    .filter(|n| before.get(key(n)) != after.get(key(n)))
                     .cloned()
                     .collect();
                 if moved.is_empty() {
@@ -410,7 +426,7 @@ impl Spec {
     fn subset(&self, installed: &BTreeMap<String, String>, want_present: bool) -> Vec<String> {
         self.names
             .iter()
-            .filter(|n| installed.contains_key(*n) == want_present)
+            .filter(|n| installed.contains_key(key(n)) == want_present)
             .cloned()
             .collect()
     }
@@ -428,12 +444,20 @@ impl Spec {
             let argv: Vec<&str> = refresh.to_vec();
             self.exec(ctx, &argv)?;
         }
-        let mut argv: Vec<&str> = verb.to_vec();
-        if self.cask && let Some(flag) = m.cask_flag {
-            argv.push(flag);
+        let batches: Vec<&[String]> = if m.one_per_call {
+            names.chunks(1).collect()
+        } else {
+            vec![names]
+        };
+        for batch in batches {
+            let mut argv: Vec<&str> = verb.to_vec();
+            if self.cask && let Some(flag) = m.cask_flag {
+                argv.push(flag);
+            }
+            argv.extend(batch.iter().map(String::as_str));
+            self.exec(ctx, &argv)?;
         }
-        argv.extend(names.iter().map(String::as_str));
-        self.exec(ctx, &argv)
+        Ok(())
     }
 
     fn exec(&self, ctx: &Ctx<'_>, argv: &[&str]) -> std::result::Result<(), Effect> {
@@ -442,4 +466,16 @@ impl Spec {
             None => Ok(()),
         }
     }
+}
+
+/// The name a query's output is keyed by.
+///
+/// brew accepts a tap-qualified name — `hashicorp/tap/packer` — and then
+/// lists it as plain `packer`, so a step naming the qualified form would
+/// never find it installed and would reinstall on every apply. Only brew puts
+/// a slash in a package name, so taking the last path segment is safe for
+/// every row and needs no field to say which. The *install* argv still gets
+/// the name as written; only the lookup is normalised.
+fn key(name: &str) -> &str {
+    name.rsplit('/').next().unwrap_or(name)
 }

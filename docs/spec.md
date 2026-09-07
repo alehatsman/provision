@@ -1,6 +1,6 @@
 # provision — specification
 
-Status: v0.6 · 2026-09-08 · owner: aleh
+Status: v0.7 · 2026-09-08 · owner: aleh
 
 This is the contract. Code that disagrees with it is wrong, or this file is.
 Fix one.
@@ -406,7 +406,20 @@ pkg:
 | winget | `winget list`, matched by id |
 
 - `latest` upgrades; changed when the version from that query differs before
-  and after.
+  and after. A named package that is **not installed** is installed first:
+  `apt-get install --only-upgrade` silently skips one that is absent, and brew
+  and winget error on it, so upgrading the whole list would report `ok` with
+  the package still missing.
+- Under `plan`, `latest` on an installed package is **`unknown`**: whether a
+  newer version exists is not a question the local database answers, and plan
+  does not go to the network to find out. A missing package is knowable, and
+  is reported as a change.
+- `latest` compares against the package lists the machine already has, unless
+  `update_cache: true` says to refresh them first.
+- A package may be named as its manager accepts it — brew takes
+  `hashicorp/tap/packer` — and the query is matched by the last path segment,
+  because brew then lists it as plain `packer`. The install call still gets
+  the name as written.
 - `update_cache: true` refreshes before the install call, and only when there
   is something to install. **Never under `plan`**: a dry run that mutates the
   package database is not a dry run.
@@ -415,8 +428,12 @@ pkg:
 - `sudo` is not implied. apt and pacman need `sudo: true`. brew and yay must
   **not** have it — both refuse to run as root — and both combinations are
   validation errors. apt, pacman or yay with `sudo: false` is not a validation
-  error; the manager will say so itself. Under `plan` with no reachable root,
-  a step that would need it is `would run (unprobed)`.
+  error; the manager will say so itself.
+- **`plan` answers even with no reachable root.** The query reads a local
+  database and never escalates, plan never installs, and `update_cache` never
+  runs under plan, so there is nothing for root to protect. Only `apply` needs
+  the preflight. This is unlike `file`, where reading the target itself can
+  require root.
 - A missing manager binary is an error naming it.
 - Repositories, taps, PPAs, AUR helpers: **not** part of `pkg`. They are
   `shell` steps with `unless`. See migration.md for recipes.

@@ -1,0 +1,14 @@
+---
+# Every step here is a no-op on any apt host: the verdict is reached from the
+# local dpkg database and no manager command is ever run. Safe under `apply`
+# as well as `plan` — nothing in this file can install or remove anything.
+- name: A package the base system always has
+  pkg:
+    name: coreutils
+    manager: apt
+
+- name: A package that was never installed, wanted absent
+  pkg:
+    name: provision-no-such-package
+    state: absent
+    manager: apt
