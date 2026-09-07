@@ -1,6 +1,6 @@
 # provision — specification
 
-Status: v0.2 · 2026-09-07 · owner: aleh
+Status: v0.3 · 2026-09-08 · owner: aleh
 
 This is the contract. Code that disagrees with it is wrong, or this file is.
 Fix one.
@@ -168,7 +168,7 @@ changed_when: result.rc == 0
 |---|---|---|---|
 | `name` | string | action key + first arg | Shown in output. Templated. |
 | `when` | expr | true | Skip the step when false. Evaluated before `unless`/`creates`. |
-| `unless` | string | — | A shell command. Exit 0 means "already done", step skipped. Non-zero means run. Any other failure to spawn is an error. |
+| `unless` | string | — | A shell command, run through the interpreter `shell` defaults to (bash on unix, powershell on Windows). Exit 0 means "already done", step skipped. Non-zero means run. A failure to spawn at all is an error. |
 | `creates` | path | — | Skip when the path exists. |
 | `sudo` | bool | false | Run the action as root (§7). Windows: error; use `shell` from an elevated prompt. |
 | `timeout` | duration | 10m | Kill the step and fail. `30s`, `5m`, `1h`. |
@@ -225,6 +225,10 @@ shell:                         # long form
 - Idempotency: **declared**, via `unless`, `creates`, or `changed_when`. A
   bare `shell` step with none of these is reported `changed: unknown`.
   `validate --strict` fails on it.
+- The verdict of a gated step is the gate's own meaning: `unless` exited
+  non-zero, or `creates` did not exist, so the work was needed — a successful
+  run is `changed`. With no gate the verdict is `unknown`: the step ran, and
+  nothing here can say what it did. `changed_when` overrides either.
 - Plan: prints `would run` plus the first line of the script. If `unless` or
   `creates` is set, plan evaluates it and reports `skip` or `would run`.
   `--plan-no-probe` skips `unless` evaluation (for CI without the target).
@@ -364,6 +368,12 @@ assert:
 ```
 
 - Always reports `ok` or `failed`. Plan runs asserts unless `--plan-no-probe`.
+- **A failing assert does not stop a `plan` walk.** Apply stops at the first
+  failure; plan never does. Plan has not done the work, so an assert about
+  work not yet done — "verify the key is present", before the step that
+  writes it has run — is information, not a reason to hide the other 154
+  steps. The run still exits 1, so a wrong-machine guard still fails loudly;
+  it just prints the rest of the plan underneath itself.
 - `retry` (§4) composes with `assert`, and is how a readiness gate is
   written: the assert is re-run on failure until it passes or attempts run
   out. `retry: {attempts: 30, delay: 2s}` is a 60-second wait-for-ready.
@@ -376,6 +386,14 @@ assert:
   read once from the terminal and fed via `sudo -S` for every escalated step.
 - Environment is passed with `sudo --preserve-env=<the step's env keys>`.
 - No `become_user`. Root or the current user. That is the whole matrix.
+- The preflight can run "before the first step" because `apply` walks the
+  plan twice: once exactly as `validate` does — rendering every field,
+  resolving every file, touching nothing — and then again for real. The first
+  walk is what finds the sudo steps, and it is why a plan with a typo in its
+  last step fails before its first step runs.
+- That first walk cannot know a `when` that reads a `register`, so it
+  over-approximates: a sudo step the real walk will skip still arms the
+  preflight. Asking for a password that goes unused beats failing halfway in.
 
 ## 8. Commands
 
@@ -416,6 +434,16 @@ Tag selection (Ansible semantics, deliberately):
 
 Exit codes: `0` ok / nothing to do · `1` failure · `2` plan found changes ·
 `3` usage or validation error.
+
+`plan` exits 2 when any step is reported `would change`, `would run`, or
+`unknown` — anything that is not `ok` or `skipped`. **`unknown` counts.** A
+step provision cannot judge is not a step it may call converged, and driving
+that count to zero is precisely what `--strict` is for. `--plan-no-probe`
+probes nothing and so claims nothing: it exits 0 unless validation failed.
+
+`apply` exits 1 on the first failed step, 0 otherwise. It does not exit 2;
+having done the work, "changes were found" is not news. `plan` also exits 1
+when a step failed — only an `assert` can, and §6.7 says why it keeps walking.
 
 ## 9. Output
 
@@ -473,10 +501,16 @@ One JSON object per line on stdout, human output goes to stderr:
 | Timeout kills a `shell` with children | Process group killed, not just the shell |
 | Plan probes with `--plan-no-probe` | `unless`/`assert`/`pkg` queries skipped, reported `would run (unprobed)` |
 | `when` reads a `register` during `plan` | The step that registers it has not run, so the name holds a placeholder (`rc: 0`, empty output, `changed: false`) and the reader is reported `would run (unprobed)` rather than skipped. Plan does not claim a verdict it cannot have (D11) |
-| Non-UTF-8 in stdout | Lossy display, exact bytes in `register` |
+| Non-UTF-8 in stdout | Lossy in both the display and the `register`. Exact bytes were the earlier rule and were dropped: a `register` holding bytes breaks `result.stdout == "yes"`, which is the only thing a register is for |
+| A step is skipped by `when` or by tags | Its `register`, if it declares one, still binds — with `skipped: true`. That field exists precisely so a later `when` can read it rather than fail on an undefined name |
 | Ctrl-C mid-step | Current step killed, summary printed with `interrupted`, exit 130 |
 | Windows path in `dest` | Accepted; `~` expands to `%USERPROFILE%` |
 | Two `vars_file` set the same key | Later wins, `--explain-var k` shows the chain |
+| `timeout` and `retry` on one step | The timeout applies per attempt, not to the step |
+| `retry` and `register` on one step | The register holds the last attempt, and its `rc` is that attempt's |
+| `--stream` and `register` on one step | Output is teed: streamed live *and* captured |
+| `assert` fails | `rc: 1` in `register`; the run stops like any other failure |
+| A step's `env` names a key `sudo` must preserve | `sudo --preserve-env` is given exactly the step's own `env` keys, nothing more |
 
 ## 11. Validation of this spec
 

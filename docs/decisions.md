@@ -202,3 +202,24 @@ will actually run. D11 already says plan is best-effort and must say so;
 `unprobed` is the word it already has for exactly this.
 
 **Overturned by.** Nothing. It is D11 applied to one more case.
+
+## D15 — `unknown` counts as a change for `plan`'s exit code
+
+**Decision.** `plan` exits 2 when any step is `would change`, `would run`, or
+`unknown`. Only `ok` and `skipped` exit 0. `--plan-no-probe` probes nothing,
+claims nothing, and exits 0 unless validation failed.
+
+**Why.** Spec §8 said "0 if nothing would change, 2 if something would" and
+never said which side `unknown` falls on. It has to be 2. An ungated `shell`
+step is `unknown` forever, so counting it as 0 makes a converged machine and
+a machine full of ungated shell steps report identically — and `plan` stops
+being a drift check on exactly the steps most likely to drift. Counting it as
+2 gives `--strict` (D3) something to be *for*: driving the unknown count to
+zero is what makes exit 0 mean something. plan.md already measures it.
+
+`--plan-no-probe` is the exception because it is the one mode that inspects
+nothing. Exiting 2 there would be a claim it did not earn, and dotfiles CI
+runs it on every machine plan from a machine that is none of them.
+
+**Overturned by.** Nothing. If exit 2 proves noisy, the fix is `--strict` on
+the plan, not a quieter exit code.
