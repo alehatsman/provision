@@ -507,6 +507,18 @@ impl Expander {
         }
 
         if !self.mode.reports() {
+            // Parse the action body here too, and throw the result away.
+            //
+            // Without this, `validate` accepts what `plan` rejects: an action
+            // body is only parsed on the way to running it, so a `pkg` with no
+            // package name or a `file` with neither `content` nor `src` passes
+            // validation and fails on the next command. That happened twice on
+            // the day `pkg` landed, in this repo's own example and in the
+            // fleet. §8 promises validate is the subset of plan that runs
+            // nothing, not a weaker check.
+            if renderable && let Err(d) = Action::parse(&self.engine, step, &ctx, raw) {
+                self.diags.push(d);
+            }
             // `validate` binds the placeholder so a later `when` that reads
             // this register still compiles. Nothing runs.
             self.bind_register(step, scope, None, &Status::WouldRunUnprobed);

@@ -519,8 +519,14 @@ provision version
 ```
 
 - `validate`: parse, schema, template syntax, prop schemas, file existence
-  for `import`/`use`/`vars_file`/`src`. No commands run. `--strict` also
+  for `import`/`use`/`vars_file`/`src`, **and the body of every action** — a
+  `pkg` that names no package, a `file` with neither `content` nor `src`, a
+  `mode` that is not a quoted octal string. No commands run. `--strict` also
   rejects `shell`/`cmd` steps with no idempotency gate.
+
+  `validate` is the subset of `plan` that runs nothing, not a weaker check.
+  Anything `plan` would reject before touching the machine, `validate`
+  rejects too.
 - `plan`: everything `validate` does, plus render templates, evaluate `when`,
   probe `unless`/`creates`/`pkg`/`service`/`file` state, print what would
   change. Runs nothing that mutates. Exit 0 if nothing would change, 2 if

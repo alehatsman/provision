@@ -94,6 +94,21 @@ fn an_unknown_field_in_an_action_body_is_an_error() {
 }
 
 #[test]
+fn validate_rejects_what_plan_would_reject() {
+    // Spec §8: validate is the subset of plan that runs nothing, not a weaker
+    // check. Action bodies used to be parsed only on the way to running them,
+    // so these three passed validation and failed on the next command — which
+    // happened in this repo's own example and in the fleet on the day `pkg`
+    // landed.
+    let (code, out) = validate("bad_action_bodies.yml");
+    assert_eq!(code, EXIT_VALIDATION, "{out}");
+    assert!(out.contains("`pkg` requires `name` or `names`"), "{out}");
+    assert!(out.contains("`file` state file needs `content` or `src`"), "{out}");
+    assert!(out.contains("`service` needs `state` or `enabled`"), "{out}");
+    assert_positioned(&out);
+}
+
+#[test]
 fn a_step_with_no_action_is_an_error() {
     let (code, out) = validate("no_action.yml");
     assert_eq!(code, EXIT_VALIDATION, "{out}");

@@ -1,0 +1,16 @@
+---
+# Three action bodies that only a parse can reject. Each was accepted by
+# `validate` and refused by `plan` until validate began parsing bodies too.
+- name: A pkg that names no package
+  pkg:
+    manager: apt
+    update_cache: true
+
+- name: A file with neither content nor src
+  file:
+    path: /tmp/provision-never-written
+    state: file
+
+- name: A service that declares nothing
+  service:
+    name: nothing.service
