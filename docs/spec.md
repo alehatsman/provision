@@ -1,6 +1,6 @@
 # provision — specification
 
-Status: v0.4 · 2026-09-08 · owner: aleh
+Status: v0.5 · 2026-09-08 · owner: aleh
 
 This is the contract. Code that disagrees with it is wrong, or this file is.
 Fix one.
@@ -264,15 +264,54 @@ file:
 
 - Changed when content, mode, owner, group, or type differs. Compared by
   bytes, not mtime.
+
+**The four states.**
+
+- `file` needs exactly one of `content` or `src`. Neither is a validation
+  error, and both together is one, positioned at the second. There is no
+  touch: an empty file is `content: ""`, said out loud.
+- `dir` creates the directory and its parents. On one that already exists it
+  still applies `mode`, `owner` and `group` where they differ, and reports
+  `changed` when it does.
+- `link` points `path` at `src`, stored exactly as written — no
+  canonicalisation, so a relative link stays relative. Changed when `path` is
+  not a symlink at all, or is one pointing somewhere else. Replacing an
+  existing regular file or directory at `path` requires `force: true`;
+  without it the step fails naming the path. `mode`, `owner` and `group` do
+  not apply to a symlink, and setting them is a validation error.
+- `absent` removes a file, a symlink, or an empty directory; a non-empty
+  directory requires `force: true`. A path that is already gone is `ok`, not
+  `changed`.
+
+**Modes are deterministic, not inherited from the umask.** A new file with no
+`mode` gets `0644` and a new directory `0755`. A target that already exists
+keeps the mode it has unless `mode` says otherwise.
+
+- `owner` and `group` are independent; either may be set alone. Both require
+  `sudo: true` and are a validation error without it.
+
+**Reading state obeys `sudo` too.** With `sudo: true` every probe of the
+target — its bytes, its mode, its owner — runs as root, because a target the
+step needs root to write is usually one it needs root to read:
+`/etc/sudoers.d/*` is `0440 root:root`. Without `sudo: true` a target that
+cannot be read fails the step, naming the path and saying that `sudo: true`
+is how to read it. Under `plan` with no reachable root the step is
+`would run (unprobed)`, exactly as a gate is (§7).
+
+**Writing.** Without sudo: a temp file in the destination's own directory,
+mode `0600`, then rename — the same directory because rename is only atomic
+within one filesystem. With `sudo` the temp file goes in the user's own temp
+directory instead, because the reason the step said `sudo` is usually that it
+cannot create a file next to the destination at all; it is then placed with
+`install -m MODE [-o OWNER] [-g GROUP] TMP DEST` and the temp removed. The
+same-directory rule does not apply there: `install` copies, so nothing depends
+on the two paths sharing a filesystem.
+
+- Directories under sudo are `install -d -m MODE`, links are `ln -sfn`, and
+  removal is `rm -r`. Without sudo the same four operations go through `std`.
 - Plan: unified diff for content changes (`--no-diff` to suppress; secrets
   are the operator's problem), `mode 0644 → 0600` and `group staff → wheel`
   for metadata.
-- `owner` and `group` are independent; either may be set alone. Both require
-  `sudo: true` and are a validation error without it.
-- Writes atomically: temp file in the same directory, rename. With `sudo`,
-  the temp file is written as the user and installed with `install(1)`
-  semantics so owner, group, and mode land correctly.
-- `absent` on a non-empty dir requires `force: true`.
 
 ### 6.4 `template`
 
@@ -304,8 +343,14 @@ template:
 - One step, one output line. `changed` when any file changed; the line
   reports the count (`changed  3 of 14`).
 - Plan prints one diff per changed file, each headed by its relative path.
-- The source tree is walked in sorted order, depth first. Symlinks in the
-  source are not followed and are a validation error.
+- `dest` must be a directory or absent. An existing regular file at `dest` is
+  a step failure, not a tree silently flattened into one file.
+- The source tree is walked in sorted order, depth first. A symlink anywhere
+  in it is a validation error, positioned at `src`: the tool does not follow
+  them and will not guess.
+- A source file that is not valid UTF-8 is copied byte for byte rather than
+  rendered. The validate walk already steps over it; apply still has to place
+  it.
 - Files are not required to end in `.j2`; every file is rendered. A `.j2`
   suffix on a source file is stripped from the destination name.
 - Nothing under `dest` is removed. This is not a sync; a file deleted from
@@ -327,12 +372,33 @@ pkg:
 ```
 
 - Changed when the manager's own query says the package was missing before
-  and present after (`dpkg-query`, `pacman -Q`, `brew list`, `winget list`).
-  One query for the whole set, one install call for the missing subset.
-- `latest` upgrades; changed when the version string differs.
+  and present after. One query for the whole set, one install call for the
+  missing subset.
+- **Default manager**, when `manager` is absent: the first of `pacman`,
+  `apt`, `brew`, `winget` found on PATH. `yay` is never chosen by default — a
+  plan that wants the AUR says `manager: yay` and means it.
+- The queries carry **versions**, because `latest` has nothing to compare
+  without them:
+
+| Manager | Query |
+|---|---|
+| apt | `dpkg-query -W -f '${Package}\t${Version}\t${Status}\n'`, keeping only `install ok installed`. Plain `-W` also lists removed-but-config packages, which would read as present |
+| pacman, yay | `pacman -Q`. Both read the same database, so `yay` queries with `pacman` |
+| brew | `brew list --versions`, plus `brew list --cask --versions` when `cask: true` |
+| winget | `winget list`, matched by id |
+
+- `latest` upgrades; changed when the version from that query differs before
+  and after.
+- `update_cache: true` refreshes before the install call, and only when there
+  is something to install. **Never under `plan`**: a dry run that mutates the
+  package database is not a dry run.
+- `absent` mirrors `present` with the manager's remove command.
 - Plan: lists the packages that would be installed, by actual query.
-- `sudo` is not implied. apt and pacman need `sudo: true`; brew must not
-  have it. The tool errors on `pkg` + `manager: brew` + `sudo: true`.
+- `sudo` is not implied. apt and pacman need `sudo: true`. brew and yay must
+  **not** have it — both refuse to run as root — and both combinations are
+  validation errors. apt, pacman or yay with `sudo: false` is not a validation
+  error; the manager will say so itself. Under `plan` with no reachable root,
+  a step that would need it is `would run (unprobed)`.
 - A missing manager binary is an error naming it.
 - Repositories, taps, PPAs, AUR helpers: **not** part of `pkg`. They are
   `shell` steps with `unless`. See migration.md for recipes.
@@ -349,11 +415,18 @@ service:
   scope: system                # system | user (systemd only)
 ```
 
-- Changed when `systemctl is-active` / `is-enabled` differs before and after.
-  `restarted` is always changed.
-- launchd: `launchctl bootstrap`/`bootout` for `enabled`, `kickstart` for
-  `restarted`. Best effort; reported honestly.
-- Windows: error. Use `shell` with PowerShell.
+- Probe is `systemctl is-active` and `systemctl is-enabled`; changed when
+  either differs before and after.
+- `scope: user` runs `systemctl --user`, and must not carry `sudo: true`. The
+  two mean opposite things, and the combination is a validation error.
+- `restarted` and `reloaded` are always `changed`, and always `would change`
+  under plan. Neither has a before-state to compare against.
+- launchd: `launchctl print gui/$UID/<name>` for `scope: user` and
+  `launchctl print system/<name>` for system, `bootstrap`/`bootout` for
+  `enabled`, `kickstart -k` for `restarted`.
+- A launchd path on a machine that is not macOS is a validation error naming
+  the fact that decided it. Windows is a validation error too: use `shell`
+  with PowerShell.
 
 ### 6.7 `assert`
 
@@ -474,13 +547,18 @@ One line per step, updated in place while running (spinner), then frozen:
 ```
 
 - Glyphs and colors: `✓` green ok, `~` yellow changed, `-` dim skipped, `?`
-  magenta unknown, `✗` red failed. `NO_COLOR` and `--color=never` honored.
+  magenta unknown, `✗` red failed, `→` yellow would run. `would change` is
+  the plan-time twin of `changed` and carries the same `~` and the same
+  yellow. `NO_COLOR` and `--color=never` honored.
 - Nested `import`/`use` shown as a dim header line with the file name;
   steps indented one level. Depth capped at display; execution is flat.
 - Skipped steps collapse to one dim line each; `--hide-skipped` drops them
   and the summary still counts them.
 - Plan mode uses `would change` / `would run` in place of `changed`, and
-  prints diffs under the line, indented, colored.
+  prints diffs under the line, indented, colored: unified, three lines of
+  context. `--no-diff` suppresses them. The flag exists on `apply` too, where
+  it does nothing, so that a script can pass the same arguments to both.
+- The summary counts `would change` before `would run`.
 - Retries render as `attempt 2/3` on the line while running.
 
 ### 9.2 Non-TTY
@@ -490,7 +568,9 @@ printed the same way. Suitable for CI logs.
 
 ### 9.3 `--json`
 
-One JSON object per line on stdout, human output goes to stderr:
+One JSON object per line on stdout, human output goes to stderr. `status` is
+one of `ok`, `changed`, `unknown`, `skipped`, `failed`, `would_change`,
+`would_run`, `would_run_unprobed`. `diff` is present only when there is one:
 
 ```json
 {"event":"step","index":3,"name":"Deploy .zshrc","status":"changed","duration_ms":12,"file":"components/zsh/index.yml","line":41,"diff":"..."}
@@ -523,6 +603,12 @@ One JSON object per line on stdout, human output goes to stderr:
 | A step's `env` names a key `sudo` must preserve | `sudo --preserve-env` is given exactly the step's own `env` keys, nothing more |
 | `--ask-sudo-pass` and a step that reads stdin | The wrapped command is `sudo -k -S`, so the timestamp is invalidated and sudo consumes the password line before the child is started. The child sees EOF, never the password |
 | A `sudo: true` step's `unless` under `plan`, with no sudo | The gate is not run and the step is `would run (unprobed)`. Under `apply` this cannot arise: the preflight already failed |
+| `file` target cannot be read and the step has no `sudo` | Step fails naming the path, and says `sudo: true` is how to read it. Guessing "it must differ" would rewrite a file nobody could compare |
+| `file` target cannot be read under `plan` with no reachable root | `would run (unprobed)`, like a gate |
+| `template` in directory mode with a regular file at `dest` | Step failure. A tree is not flattened into one file |
+| `pkg` with `update_cache: true` under `plan` | The cache is not refreshed. A dry run that mutates the package database is not a dry run |
+| `service` with `scope: user` and `sudo: true` | Validation error. The two mean opposite things |
+| `service` on a launchd path on a machine that is not macOS | Validation error naming the fact that decided it |
 
 ## 11. Validation of this spec
 

@@ -229,3 +229,61 @@ runs it on every machine plan from a machine that is none of them.
 
 **Overturned by.** Nothing. If exit 2 proves noisy, the fix is `--strict` on
 the plan, not a quieter exit code.
+
+## D16 — the phase 2 action semantics
+
+**Decided by review 2026-09-08, owner to confirm.** Everything under this
+heading is provisional: it was settled by the reviewing session while the
+owner was away, and it is gathered here rather than scattered so he can
+overturn any of it in one place. Three of the original decisions were amended
+before any code was written, each because a measurement said so; those are
+marked where they appear.
+
+**Reading state obeys sudo.** A `file` step with `sudo: true` probes the
+target as root. The alternative — probing as the user and guessing on failure
+— rewrites files nobody could compare, and `/etc/sudoers.d/*` at `0440
+root:root` is not a corner case: all 18 sudo+`file` steps in the fleet write
+into root-owned directories. Without sudo an unreadable target fails the step
+and says `sudo: true` is the fix. Under plan with no reachable root it is
+unprobed, exactly like a gate.
+
+**No touch semantics.** `state: file` needs `content` or `src`, and exactly
+one of them. Checked against the fleet first: zero steps rely on `state: file`
+alone, so nothing breaks. An empty file is `content: ""`, said out loud.
+
+**Links carry no mode.** `src` is stored as written, never canonicalised.
+Replacing a regular file or directory at `path` needs `force: true`. Setting
+`mode`, `owner` or `group` on a link is a validation error — checked first:
+both `link` steps in the fleet set none of them.
+
+**The sudo write path uses the user's temp directory** (amended). The brief
+said "temp file next to dest"; `/etc/sudoers.d` is `drwxr-xr-x root root`, so
+the user cannot create it there, and being unable to write there is the whole
+reason the step said sudo. The same-directory rule exists so the *non-sudo*
+path can rename atomically within one filesystem; the sudo path uses
+`install`, which copies, so it is free to stage anywhere the user can write.
+
+**Modes are deterministic.** A new file with no `mode` is `0644` and a new
+directory `0755`, umask ignored. An existing target keeps what it has. A
+converged machine should not depend on the shell that launched provision.
+
+**Package queries carry versions** (amended). The brief's queries returned
+names only, which makes `latest`'s "changed when the version differs"
+unanswerable. They now return version and status, and apt's is filtered to
+`install ok installed` — plain `dpkg-query -W` lists removed-but-config
+packages, which would read as present and make `present` a silent no-op on a
+package that is not there.
+
+**Default manager order** is pacman, apt, brew, winget. `yay` is never
+default: reaching the AUR is a decision a plan should have to write down.
+`sudo: true` with brew or with yay is a validation error; both refuse to run
+as root.
+
+**`update_cache` never runs under plan.** A dry run that mutates the package
+database is not a dry run.
+
+**`would change` is its own verdict**, sharing `changed`'s glyph and color,
+with the diff underneath. `--no-diff` exists on `apply` too, where it does
+nothing, so a script can pass the same arguments to both.
+
+**Overturned by.** The owner, in one pass over this section.

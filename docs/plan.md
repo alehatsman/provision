@@ -178,15 +178,35 @@ Deliverables
   install call per step, `latest`.
 - `service`: systemd system/user, launchd.
 
+Semantics are settled in spec §6.3–§6.6 and gathered in D16, which is
+provisional pending the owner's review.
+
 Gate
 
-- Idempotency tests for all four. `pkg` tests run in containers
-  (`archlinux`, `ubuntu`) and on the host for brew; winget test is manual
-  and documented as such.
-- `provision plan` on x1 (already converged by mooncake) shows zero changes
-  except the predicted list from migration.md §4.
-- `~/dotfiles/components/ssh/index.yml` applies on a scratch `$HOME` twice:
-  changed, then ok. Moved here from Phase 1 with `file`.
+- Idempotency tests for all four, run twice on a scratch directory: changed,
+  then ok or skipped. For `file` that means each state — file, dir, link,
+  absent — plus a mode change on an existing directory and the sudo `install`
+  path. The sudo test skips itself where `sudo -n true` fails.
+- `examples/components/ssh/index.yml` applies on a scratch `$HOME` twice:
+  changed, then ok. Moved here from Phase 1, because its first step is a
+  `file` action. The `~/dotfiles` copy is the owner's repo and his to run.
+- `pkg` runs in containers, never on the host: `docker run --rm` against
+  `ubuntu:24.04` and `archlinux:latest` with the debug binary and a fixture
+  directory mounted, installing something small. These tests are `#[ignore]`
+  unless **`PROVISION_CONTAINER_TESTS=1`** is set, so a plain `cargo test`
+  never needs a daemon. brew and winget are manual and documented as such.
+- `service` uses a throwaway unit in the **runtime** unit directory
+  (`$XDG_RUNTIME_DIR/systemd/user`), never `~/.config/systemd/user` — that
+  directory holds the owner's live units, and a test process killed between
+  writing and cleaning up would leave a stray unit in his config forever.
+  Runtime state disappears at logout, so the worst case cleans itself. One
+  attempt: if systemd does not pick the unit up there, the test skips with a
+  message and `service` joins launchd and winget as manual.
+- launchd is manual. There is no mac in this loop.
+
+Not part of the gate, and said plainly rather than counted green: `provision
+plan` on x1 showing zero changes against a mooncake-converged machine. x1 is
+not the development box and cannot be reached from it. It waits for the owner.
 
 ### Phase 3 — tags, polish, Windows
 
