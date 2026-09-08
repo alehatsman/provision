@@ -1,6 +1,6 @@
 //! End-to-end tests for the phase 0 commands.
 //!
-//! The Phase 0 gate is "100% of validation errors carry file:line", so every
+//! The Phase 0 gate is "100% of validation errors carry <file:line>", so every
 //! error assertion here checks the position, not only the message.
 
 use std::path::{Path, PathBuf};

@@ -67,7 +67,7 @@ pub(crate) enum How {
 ///
 /// The lossy view, for the runner and for `register`.
 pub(crate) fn run(s: Spawn<'_>) -> std::io::Result<Output> {
-    let raw = run_raw(s)?;
+    let raw = run_raw(&s)?;
     Ok(Output {
         rc: raw.rc,
         stdout: String::from_utf8_lossy(&raw.stdout).into_owned(),
@@ -82,7 +82,7 @@ pub(crate) fn run(s: Spawn<'_>) -> std::io::Result<Output> {
 /// makes a binary file differ from itself forever. This is the same spawn,
 /// the same process group and the same watchdog — only the last step differs.
 pub(crate) fn capture(s: Spawn<'_>) -> std::io::Result<Raw> {
-    run_raw(s)
+    run_raw(&s)
 }
 
 pub(crate) struct Raw {
@@ -99,7 +99,7 @@ impl Raw {
     }
 }
 
-fn run_raw(s: Spawn<'_>) -> std::io::Result<Raw> {
+fn run_raw(s: &Spawn<'_>) -> std::io::Result<Raw> {
     let (program, args) = s
         .argv
         .split_first()
@@ -183,13 +183,13 @@ fn wait_for(child: &mut Child, pid: u32, timeout: Duration) -> How {
 
 fn exit_code(child: &mut Child) -> i32 {
     match child.wait() {
-        Ok(st) => st.code().unwrap_or_else(|| signal_code(&st)),
+        Ok(st) => st.code().unwrap_or_else(|| signal_code(st)),
         Err(_) => -1,
     }
 }
 
 #[cfg(unix)]
-fn signal_code(st: &std::process::ExitStatus) -> i32 {
+fn signal_code(st: std::process::ExitStatus) -> i32 {
     use std::os::unix::process::ExitStatusExt;
     // The shell's convention, so `failed_when: result.rc == 139` reads the
     // way an operator expects for a segfault.
@@ -197,7 +197,7 @@ fn signal_code(st: &std::process::ExitStatus) -> i32 {
 }
 
 #[cfg(not(unix))]
-fn signal_code(_st: &std::process::ExitStatus) -> i32 {
+fn signal_code(_st: std::process::ExitStatus) -> i32 {
     -1
 }
 

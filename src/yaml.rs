@@ -207,7 +207,7 @@ impl<'a> N<'a> {
     /// A string, or a list of strings. `tags: core` and `tags: [core]` both work.
     pub(crate) fn as_str_or_seq(&self) -> Result<Vec<&'a str>> {
         match &self.node.data {
-            YamlData::Sequence(_) => self.as_seq()?.iter().map(|n| n.as_str()).collect(),
+            YamlData::Sequence(_) => self.as_seq()?.iter().map(N::as_str).collect(),
             _ => Ok(vec![self.as_str()?]),
         }
     }
@@ -225,7 +225,10 @@ impl<'a> N<'a> {
     }
 
     /// Convert to a template value, preserving YAML types.
-    #[allow(clippy::wrong_self_convention)] // N is Copy; taking &self reads better here
+    #[expect(
+        clippy::wrong_self_convention,
+        reason = "N is Copy; taking &self reads better here"
+    )]
     pub(crate) fn to_value(&self) -> Result<minijinja::Value> {
         use minijinja::Value as V;
         Ok(match &self.node.data {
@@ -235,7 +238,7 @@ impl<'a> N<'a> {
             YamlData::Value(Scalar::Boolean(b)) => V::from(*b),
             YamlData::Value(Scalar::Null) => V::from(()),
             YamlData::Sequence(_) => {
-                let items: Result<Vec<_>> = self.as_seq()?.iter().map(|n| n.to_value()).collect();
+                let items: Result<Vec<_>> = self.as_seq()?.iter().map(N::to_value).collect();
                 V::from(items?)
             }
             YamlData::Mapping(_) => {

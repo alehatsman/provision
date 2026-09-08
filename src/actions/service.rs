@@ -171,28 +171,28 @@ impl Backend {
     /// `None` only when the command could not be run at all. An unknown or
     /// inactive unit is `Some(false)`: `is-active` exits 3 for those, which
     /// is an answer. The verdict treats `None` as "not as declared".
-    fn is_active(&self, name: &str, ctx: &Ctx<'_>) -> Option<bool> {
+    fn is_active(self, name: &str, ctx: &Ctx<'_>) -> Option<bool> {
         match self {
             Backend::Systemd { user } => {
                 let got = ctx
-                    .exec(&["systemctl", scope_flag(*user), "is-active", name], false)
+                    .exec(&["systemctl", scope_flag(user), "is-active", name], false)
                     .ok()?;
                 Some(got.rc == 0)
             }
             Backend::Launchd { user } => {
                 let got = ctx
-                    .exec(&["launchctl", "print", &domain(*user, name)], false)
+                    .exec(&["launchctl", "print", &domain(user, name)], false)
                     .ok()?;
                 Some(got.rc == 0)
             }
         }
     }
 
-    fn is_enabled(&self, name: &str, ctx: &Ctx<'_>) -> Option<bool> {
+    fn is_enabled(self, name: &str, ctx: &Ctx<'_>) -> Option<bool> {
         match self {
             Backend::Systemd { user } => {
                 let got = ctx
-                    .exec(&["systemctl", scope_flag(*user), "is-enabled", name], false)
+                    .exec(&["systemctl", scope_flag(user), "is-enabled", name], false)
                     .ok()?;
                 Some(got.rc == 0)
             }
@@ -203,7 +203,7 @@ impl Backend {
             // `disable` write, and takes a domain rather than a path.
             Backend::Launchd { user } => {
                 let got = ctx
-                    .exec(&["launchctl", "print-disabled", &domain_root(*user)], false)
+                    .exec(&["launchctl", "print-disabled", &domain_root(user)], false)
                     .ok()?;
                 let out = String::from_utf8_lossy(&got.stdout);
                 let line = out.lines().find(|l| l.contains(&format!("\"{name}\"")))?;
@@ -212,7 +212,7 @@ impl Backend {
         }
     }
 
-    fn set_state(&self, name: &str, want: Want, ctx: &Ctx<'_>) -> std::result::Result<(), Effect> {
+    fn set_state(self, name: &str, want: Want, ctx: &Ctx<'_>) -> std::result::Result<(), Effect> {
         let root = ctx.sudo;
         match self {
             Backend::Systemd { user } => {
@@ -222,10 +222,10 @@ impl Backend {
                     Want::Restarted => "restart",
                     Want::Reloaded => "reload",
                 };
-                run(ctx, &["systemctl", scope_flag(*user), verb, name], root)
+                run(ctx, &["systemctl", scope_flag(user), verb, name], root)
             }
             Backend::Launchd { user } => {
-                let d = domain(*user, name);
+                let d = domain(user, name);
                 match want {
                     Want::Started => run(ctx, &["launchctl", "kickstart", &d], root),
                     Want::Restarted | Want::Reloaded => {
@@ -237,12 +237,12 @@ impl Backend {
         }
     }
 
-    fn set_enabled(&self, name: &str, on: bool, ctx: &Ctx<'_>) -> std::result::Result<(), Effect> {
+    fn set_enabled(self, name: &str, on: bool, ctx: &Ctx<'_>) -> std::result::Result<(), Effect> {
         let root = ctx.sudo;
         match self {
             Backend::Systemd { user } => {
                 let verb = if on { "enable" } else { "disable" };
-                run(ctx, &["systemctl", scope_flag(*user), verb, name], root)
+                run(ctx, &["systemctl", scope_flag(user), verb, name], root)
             }
             // `bootstrap` needs the path to a plist, which a `service` step
             // does not carry — the unit is deployed by a `file` or `template`
@@ -250,7 +250,7 @@ impl Backend {
             // a service target and no path, so that is what this uses.
             Backend::Launchd { user } => {
                 let verb = if on { "enable" } else { "disable" };
-                run(ctx, &["launchctl", verb, &domain(*user, name)], root)
+                run(ctx, &["launchctl", verb, &domain(user, name)], root)
             }
         }
     }

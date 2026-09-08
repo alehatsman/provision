@@ -86,7 +86,7 @@ impl PropType {
         })
     }
 
-    pub(crate) fn name(&self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             PropType::String => "string",
             PropType::Bool => "bool",
@@ -97,7 +97,7 @@ impl PropType {
 
     /// What a command-line value of this type looks like. Named in the
     /// error when `--prop` cannot read one (§8).
-    pub(crate) fn example(&self) -> &'static str {
+    pub(crate) fn example(self) -> &'static str {
         match self {
             PropType::String => "any text",
             PropType::Bool => "true or false",
@@ -108,7 +108,7 @@ impl PropType {
 
     /// Does a rendered value satisfy this type? Spec §3.2: checked *after*
     /// rendering, because `variant: "{{ v }}"` is a template until then.
-    pub(crate) fn accepts(&self, v: &minijinja::Value) -> bool {
+    pub(crate) fn accepts(self, v: &minijinja::Value) -> bool {
         use minijinja::value::ValueKind as Kind;
         match self {
             PropType::String => matches!(v.kind(), Kind::String),

@@ -243,7 +243,7 @@ impl Action {
                 if items.is_empty() {
                     return Err(body.err("`cmd` is empty"));
                 }
-                Action::Cmd(items.iter().map(|v| v.to_string()).collect())
+                Action::Cmd(items.iter().map(ToString::to_string).collect())
             }
 
             "assert" => {

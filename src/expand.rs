@@ -45,10 +45,10 @@ pub(crate) enum Mode {
 }
 
 impl Mode {
-    fn executes(&self) -> bool {
+    fn executes(self) -> bool {
         matches!(self, Mode::Apply | Mode::Run)
     }
-    fn reports(&self) -> bool {
+    fn reports(self) -> bool {
         !matches!(self, Mode::Validate { .. })
     }
 }
@@ -215,7 +215,7 @@ impl Expander {
         let mut tags = inherited.clone();
         if let Some(n) = step.mods.tags {
             match n.as_str_or_seq() {
-                Ok(ts) => tags.extend(ts.iter().map(|s| s.to_string())),
+                Ok(ts) => tags.extend(ts.iter().map(ToString::to_string)),
                 Err(d) => {
                     self.diags.push(d);
                     return;
@@ -231,7 +231,7 @@ impl Expander {
         if !step.is_structural() && !self.selection.selects(&tags) {
             let status = Status::Skipped("not selected by tags".into());
             self.bind_register(step, scope, None, &status);
-            self.record(step, scope, depth, tags, status);
+            self.record(step, scope, depth, status);
             return;
         }
 
@@ -239,7 +239,7 @@ impl Expander {
             Cond::False => {
                 let status = Status::Skipped("when: false".into());
                 self.bind_register(step, scope, None, &status);
-                self.record(step, scope, depth, tags, status);
+                self.record(step, scope, depth, status);
                 return;
             }
             Cond::Error(d) => {
@@ -266,7 +266,7 @@ impl Expander {
                 // hide far more than the honesty buys.
                 if self.mode.reports() && !step.is_structural() {
                     self.bind_register(step, scope, None, &Status::WouldRunUnprobed);
-                    self.record(step, scope, depth, tags, Status::WouldRunUnprobed);
+                    self.record(step, scope, depth, Status::WouldRunUnprobed);
                     return;
                 }
             }
@@ -278,7 +278,7 @@ impl Expander {
             "vars_file" => self.do_vars_file(step, scope),
             "import" => self.do_import(step, scope, depth, &tags),
             "use" => self.do_use(step, scope, depth, &tags),
-            _ => self.do_action(step, scope, depth, tags),
+            _ => self.do_action(step, scope, depth, &tags),
         }
     }
 
@@ -608,7 +608,7 @@ impl Expander {
         step: &Step<'static>,
         scope: &mut Scope,
         depth: usize,
-        tags: BTreeSet<String>,
+        tags: &BTreeSet<String>,
     ) {
         let ctx = scope.ctx();
 
@@ -726,14 +726,14 @@ impl Expander {
         };
         let Some(prepared) = prepared else {
             self.bind_register(step, scope, None, &Status::WouldRunUnprobed);
-            self.record(step, scope, depth, tags, Status::WouldRunUnprobed);
+            self.record(step, scope, depth, Status::WouldRunUnprobed);
             return;
         };
 
         let unprobed = matches!(self.mode, Mode::Plan { probe: false });
         if unprobed {
             self.bind_register(step, scope, None, &Status::WouldRunUnprobed);
-            self.record(step, scope, depth, tags, Status::WouldRunUnprobed);
+            self.record(step, scope, depth, Status::WouldRunUnprobed);
             return;
         }
 
@@ -988,15 +988,11 @@ impl Expander {
     // ── helpers ───────────────────────────────────────────────────────────
 
     /// A step that reached a verdict without running: skipped, or unprobed.
-    fn record(
-        &mut self,
-        step: &Step<'static>,
-        scope: &Scope,
-        depth: usize,
-        tags: BTreeSet<String>,
-        status: Status,
-    ) {
-        let _ = tags;
+    ///
+    /// Takes no tags, unlike `emit`: a step that never ran has nothing to
+    /// report about them, and the parameter was being discarded on the first
+    /// line.
+    fn record(&mut self, step: &Step<'static>, scope: &Scope, depth: usize, status: Status) {
         self.finish(
             step,
             scope,
@@ -1037,7 +1033,10 @@ impl Expander {
         );
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one walk step: the step, its scope, its depth, its tags and the runner's answer"
+    )]
     fn finish(
         &mut self,
         step: &Step<'static>,
@@ -1300,7 +1299,7 @@ fn collect_tree(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
         let mut entries: Vec<_> = std::fs::read_dir(&d)?.collect::<std::io::Result<_>>()?;
-        entries.sort_by_key(|e| e.file_name());
+        entries.sort_by_key(std::fs::DirEntry::file_name);
         for e in entries {
             let p = e.path();
             if p.is_dir() {

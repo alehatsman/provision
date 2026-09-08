@@ -389,7 +389,7 @@ fn run() -> Result<u8, Diag> {
                         "give a component file, a directory with a trailing `/`, or --step",
                     ));
                 };
-                return run_one_step(&src, &run, verbose, stream, ask_sudo_pass, base);
+                return run_one_step(&src, &run, verbose, stream, ask_sudo_pass, &base);
             };
             if step.is_some() {
                 return Err(Diag::file_level("--step", "takes no file argument"));
@@ -533,7 +533,7 @@ fn run_one_step(
     verbose: bool,
     stream: bool,
     ask_sudo_pass: bool,
-    base: PathBuf,
+    base: &Path,
 ) -> Result<u8, Diag> {
     let doc = yaml::Doc::from_str("<step>", src)?;
     let node = doc.node();
@@ -559,7 +559,7 @@ nothing later could read",
     let mut check = expander(&run.vars, Mode::Validate { strict: false }, run.selection())?;
     check.run_steps(std::slice::from_ref(&step))?;
     if !check.diags.is_empty() {
-        report(&check, &base, None);
+        report(&check, base, None);
         return Ok(EXIT_USAGE);
     }
     let sudo = Sudo::preflight(check.needs_sudo, ask_sudo_pass)?;
@@ -572,7 +572,7 @@ nothing later could read",
             root_available: true,
             ungated_ok: true,
         })
-        .with_sink(run.sink(base.clone(), verbose, stream));
+        .with_sink(run.sink(base.to_path_buf(), verbose, stream));
 
     let started = Instant::now();
     ex.run_steps(std::slice::from_ref(&step))?;
@@ -580,7 +580,7 @@ nothing later could read",
 
     if !ex.diags.is_empty() {
         eprintln!();
-        report(&ex, &base, None);
+        report(&ex, base, None);
         return Ok(EXIT_USAGE);
     }
     if ex.summary.interrupted {

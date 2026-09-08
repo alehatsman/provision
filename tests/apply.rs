@@ -1300,7 +1300,7 @@ fn a_symlink_in_the_source_tree_is_an_error() {
 /// cleans itself up.
 struct Unit {
     name: String,
-    path: std::path::PathBuf,
+    path: PathBuf,
 }
 
 impl Unit {
@@ -1348,7 +1348,7 @@ fn systemctl(args: &[&str]) -> bool {
         .unwrap_or(false)
 }
 
-fn service_plan(dir: &Path, name: &str, body: &str) -> std::path::PathBuf {
+fn service_plan(dir: &Path, name: &str, body: &str) -> PathBuf {
     let plan = dir.join("service.yml");
     std::fs::write(
         &plan,

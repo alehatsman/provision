@@ -18,7 +18,7 @@ impl Json {
         Json { base }
     }
 
-    fn emit(&self, v: serde_json::Value) {
+    fn emit(&self, v: &serde_json::Value) {
         let mut out = std::io::stdout().lock();
         let _ = writeln!(out, "{v}");
         let _ = out.flush();
@@ -65,11 +65,11 @@ impl Sink for Json {
             m.insert("attempt".into(), json!(ev.attempt));
             m.insert("attempts".into(), json!(ev.attempts));
         }
-        self.emit(o);
+        self.emit(&o);
     }
 
     fn summary(&mut self, plan: &Path, s: &Summary) {
-        self.emit(json!({
+        self.emit(&json!({
             "event": "summary",
             "plan": self.rel(plan),
             "total": s.total,

@@ -652,7 +652,7 @@ impl Spec {
     fn dir_is_empty(&self, ctx: &Ctx<'_>) -> bool {
         if ctx.reads_as_root() {
             return match ctx.as_root(&["ls", "-A", &self.path]) {
-                Ok(got) => got.stdout.iter().all(|b| b.is_ascii_whitespace()),
+                Ok(got) => got.stdout.iter().all(u8::is_ascii_whitespace),
                 Err(_) => false,
             };
         }

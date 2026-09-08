@@ -95,7 +95,7 @@ impl Engine {
     /// Render a spanned node into a value: strings through the field rule of
     /// §3.4, sequences and mappings element by element, everything else as
     /// written. Errors are anchored at the node that failed, not the root.
-    pub(crate) fn render_node<'a>(&self, at: N<'a>, ctx: &Value) -> Result<Value> {
+    pub(crate) fn render_node(&self, at: N<'_>, ctx: &Value) -> Result<Value> {
         match at.as_str() {
             Ok(s) => self
                 .render_field(s, ctx)
@@ -202,8 +202,8 @@ fn kind_name(v: &Value) -> &'static str {
 
 // ── filters ───────────────────────────────────────────────────────────────
 
-fn f_expanduser(s: String) -> String {
-    expanduser(&s)
+fn f_expanduser(s: &str) -> String {
+    expanduser(s)
 }
 
 /// `~` and `~/…` only. `~other` is left alone: the tool has no business
@@ -221,38 +221,38 @@ pub(crate) fn expanduser(s: &str) -> String {
     }
 }
 
-fn f_basename(s: String) -> String {
-    Path::new(&s)
+fn f_basename(s: &str) -> String {
+    Path::new(s)
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or(s)
+        .unwrap_or_else(|| s.to_string())
 }
 
-fn f_dirname(s: String) -> String {
-    Path::new(&s)
+fn f_dirname(s: &str) -> String {
+    Path::new(s)
         .parent()
         .map(|n| n.display().to_string())
         .unwrap_or_default()
 }
 
 /// POSIX single-quote shell escaping. Safe for every byte.
-fn f_quote(s: String) -> String {
+fn f_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
-fn f_to_json(v: Value) -> std::result::Result<String, minijinja::Error> {
-    serde_json::to_string(&v)
+fn f_to_json(v: &Value) -> std::result::Result<String, minijinja::Error> {
+    serde_json::to_string(v)
         .map_err(|e| minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string()))
 }
 
-fn f_to_yaml(v: Value) -> String {
+fn f_to_yaml(v: &Value) -> String {
     let mut out = String::new();
-    emit_yaml(&v, 0, &mut out);
+    emit_yaml(v, 0, &mut out);
     out
 }
 
-fn t_exists(s: String) -> bool {
-    Path::new(&expanduser(&s)).exists()
+fn t_exists(s: &str) -> bool {
+    Path::new(&expanduser(s)).exists()
 }
 
 // ── a small YAML emitter ─────────────────────────────────────────────────
@@ -262,7 +262,7 @@ fn emit_yaml(v: &Value, indent: usize, out: &mut String) {
     let pad = "  ".repeat(indent);
     match v.kind() {
         Kind::Seq => {
-            let items: Vec<Value> = v.try_iter().map(|i| i.collect()).unwrap_or_default();
+            let items: Vec<Value> = v.try_iter().map(Iterator::collect).unwrap_or_default();
             if items.is_empty() {
                 out.push_str("[]\n");
                 return;
@@ -277,7 +277,7 @@ fn emit_yaml(v: &Value, indent: usize, out: &mut String) {
             }
         }
         Kind::Map => {
-            let keys: Vec<Value> = v.try_iter().map(|i| i.collect()).unwrap_or_default();
+            let keys: Vec<Value> = v.try_iter().map(Iterator::collect).unwrap_or_default();
             if keys.is_empty() {
                 out.push_str("{}\n");
                 return;
@@ -330,7 +330,7 @@ fn scalar_yaml(v: &Value) -> String {
                     "true" | "false" | "null" | "yes" | "no" | "on" | "off" | "~"
                 )
                 && s.parse::<f64>().is_err();
-            if plain { s } else { format!("{:?}", s) }
+            if plain { s } else { format!("{s:?}") }
         }
     }
 }

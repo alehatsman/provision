@@ -67,7 +67,7 @@ pub(crate) struct Step<'a> {
     pub mods: Mods<'a>,
 }
 
-impl<'a> Step<'a> {
+impl Step<'_> {
     pub(crate) fn is_structural(&self) -> bool {
         STRUCTURAL_KEYS.contains(&self.key)
     }
@@ -132,7 +132,7 @@ pub(crate) struct Mods<'a> {
 ///
 /// A malformed step does not stop the others: the gate is that *every*
 /// validation error carries a position, which means reporting all of them.
-pub(crate) fn parse_steps<'a>(root: N<'a>) -> Result<(Vec<Step<'a>>, Vec<crate::error::Diag>)> {
+pub(crate) fn parse_steps(root: N<'_>) -> Result<(Vec<Step<'_>>, Vec<crate::error::Diag>)> {
     let items = root.as_seq().map_err(|_| {
         root.err(format!("a plan is a list of steps, found {}", root.kind()))
             .with_note(
