@@ -440,12 +440,18 @@ Expected `plan` diffs on an already-converged machine after migration:
    `provision` branch of dotfiles. `provision validate` green on all five
    machine plans, and every `.j2` renders under `--plan-no-probe`.
    `mgitci.yml` is out of scope (§6) and `tasks.yml` is deleted.
-2. x1 first (Arch, most typed actions, no Windows). `plan`, fix `unknown`s,
-   `apply`, `plan` again shows nothing.
-3. mac and work_mac.
-4. main_pc and mini_pc WSL side.
-5. Windows bootstrap on mini_pc (the one that matters less if it breaks).
-6. Delete mooncake from every machine. Merge the branch.
+2. main_pc WSL first. It is the box the work was done on, so a failure is
+   diagnosable in the same session that caused it, and it is the CI server:
+   `provision-ci:latest` cannot be built anywhere else. `plan`, fix
+   `unknown`s, `apply`, `plan` again shows nothing.
+3. main_pc Windows host. Done alongside the WSL side because the two halves
+   share `.wslconfig` and the firewall rules, and the host is reachable from
+   the WSL side without leaving the machine.
+4. mini_pc, both sides.
+5. mac and work_mac.
+6. x1 last. It is the only always-with-me machine and the usual controller;
+   breaking it strands the fleet. Everything else has proved the tool first.
+7. Delete mooncake from every machine. Merge the branch.
 
 ## 8. What the rewrite found
 

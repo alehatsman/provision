@@ -229,8 +229,10 @@ shell:                         # long form
   non-zero, or `creates` did not exist, so the work was needed — a successful
   run is `changed`. With no gate the verdict is `unknown`: the step ran, and
   nothing here can say what it did. `changed_when` overrides either.
-- Plan: prints `would run`. If `unless` or `creates` is set, plan evaluates
-  it and reports `skip` or `would run`. (This used to promise "plus the first
+- Plan: a gated step prints `skip` or `would run` — plan evaluates `unless`
+  or `creates` and the gate's answer is a verdict. An ungated step prints
+  `unknown`, the same verdict apply gives it and for the same reason: it
+  will run, and nothing here can say what it would do. (This used to promise "plus the first
   line of the script". The renderer never printed one and nothing has wanted
   it: the step's name is what carries the meaning, and a script's first line
   is usually `set -euo pipefail`.)

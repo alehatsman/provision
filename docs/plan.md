@@ -12,12 +12,20 @@ Status: phases 0–4 code complete · 2026-09-08
 | 3 — tags, polish, Windows | Windows all-targets clean, self-contained `.exe` | `1a5c5f6` |
 | 4 — migration and cut-over | dotfiles applies with provision, main_pc reports no `unknown` | dotfiles `91415fc` |
 
+Windows was exercised natively on main_pc's host on 2026-09-08, from WSL via
+`powershell.exe`, with the cross-compiled `x86_64-pc-windows-gnu` binary run
+from a Windows path: `facts` reports the right `os`/`home`/`username`,
+`validate` and `plan` (both with and without probing) run against
+`platforms\windows\bootstrap.yml`, and a throwaway plan under `%TEMP%`
+applied twice — changed, then ok — covering the powershell interpreter,
+`file`, `template`, `register`, a `when` reading it, `creates`, `unless` and
+`failed_when`. Exit codes 0, 2 and 3 all correct. What is still untested
+there: `pkg` against winget, `service`, and Ctrl-C.
+
 Open, and all of it the owner's — none of it can close from this machine:
 
-- Apply to each machine, x1 first (migration.md §7 steps 2–6). Every gate
-  below that line is a real apply.
-- `validate` and `plan` on a Windows box. Both are validated on Linux with
-  `--vars-file`; neither has run on Windows.
+- Apply to each machine, main_pc WSL first and x1 last (migration.md §7
+  steps 2–7). Every gate below that line is a real apply.
 - Build `provision-ci:latest` on main_pc. dotfiles CI is red until it exists.
 - `just` is installed on no machine and provisioned by nothing, so the
   justfile apply recipes are documentation. Adding it is a fleet dependency.
