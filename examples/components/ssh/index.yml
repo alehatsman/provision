@@ -10,7 +10,13 @@
   tags: [ssh]
 
 - name: Generate SSH identity
-  shell: ssh-keygen -t ed25519 -C "{{ email }}" -f "{{ ssh_key_path }}" -N ""
+  # `| expanduser` because spec §3 leaves `~` alone inside a shell script —
+  # the shell is supposed to do it, and inside double quotes the shell does
+  # not. `creates:` below is a path field the tool owns, so it *is* expanded:
+  # without the filter the gate would watch the real path while ssh-keygen
+  # wrote to a directory literally named `~`, and the step would run forever
+  # without ever satisfying its own gate.
+  shell: ssh-keygen -t ed25519 -C "{{ email }}" -f "{{ ssh_key_path | expanduser }}" -N ""
   creates: "{{ ssh_key_path }}"
   tags: [ssh]
 
