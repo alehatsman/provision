@@ -349,8 +349,15 @@ Expected `plan` diffs on an already-converged machine after migration:
   `always`.
 - **Strict templates.** An undefined variable fails `validate`. Expect a
   handful in rarely-run branches (`when: false` blocks). Fix or delete.
-- **`sudo -n` preflight.** On mac and x1, without NOPASSWD, `apply` fails
-  immediately unless `--ask-sudo-pass` is given. This replaces `-K`.
+- **`sudo -n` preflight.** `--ask-sudo-pass` replaces `-K`, and it is
+  needed on a machine that has never been applied to. **Corrected
+  2026-09-08:** this used to say "on mac and x1, without NOPASSWD", which
+  is wrong — `shared/bootstrap.yml` installs
+  `/etc/sudoers.d/<user>-nopasswd` with `NOPASSWD: ALL` on every linux and
+  darwin host, and all five machine plans import it. mooncake's own
+  bootstrap writes the identical file, so the machines it converged already
+  have it. The three machine headers that prescribed the flag forever were
+  fixed in dotfiles `6ff625f`.
 - **No `changed` for gate-less shell.** It shows as `unknown`, in magenta.
   This is a feature.
 - **Template directory mode is not a sync.** `for_each_file` re-rendered the
@@ -392,20 +399,36 @@ Expected `plan` diffs on an already-converged machine after migration:
   leaving it would only mean excluding a file from `validate`.
 
   ```
-  x1:        provision apply x1.yml
-  main_pc:   provision apply main_pc.yml
+  x1:        mkdir -p ~/.local/state/provision
+             provision apply x1.yml --json >> ~/.local/state/provision/x1.jsonl
   plan m:    provision plan {{m}}.yml
   ci:        for m in main_pc mini_pc x1 mac work_mac; do provision plan --plan-no-probe $m.yml; done
   ```
 
+  Each apply recipe appends a JSON run log (D9). `--json` moves the human
+  output to stderr, so the terminal still shows progress while the shell
+  keeps the record; there is no `--log` flag and there will not be one.
+
+  **`just` is installed on no machine in this fleet and provisioned by
+  nothing**, so these recipes are documentation until it is. Adding it to a
+  package list is a new fleet dependency, and therefore the owner's call,
+  not something to slip in alongside the recipes.
+
 - `mgitci.yml`: replace the `mooncake validate` / `mooncake plan --no-inspect`
   steps with `provision validate` / `provision plan --plan-no-probe`. The CI
-  image carries the `provision` binary instead of mooncake. **Not on this
-  branch** (decided 2026-09-08): the CI image has mooncake and no provision
-  binary, so flipping it now breaks CI before provision can apply anything.
-  It moves in §7 step 6, with the release that Phase 1 produces. Until
-  then `mgitci.yml` stays a mooncake file and is not passed to
-  `provision validate`.
+  image carries the `provision` binary **as well as** mooncake, not instead
+  of it: moongitd execs every CI step as `mooncake step '<yaml>'` inside the
+  container, so the image has to carry mooncake whatever applies the
+  dotfiles. `components/provision` builds `provision-ci:latest` FROM
+  `mooncake-ci:latest` plus the binary, sha-gated on the binary's hash and
+  the base image id.
+
+  **Landed on the branch 2026-09-08** (dotfiles `367624c` for the component,
+  `91415fc` for the switch), superseding the earlier "not on this branch"
+  ruling. The hazard it named is real and unchanged, so the switch is its
+  own last commit and says so in its message: **CI is red until the image
+  exists on main_pc**, because CI cannot pull (dotfiles#8) and building the
+  image is a real apply — §7 step 6, the owner's.
 
 - The nine repos with `tasks.yml` (`dex`, `moongit`, `moongit-*`, `cry-aye`)
   and the `go-quality` presets are a separate migration to `just`, outside

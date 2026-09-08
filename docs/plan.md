@@ -254,17 +254,40 @@ Gate
 
 Deliverables
 
-- `~/dotfiles` fully on provision. mooncake removed from every machine's
-  plan and from `shared/bootstrap.yml`.
-- dotfiles CI runs `provision validate` + `provision plan --plan-no-probe`
-  on all machine plans.
-- `mooncake` binary uninstalled from all five machines.
+- **Rewritten 2026-09-08 by review, owner to confirm.** This section used to
+  say "mooncake removed from every machine's plan and from
+  `shared/bootstrap.yml`" and "`mooncake` binary uninstalled from all five
+  machines". Both are dead as written, and migration.md §5 says why:
+  mooncake stays a tool these plans provision around. `components/mooncake`
+  builds a CI image, `components/fleet-peer` runs `mooncake agentd
+  bootstrap`, the machine vars feed that agentd — and moongit's runner execs
+  every CI step as `mooncake step '<yaml>'`, so the CI image has to carry
+  mooncake no matter which tool applies the dotfiles. What phase 4 actually
+  delivers is that **provision is the applier**. Whether the owner uninstalls
+  anything afterwards is his call and not a gate.
+- **Done** (dotfiles `6ff625f`…`91415fc`) `~/dotfiles` applies with
+  provision. `tasks.yml` and `mooncake.yml` are gone from the branch, the
+  `justfile` carries the apply recipes with `--json` run logs (D9), and
+  every machine plan validates.
+- **Done** (dotfiles `91415fc`) dotfiles CI runs `provision validate` +
+  `provision plan --plan-no-probe` on all five machine plans, in an image
+  built by `components/provision`.
+- **Done** (dotfiles `d92ed9c`) every step on main_pc answers what it did:
+  `plan` reports no `unknown`, and `validate --strict main_pc.yml` is clean.
 
 Gate
 
 - `provision apply` converges each machine from its mooncake-converged state
-  with zero unexpected changes, then `plan` shows nothing to do.
+  with zero unexpected changes, then `plan` shows nothing to do. **Owner's**,
+  and the substance of migration.md §7 steps 2–6: every one of these is a
+  real apply on a machine, x1 first.
 - One fresh machine (a VM or the next reinstall) bootstraps end to end.
+  **Owner's**, for the same reason.
+- Building `provision-ci:latest` on main_pc. **Owner's** — CI stays red
+  until it exists, which is why that switch landed last and alone.
+- `just` is installed on no machine in this fleet and provisioned by
+  nothing, so the apply recipes are documentation until it is. Adding it to
+  a package list is a new fleet dependency and the **owner's** call.
 
 ## Order and dependencies
 
