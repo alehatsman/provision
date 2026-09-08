@@ -55,7 +55,7 @@ fn run_in(scratch: &Path, args: &[&str]) -> Output {
 
 fn apply(scratch: &Path, plan: &str, extra: &[&str]) -> (i32, String) {
     let path = fixture(plan);
-    let mut args = vec!["apply", path.to_str().unwrap()];
+    let mut args = vec!["apply", path.to_str().expect("fixture paths are UTF-8")];
     args.extend_from_slice(extra);
     let out = run_in(scratch, &args);
     (
@@ -75,6 +75,9 @@ fn verdict(out: &str, name: &str) -> String {
     words.join(" ")
 }
 
+// A missing line is this helper's assertion failure; panicking with the
+// whole output is how the test says what it expected.
+#[expect(clippy::panic, reason = "a test helper's assertion failure")]
 fn line_for<'a>(out: &'a str, name: &str) -> &'a str {
     out.lines()
         .find(|l| l.contains(name))
@@ -645,7 +648,7 @@ fn ctrl_c_kills_the_step_and_exits_130() {
     let dir = tempfile::tempdir().unwrap();
     let path = fixture("interrupt.yml");
     let child = Command::new(env!("CARGO_BIN_EXE_provision"))
-        .args(["apply", path.to_str().unwrap()])
+        .args(["apply", path.to_str().expect("fixture paths are UTF-8")])
         .env("PROVISION_SCRATCH", dir.path())
         .env("NO_COLOR", "1")
         .stdout(std::process::Stdio::piped())
@@ -1072,7 +1075,7 @@ fn the_sudo_write_path_stages_outside_the_destination() {
 
     let run = |extra: &[&str]| {
         let path = fixture("file_sudo.yml");
-        let mut args = vec!["apply", path.to_str().unwrap()];
+        let mut args = vec!["apply", path.to_str().expect("fixture paths are UTF-8")];
         args.extend_from_slice(extra);
         let out = Command::new(env!("CARGO_BIN_EXE_provision"))
             .args(&args)
@@ -1126,12 +1129,17 @@ fn sudo(args: &[&str]) -> bool {
 
 fn mode_of(p: &Path) -> u32 {
     use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(p).unwrap().permissions().mode() & 0o7777
+    std::fs::metadata(p)
+        .expect("the test just created this path")
+        .permissions()
+        .mode()
+        & 0o7777
 }
 
 fn set_mode(p: &Path, mode: u32) {
     use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode)).unwrap();
+    std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode))
+        .expect("the test just created this path");
 }
 
 #[test]
@@ -1371,7 +1379,7 @@ fn service_plan(dir: &Path, name: &str, body: &str) -> PathBuf {
         &plan,
         format!("- name: The test unit\n  service:\n    name: {name}\n    scope: user\n{body}"),
     )
-    .unwrap();
+    .expect("writing a plan into the test's own tempdir");
     plan
 }
 
@@ -1503,8 +1511,11 @@ fn apt_is_local() -> bool {
 /// below and no malformed body can act.
 fn pkg_plan(dir: &Path, body: &str) -> (i32, String) {
     let path = dir.join("pkg.yml");
-    std::fs::write(&path, body).unwrap();
-    let out = run_in(dir, &["plan", path.to_str().unwrap()]);
+    std::fs::write(&path, body).expect("writing a plan into the test's own tempdir");
+    let out = run_in(
+        dir,
+        &["plan", path.to_str().expect("fixture paths are UTF-8")],
+    );
     (
         out.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr),
@@ -1683,11 +1694,11 @@ fn yay_is_never_chosen_as_the_default_manager() {
     let path = dir.path().join("pkg.yml");
     std::fs::write(&path, "- name: No default here\n  pkg:\n    name: git\n").unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_provision"))
-        .args(["plan", path.to_str().unwrap()])
+        .args(["plan", path.to_str().expect("fixture paths are UTF-8")])
         .env("PATH", &bin)
         .env("NO_COLOR", "1")
         .output()
-        .unwrap();
+        .expect("provision failed to start");
     let text =
         String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(3), "{text}");
@@ -1778,7 +1789,7 @@ fn update_cache_never_runs_a_command_under_plan() {
     )
     .unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_provision"))
-        .args(["plan", path.to_str().unwrap()])
+        .args(["plan", path.to_str().expect("fixture paths are UTF-8")])
         .env(
             "PATH",
             format!(
@@ -1789,7 +1800,7 @@ fn update_cache_never_runs_a_command_under_plan() {
         )
         .env("NO_COLOR", "1")
         .output()
-        .unwrap();
+        .expect("provision failed to start");
     let text =
         String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(2), "{text}");
@@ -1830,24 +1841,28 @@ fn pkg_json_status_matches_the_spec_vocabulary() {
 fn fake_manager(bin_dir: &Path, name: &str, body: &str) {
     use std::os::unix::fs::PermissionsExt;
     let path = bin_dir.join(name);
-    std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-    let mut perm = std::fs::metadata(&path).unwrap().permissions();
+    std::fs::write(&path, format!("#!/bin/sh\n{body}\n"))
+        .expect("writing a stub into the test's own tempdir");
+    let mut perm = std::fs::metadata(&path)
+        .expect("just written")
+        .permissions();
     perm.set_mode(0o755);
-    std::fs::set_permissions(&path, perm).unwrap();
+    std::fs::set_permissions(&path, perm).expect("just written");
 }
 
 /// Cats a captured-output fixture back out, whatever the manager was called
 /// with — plan only ever asks it to query.
 fn cat_fixture(name: &str) -> String {
-    let text = std::fs::read_to_string(fixture(&format!("pkg/{name}"))).unwrap();
+    let text =
+        std::fs::read_to_string(fixture(&format!("pkg/{name}"))).expect("a checked-in fixture");
     format!("cat <<'PKGFIXTURE'\n{text}PKGFIXTURE\n")
 }
 
 fn pkg_plan_with_path(dir: &Path, body: &str, bin_dir: &Path) -> (i32, String) {
     let path = dir.join("pkg.yml");
-    std::fs::write(&path, body).unwrap();
+    std::fs::write(&path, body).expect("writing a plan into the test's own tempdir");
     let out = Command::new(env!("CARGO_BIN_EXE_provision"))
-        .args(["plan", path.to_str().unwrap()])
+        .args(["plan", path.to_str().expect("fixture paths are UTF-8")])
         .env(
             "PATH",
             format!(
@@ -1858,7 +1873,7 @@ fn pkg_plan_with_path(dir: &Path, body: &str, bin_dir: &Path) -> (i32, String) {
         )
         .env("NO_COLOR", "1")
         .output()
-        .unwrap();
+        .expect("provision failed to start");
     (
         out.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr),
@@ -1911,9 +1926,9 @@ fn parse_space_pairs_reads_a_pacman_query() {
 /// one lets the stub mutate: apply is the only mode that calls install.
 fn pkg_apply_with_path(dir: &Path, body: &str, bin_dir: &Path) -> (i32, String) {
     let path = dir.join("pkg.yml");
-    std::fs::write(&path, body).unwrap();
+    std::fs::write(&path, body).expect("writing a plan into the test's own tempdir");
     let out = Command::new(env!("CARGO_BIN_EXE_provision"))
-        .args(["apply", path.to_str().unwrap()])
+        .args(["apply", path.to_str().expect("fixture paths are UTF-8")])
         .env(
             "PATH",
             format!(
@@ -1924,7 +1939,7 @@ fn pkg_apply_with_path(dir: &Path, body: &str, bin_dir: &Path) -> (i32, String) 
         )
         .env("NO_COLOR", "1")
         .output()
-        .unwrap();
+        .expect("provision failed to start");
     (
         out.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr),

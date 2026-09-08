@@ -41,7 +41,11 @@ fn run(args: &[&str]) -> (i32, String) {
 /// echoed, and a captured step prints nothing without it.
 fn task(extra: &[&str]) -> (i32, String) {
     let path = fixture("task.yml");
-    let mut args = vec!["run", path.to_str().unwrap(), "--verbose"];
+    let mut args = vec![
+        "run",
+        path.to_str().expect("fixture paths are UTF-8"),
+        "--verbose",
+    ];
     args.extend_from_slice(extra);
     run(&args)
 }

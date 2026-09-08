@@ -29,7 +29,7 @@ fn run(args: &[&str]) -> Output {
 
 fn validate(fixture: &str) -> (i32, String) {
     let path = fixtures().join(fixture);
-    let out = run(&["validate", path.to_str().unwrap()]);
+    let out = run(&["validate", path.to_str().expect("fixture paths are UTF-8")]);
     (
         out.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&out.stderr).into_owned() + &String::from_utf8_lossy(&out.stdout),
@@ -47,7 +47,7 @@ fn plan(args: &[&str]) -> (i32, String) {
 }
 
 fn fixture_arg(name: &str) -> String {
-    fixtures().join(name).to_str().unwrap().to_string()
+    fixtures().join(name).display().to_string()
 }
 
 /// Every error must name a file, a line and a column.
@@ -57,8 +57,12 @@ fn assert_positioned(out: &str) {
         .filter(|l| l.trim_start().starts_with("error:"))
         .collect();
     assert!(!errors.is_empty(), "expected at least one error in:\n{out}");
+    #[expect(clippy::panic, reason = "a test's assertion failure")]
     for e in errors {
-        let after = e.split_once("error:").unwrap().1.trim();
+        let Some((_, after)) = e.split_once("error:") else {
+            panic!("not an error line: {e}")
+        };
+        let after = after.trim();
         let (loc, _) = after.split_once(' ').unwrap_or((after, ""));
         let parts: Vec<&str> = loc.trim_end_matches(':').rsplitn(3, ':').collect();
         // rsplitn yields col, line, file — so a well-formed position is
