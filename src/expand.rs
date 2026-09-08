@@ -27,6 +27,16 @@ use std::time::{Duration, Instant};
 /// Spec §4: a step with no `timeout` gets ten minutes.
 const DEFAULT_TIMEOUT: Duration = Duration::from_mins(10);
 
+/// The one skip reason whose `name` must not be rendered. Spec §8: a
+/// tag-excluded step is filtered *before* anything of it is rendered,
+/// precisely so it cannot fail on a variable it was never meant to read — so
+/// its name has not been rendered either, and rendering it now would
+/// reintroduce exactly the failure the ordering exists to prevent.
+///
+/// Named rather than spelled twice: `step_name` decides by comparing against
+/// this, and a second literal would let the two drift apart silently.
+const NOT_SELECTED: &str = "not selected by tags";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Mode {
     /// Check everything; run nothing; produce no step list.
@@ -227,7 +237,7 @@ impl Expander {
         // Structural steps are exempt: they build the scope every later step
         // reads, and selecting work must not silently unset variables.
         if !step.is_structural() && !self.selection.selects(&tags) {
-            let status = Status::Skipped("not selected by tags".into());
+            let status = Status::Skipped(NOT_SELECTED.into());
             self.bind_register(step, scope, None, &status);
             self.record(step, scope, depth, status);
             return;
@@ -1065,8 +1075,24 @@ impl Expander {
         let Ok(raw) = n.as_str() else {
             return step.fallback_name();
         };
-        if matches!(status, Status::Skipped(_)) {
+        // A tag exclusion keeps the raw name (see `NOT_SELECTED`). Every other
+        // skip — `when`, `unless`, `creates` — has already rendered its gate
+        // against this scope, so the name renders against the same scope with
+        // nothing new to fail on, and printing `Pin rust-quality to
+        // {{ rq_version }}` when the same step failing prints the value was
+        // just the reader losing information for no reason.
+        if matches!(status, Status::Skipped(why) if why == NOT_SELECTED) {
             return raw.to_string();
+        }
+        // A skipped step's name is not worth a diagnostic: nothing ran, and
+        // the raw text still identifies the line. A step that *did* run and
+        // whose name would not render is a real fault in the plan and keeps
+        // its error.
+        if matches!(status, Status::Skipped(_)) {
+            return match self.engine.render(raw, &scope.ctx()) {
+                Ok(s) if !s.trim().is_empty() => s,
+                _ => raw.to_string(),
+            };
         }
         match self.engine.render(raw, &scope.ctx()) {
             Ok(s) if !s.trim().is_empty() => s,

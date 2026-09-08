@@ -1,0 +1,32 @@
+---
+# Spec §8 and §9.1. A skipped step used to print its `name` raw, so the same
+# step read `Pin rust-quality to {{ rq_version }}` when skipped and
+# `Pin rust-quality to v0.2.0` when it failed.
+#
+# Three steps, because the rule has two halves and the tag half needs two
+# cases to pin: one name that *would* look different if it were rendered, and
+# one that would blow up if it were.
+- vars:
+    who: world
+
+# Skipped by its gate. The gate has already been rendered and run against this
+# scope, so the name renders against the same scope with nothing new to fail on.
+- name: "greets {{ who }}"
+  shell: "true"
+  unless: "true"
+
+# Excluded by tags, with a variable that IS defined. Rendering it would work,
+# which is what makes this the case that catches a missing guard: raw and
+# rendered differ here, and only here.
+- name: "excluded {{ who }}"
+  shell: "true"
+  tags: [never]
+  changed_when: "false"
+
+# Excluded by tags, with a variable that is not defined anywhere. Tag
+# filtering runs before anything is rendered precisely so a dropped step
+# cannot fail on a name like this, and it must stay that way.
+- name: "excluded {{ never_defined_anywhere }}"
+  shell: "true"
+  tags: [never]
+  changed_when: "false"

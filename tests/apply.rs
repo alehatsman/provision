@@ -422,6 +422,45 @@ fn json_carries_rc_and_output_for_every_step_that_ran_a_command() {
     assert_eq!(steps[3]["status"], "skipped");
 }
 
+// A skipped step's name is rendered like any other -- except a tag-excluded
+// one, which is filtered before anything of it is rendered (spec §8) so that
+// it cannot fail on a variable it was never meant to read. Rendering its name
+// would put that failure straight back.
+#[test]
+fn a_skipped_steps_name_is_rendered_unless_tags_excluded_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(dir.path(), "skipped_name.yml", &["--skip-tags", "never"]);
+    assert_eq!(code, 0, "{out}");
+
+    // Skipped by `unless`, and the name says what it greets.
+    assert!(
+        out.contains("greets world"),
+        "the name did not render:\n{out}"
+    );
+    assert!(!out.contains("greets {{ who }}"), "{out}");
+
+    // Excluded by tags: raw even where rendering would have succeeded. This
+    // is the assertion that catches a missing guard -- the undefined-variable
+    // case below cannot, because a name that fails to render falls back to raw
+    // and so reads the same either way.
+    assert!(
+        out.contains("excluded {{ who }}"),
+        "a tag-excluded name must stay raw:\n{out}"
+    );
+    assert!(
+        !out.contains("excluded world"),
+        "a tag-excluded name rendered:\n{out}"
+    );
+
+    // And one that would not render at all is still not an error.
+    assert!(
+        out.contains("excluded {{ never_defined_anywhere }}"),
+        "{out}"
+    );
+    assert!(!out.contains("undefined variable"), "{out}");
+    assert!(out.contains("3 skipped"), "{out}");
+}
+
 #[test]
 fn hide_skipped_drops_the_lines_but_not_the_count() {
     let dir = tempfile::tempdir().unwrap();
