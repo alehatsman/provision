@@ -1,4 +1,0 @@
----
-- name: Where the step runs
-  shell: echo "cwd=$(pwd)"
-  changed_when: "false"

@@ -732,7 +732,7 @@ fn cmd_runs_an_argv_and_is_idempotent() {
 }
 
 #[test]
-fn cwd_defaults_to_the_plan_files_directory_and_can_be_overridden() {
+fn cwd_defaults_to_the_invocation_directory_and_can_be_overridden() {
     let dir = tempfile::tempdir().unwrap();
     let (code, out) = apply(dir.path(), "cwd_default.yml", &[]);
     assert_eq!(code, 0, "{out}");

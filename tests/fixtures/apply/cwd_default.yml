@@ -1,14 +1,20 @@
 ---
-# Spec §4: with no `cwd:`, a step runs in the directory of the file it is in,
-# never the process cwd. This file proves it by looking for itself.
-- name: The default cwd is the plan file's own directory
-  shell: test -f ./cwd_default.yml
+# Spec §4, phase 5b: with no `cwd:`, a step runs in the directory provision
+# was invoked from, never the directory of the file it is written in. The
+# harness invokes from the repo root and this file lives three directories
+# down, so the two answers are different and both halves are asserted:
+# `Cargo.toml` is only in the one, `cwd_default.yml` only in the other.
+- name: The default cwd is the invocation directory
+  shell: |
+    set -eu
+    test -f ./Cargo.toml
+    test ! -f ./cwd_default.yml
   changed_when: "false"
 
 - name: An explicit cwd overrides it
   shell: |
     set -eu
-    test ! -f ./cwd_default.yml
+    test ! -f ./Cargo.toml
     printf 'here' > ./from-cwd-override
   cwd: "{{ env.PROVISION_SCRATCH }}"
   changed_when: "true"

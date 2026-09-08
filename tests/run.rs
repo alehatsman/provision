@@ -319,41 +319,38 @@ fn a_step_from_a_string_carries_its_own_position() {
     );
 }
 
-// ── component_dir and the run cwd ─────────────────────────────────────────
+// ── component_dir and the one cwd rule ────────────────────────────────────
 
-// Spec §3.2 and §4, the two things a shared quality gate needs. `inner.yml`
-// lives one directory down and is `use`d from above, so the two answers are
-// different directories and a test that confused them would show it.
+// Spec §3.2 and §4, the two things a shared quality gate needs, and the two
+// that are easiest to confuse. `inner.yml` lives one directory down and is
+// `use`d from above, so the component's own directory and the invocation
+// directory are different answers and a test that mixed them up would say so.
+//
+// Asserted under every verb that walks a root: one cwd rule means the same
+// file gives the same answer whichever way you enter it, and that identity is
+// the whole of phase 5b. Running it three times is cheap and it is exactly
+// what regressed before.
 #[test]
 fn a_used_component_knows_its_own_directory_and_runs_in_the_invocation_one() {
     let path = fixture("outer.yml");
-    let (code, out) = run(&["run", path.to_str().unwrap(), "--verbose"]);
-    assert_eq!(code, 0, "{out}");
-
     let root = env!("CARGO_MANIFEST_DIR");
-    // §3.2: absolute, and the component's own directory — not the caller's.
-    assert!(
-        out.contains(&format!("dir={root}/tests/fixtures/run/nested")),
-        "component_dir should be the component's own directory:\n{out}"
-    );
-    // §4: the invocation directory, even for a step inside a `use`. A shared
-    // gate checked out under ~/.cache must gate the repo you are standing in.
-    assert!(
-        out.contains(&format!("cwd={root}\n")),
-        "a run step should default to the invocation directory:\n{out}"
-    );
-}
 
-// The same file under `apply` keeps the old rule, which is what makes the
-// change safe for every machine plan in the fleet.
-#[test]
-fn apply_still_runs_a_step_in_its_own_files_directory() {
-    let plan = fixture("apply_cwd.yml");
-    let (code, out) = run(&["apply", plan.to_str().unwrap(), "--verbose"]);
-    assert_eq!(code, 0, "{out}");
-    let root = env!("CARGO_MANIFEST_DIR");
-    assert!(
-        out.contains(&format!("cwd={root}/tests/fixtures/run\n")),
-        "apply must still use the step's file directory:\n{out}"
-    );
+    for verb in ["run", "apply"] {
+        let (code, out) = run(&[verb, path.to_str().unwrap(), "--verbose"]);
+        assert_eq!(code, 0, "{verb}:\n{out}");
+
+        // §3.2: absolute, and the component's own directory — not the
+        // caller's, and not where provision was invoked.
+        assert!(
+            out.contains(&format!("dir={root}/tests/fixtures/run/nested")),
+            "{verb}: component_dir should be the component's own directory:\n{out}"
+        );
+        // §4: the invocation directory, even for a step inside a `use`. A
+        // shared gate checked out under ~/.cache must gate the repo you are
+        // standing in, not `cd` to its own toplevel and gate itself.
+        assert!(
+            out.contains(&format!("cwd={root}\n")),
+            "{verb}: a step should default to the invocation directory:\n{out}"
+        );
+    }
 }

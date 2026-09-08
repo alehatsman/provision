@@ -827,30 +827,22 @@ impl Expander {
             }
         }
 
-        // Spec §4: `cwd` defaults to the directory of the file the step is in,
-        // never the process cwd — the same rule every path in a plan follows.
-        let cwd = match text(step.mods.cwd) {
-            Some(dir) => Some(load::resolve(step.at.file, &expanduser(&dir))),
-            // `Path::new("x1.yml").parent()` is `Some("")`, not `None`, and
-            // `current_dir("")` is ENOENT — which surfaced as the baffling
-            // "cannot run `bash`: No such file or directory". So
-            // `provision apply x1.yml` failed where `./x1.yml` worked. When
-            // the plan is a bare filename its directory *is* the process cwd,
-            // so inheriting is both simpler and right.
-            // Under `run` the default is the invocation directory instead,
-            // for every step including one inside a `use`d component. A task
-            // is a command in the repo the operator is standing in; a shared
-            // gate checked out under ~/.cache would otherwise `cd` to its own
-            // toplevel and gate itself. `None` is exactly "inherit the
-            // process cwd", so there is nothing to compute.
-            None if matches!(self.mode, Mode::Run) => None,
-            None => step
-                .at
-                .file
-                .parent()
-                .filter(|p| !p.as_os_str().is_empty())
-                .map(Path::to_path_buf),
-        };
+        // Spec §4, phase 5b: `cwd` defaults to the invocation directory, for
+        // every command and every step, including one inside a `use`d
+        // component. A command runs where the operator is standing; a shared
+        // gate checked out under ~/.cache must gate the repo you are standing
+        // in and not `cd` to its own toplevel to gate itself. `None` is
+        // exactly "inherit the process cwd", so the default computes nothing.
+        //
+        // This used to be the step's own file's directory, which made the
+        // same component mean two things depending on the verb that entered
+        // it. Measured against the fleet before it went: no step depended on
+        // the old default — zero `cwd:` modifiers, zero relative paths in
+        // shell strings — and one rule beats two.
+        //
+        // An explicit `cwd:` still resolves against the step's own file, like
+        // every other path a plan names.
+        let cwd = text(step.mods.cwd).map(|dir| load::resolve(step.at.file, &expanduser(&dir)));
 
         Some(Prepared {
             action,
