@@ -24,16 +24,18 @@ there: `pkg` against winget, `service`, and Ctrl-C.
 
 Open, and all of it the owner's — none of it can close from this machine:
 
-- Apply to each machine, main_pc WSL first and x1 last (migration.md §7
-  steps 2–7). Every gate below that line is a real apply.
-- Build `provision-ci:latest` on main_pc. dotfiles CI is red until it exists.
+- Apply to the remaining machines, x1 last (migration.md §7 steps 4–6).
+  main_pc WSL is done: applied 2026-09-08, `0 would change` on the re-plan.
+  The Windows host is tested but not bootstrapped.
+- Merge the dotfiles `provision` branch. `provision-ci:latest` exists on
+  main_pc now, so CI is no longer red-by-construction.
 - ~~Rulings~~ — all six settled 2026-09-08. D1's windows-gnu amendment and
   D16 confirmed as written. The hung-`unless` failure confirmed.
   `--explain-var` stays spec'd and unbuilt, marked as such in §10.
   mooncake stays installed everywhere: a tool, not a dependency.
   `--keep-going` built — spec §8, `main.rs` and `expand.rs`.
-- The tag, a remote, and any push. `main` exists at `f788571`; the repo
-  has no remote and nothing has been pushed.
+- A tag. `main` lives at `github.com/alehatsman/provision`, public since
+  2026-09-08; nothing is tagged.
 
 Rust, one crate, one binary. Target: **6–9k lines of Rust** including
 tests, all seven actions, three platforms. If it passes 12k, something
