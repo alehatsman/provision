@@ -2,7 +2,7 @@
 
 A small, single-binary provisioning tool for your own machines. Rust.
 
-One YAML file per machine. Seven actions. Sequential execution, fail-fast,
+One YAML file per machine. Ten actions. Sequential execution, fail-fast,
 honest dry-run, readable output. No fleet, no daemon, no agent, no plugin
 economy.
 
@@ -66,8 +66,9 @@ The job is small and stable. The tool should be too.
 - **Shell is first-class.** Most real steps are shell. The tool makes shell
   steps *idempotent by declaration* (`creates`, `unless`) instead of
   pretending a typed action exists for everything.
-- **Seven typed actions** where idempotency genuinely needs state inspection:
-  `shell`, `cmd`, `file`, `template`, `pkg`, `service`, `assert`.
+- **Ten actions** where idempotency genuinely needs state inspection:
+  `shell`, `cmd`, `file`, `template`, `pkg`, `service`, `assert`, and from
+  phase 6 `git`, `download`, `defaults` (D4 as amended).
 - **Composition** with `vars`, `vars_file`, `import`, and `use` (a component
   with declared props).
 - **Jinja2 templating** (minijinja), strict undefined, the same `.j2` files
@@ -190,16 +191,19 @@ of it.
 ## Status
 
 Version 0.9.1. Phases 0 through 5b are code complete ([docs/plan.md](docs/plan.md)).
-`validate`, `plan`, `apply`, `list` and `facts` all work, and all seven
-actions — `shell`, `cmd`, `assert`, `file`, `template`, `pkg`, `service` —
-run for real, with `unless`, `creates`, `timeout`, `retry`, `env`, `cwd`,
-`register`, `changed_when`, `failed_when`, tags, sudo, Ctrl-C and `--json`.
-Components take typed `props`, from a `use:` or from `--prop` on the command
-line, and this repo's own tasks and the shared quality gate run through them.
-Windows cross-compiles to a self-contained `.exe` and has been run natively.
+`validate`, `plan`, `apply`, `list` and `facts` all work, and all ten
+actions — `shell`, `cmd`, `assert`, `file`, `template`, `pkg`, `service`,
+`git`, `download`, `defaults` — run for real, with `unless`, `creates`,
+`timeout`, `retry`, `env`, `cwd`, `register`, `changed_when`, `failed_when`,
+tags, sudo, Ctrl-C and `--json`. Components take typed `props`, from a `use:`
+or from `--prop` on the command line, and this repo's own tasks and the
+shared quality gate run through them. Windows cross-compiles to a
+self-contained `.exe` and has been run natively.
 
-Phase 6 — `git`, `download` and `defaults` (spec §6.8–6.10) — is spec'd and
-being built on a branch; nothing here claims it yet.
+Phase 6 — `git`, `download` and `defaults` (spec §6.8–6.10) — is in. The one
+of the three this machine cannot exercise is `defaults`: its compare is unit
+tested against captured `defaults read` output, and a probed run on a mac is
+the owner's.
 
 The dotfiles are migrated: all five machine plans validate under `--strict`,
 and the probed plan for this machine reads
