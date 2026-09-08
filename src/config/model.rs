@@ -9,17 +9,37 @@ use crate::error::Result;
 use crate::yaml::N;
 use std::time::Duration;
 
-pub const ACTION_KEYS: &[&str] =
-    &["shell", "cmd", "file", "template", "pkg", "service", "assert"];
+pub const ACTION_KEYS: &[&str] = &[
+    "shell", "cmd", "file", "template", "pkg", "service", "assert",
+];
 pub const STRUCTURAL_KEYS: &[&str] = &["vars", "vars_file", "import", "use"];
 pub const MODIFIER_KEYS: &[&str] = &[
-    "name", "when", "unless", "creates", "sudo", "timeout", "retry", "env", "cwd", "tags",
-    "register", "changed_when", "failed_when", "raw", "props", "optional",
+    "name",
+    "when",
+    "unless",
+    "creates",
+    "sudo",
+    "timeout",
+    "retry",
+    "env",
+    "cwd",
+    "tags",
+    "register",
+    "changed_when",
+    "failed_when",
+    "raw",
+    "props",
+    "optional",
 ];
 
 /// Every key a step may carry, for the unknown-key check.
 pub fn all_step_keys() -> Vec<&'static str> {
-    ACTION_KEYS.iter().chain(STRUCTURAL_KEYS).chain(MODIFIER_KEYS).copied().collect()
+    ACTION_KEYS
+        .iter()
+        .chain(STRUCTURAL_KEYS)
+        .chain(MODIFIER_KEYS)
+        .copied()
+        .collect()
 }
 
 /// The fields each action's long form accepts (spec §6). `cmd` is a
@@ -27,7 +47,9 @@ pub fn all_step_keys() -> Vec<&'static str> {
 pub fn action_body_keys(action: &str) -> Option<&'static [&'static str]> {
     Some(match action {
         "shell" => &["script", "interpreter", "login"],
-        "file" => &["path", "state", "content", "src", "mode", "owner", "group", "force"],
+        "file" => &[
+            "path", "state", "content", "src", "mode", "owner", "group", "force",
+        ],
         "template" => &["src", "dest", "mode", "owner", "group"],
         "pkg" => &["name", "names", "state", "manager", "cask", "update_cache"],
         "service" => &["name", "state", "enabled", "scope"],
@@ -61,7 +83,10 @@ impl<'a> Step<'a> {
                 .and_then(|ks| ks.first().map(|(k, _)| k.to_string()))
                 .or_else(|| {
                     self.body.as_seq().ok().and_then(|items| {
-                        items.first().and_then(|i| i.as_str().ok()).map(String::from)
+                        items
+                            .first()
+                            .and_then(|i| i.as_str().ok())
+                            .map(String::from)
                     })
                 })
                 .unwrap_or_default(),
@@ -109,9 +134,10 @@ pub struct Mods<'a> {
 /// validation error carries a position, which means reporting all of them.
 pub fn parse_steps<'a>(root: N<'a>) -> Result<(Vec<Step<'a>>, Vec<crate::error::Diag>)> {
     let items = root.as_seq().map_err(|_| {
-        root.err(format!("a plan is a list of steps, found {}", root.kind())).with_note(
-            "a component is a mapping with `props:` and `steps:` and is entered with `use:`",
-        )
+        root.err(format!("a plan is a list of steps, found {}", root.kind()))
+            .with_note(
+                "a component is a mapping with `props:` and `steps:` and is entered with `use:`",
+            )
     })?;
     let mut steps = Vec::new();
     let mut errors = Vec::new();
@@ -141,16 +167,21 @@ pub fn parse_step<'a>(at: N<'a>) -> Result<Step<'a>> {
     let (key, _key_at) = match subjects.len() {
         1 => subjects[0],
         0 => {
-            return Err(at
-                .err("step has no action")
-                .with_note(format!("expected one of: {}", all_subject_keys().join(", "))));
+            return Err(at.err("step has no action").with_note(format!(
+                "expected one of: {}",
+                all_subject_keys().join(", ")
+            )));
         }
         _ => {
             let names: Vec<&str> = subjects.iter().map(|(k, _)| *k).collect();
             // Point at the second one: the first is likely what was meant.
             return Err(subjects[1]
                 .1
-                .err(format!("step has {} action keys: {}", names.len(), names.join(", ")))
+                .err(format!(
+                    "step has {} action keys: {}",
+                    names.len(),
+                    names.join(", ")
+                ))
                 .with_note("a step carries exactly one action or structural key"));
         }
     };
@@ -184,7 +215,12 @@ pub fn parse_step<'a>(at: N<'a>) -> Result<Step<'a>> {
         }
     }
 
-    Ok(Step { at, key, body, mods })
+    Ok(Step {
+        at,
+        key,
+        body,
+        mods,
+    })
 }
 
 fn all_subject_keys() -> Vec<&'static str> {
@@ -274,14 +310,22 @@ pub fn check_modifiers(step: &Step<'_>) -> Result<()> {
     // `props` belongs to `use`; `optional` belongs to `vars_file`. Silently
     // ignoring a misplaced modifier is how a typo becomes a two-hour debug.
     if let Some(n) = m.props.filter(|_| step.key != "use") {
-        return Err(n.err(format!("`props` is only valid on `use`, not on `{}`", step.key)));
+        return Err(n.err(format!(
+            "`props` is only valid on `use`, not on `{}`",
+            step.key
+        )));
     }
     if let Some(n) = m.optional.filter(|_| step.key != "vars_file") {
-        return Err(n.err(format!("`optional` is only valid on `vars_file`, not on `{}`", step.key)));
+        return Err(n.err(format!(
+            "`optional` is only valid on `vars_file`, not on `{}`",
+            step.key
+        )));
     }
 
     // Spec §4: sudo is root or nothing, and Windows has no sudo (D8).
-    if let Some(n) = m.sudo.filter(|n| cfg!(target_os = "windows") && n.as_bool().unwrap_or(false))
+    if let Some(n) = m
+        .sudo
+        .filter(|n| cfg!(target_os = "windows") && n.as_bool().unwrap_or(false))
     {
         return Err(n
             .err("`sudo` is not supported on Windows")
@@ -299,8 +343,12 @@ fn is_identifier(s: &str) -> bool {
 
 /// The expression fields, which compile as expressions rather than templates.
 pub fn expression_fields<'a>(step: &Step<'a>) -> Vec<N<'a>> {
-    [step.mods.when, step.mods.changed_when, step.mods.failed_when]
-        .into_iter()
-        .flatten()
-        .collect()
+    [
+        step.mods.when,
+        step.mods.changed_when,
+        step.mods.failed_when,
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
 }

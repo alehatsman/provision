@@ -100,7 +100,11 @@ pub fn parse_metadata(
 ) -> Result<Option<Metadata>> {
     let body = step.body;
     let render = |src: &str| -> Option<String> {
-        if raw { Some(src.to_string()) } else { engine.render(src, ctx).ok() }
+        if raw {
+            Some(src.to_string())
+        } else {
+            engine.render(src, ctx).ok()
+        }
     };
 
     let mode = match body.get("mode") {
@@ -115,14 +119,20 @@ pub fn parse_metadata(
                      and does not read it as a number: \"0644\"",
                 ));
             };
-            let Some(text) = render(raw_text) else { return Ok(None) };
+            let Some(text) = render(raw_text) else {
+                return Ok(None);
+            };
             Some(parse_mode(&text, n)?)
         }
         None => None,
     };
 
     // Spec §6.3: owner and group are independent, and both need sudo.
-    let sudo = step.mods.sudo.map(|n| n.as_bool().unwrap_or(false)).unwrap_or(false);
+    let sudo = step
+        .mods
+        .sudo
+        .map(|n| n.as_bool().unwrap_or(false))
+        .unwrap_or(false);
     for (name, node) in [("owner", body.get("owner")), ("group", body.get("group"))] {
         if let Some(n) = node.filter(|_| !sudo) {
             return Err(n
@@ -132,7 +142,11 @@ pub fn parse_metadata(
     }
 
     let field = |k: &str| body.get(k).and_then(|n| n.as_str().ok()).and_then(&render);
-    Ok(Some(Metadata { mode, owner: field("owner"), group: field("group") }))
+    Ok(Some(Metadata {
+        mode,
+        owner: field("owner"),
+        group: field("group"),
+    }))
 }
 
 // ── parsing ───────────────────────────────────────────────────────────────
@@ -140,67 +154,84 @@ pub fn parse_metadata(
 pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result<Option<Spec>> {
     let body = step.body;
     let render = |src: &str| -> Option<String> {
-        if raw { Some(src.to_string()) } else { engine.render(src, ctx).ok() }
+        if raw {
+            Some(src.to_string())
+        } else {
+            engine.render(src, ctx).ok()
+        }
     };
     let Some(path_at) = body.get("path") else {
         return Err(body.err("`file` requires `path`"));
     };
-    let Some(path) = render(path_at.as_str()?) else { return Ok(None) };
+    let Some(path) = render(path_at.as_str()?) else {
+        return Ok(None);
+    };
 
     let state = match body.get("state") {
         Some(n) => {
-            let Some(name) = render(n.as_str()?) else { return Ok(None) };
+            let Some(name) = render(n.as_str()?) else {
+                return Ok(None);
+            };
             State::parse(&name, n)?
         }
         None => State::File,
     };
 
-    let Some(meta) = parse_metadata(step, engine, ctx, raw)? else { return Ok(None) };
+    let Some(meta) = parse_metadata(step, engine, ctx, raw)? else {
+        return Ok(None);
+    };
     let (mode, owner, group) = (meta.mode, meta.owner, meta.group);
 
     let src_at = body.get("src");
     let content_at = body.get("content");
-    let force = body.get("force").and_then(|n| n.as_bool().ok()).unwrap_or(false);
+    let force = body
+        .get("force")
+        .and_then(|n| n.as_bool().ok())
+        .unwrap_or(false);
 
     let mut link_to = None;
     let mut content = None;
 
     match state {
-        State::File => {
-            match (content_at, src_at) {
-                (Some(_), Some(s)) => {
-                    return Err(s
-                        .err("`content` and `src` are mutually exclusive")
-                        .with_note("content is the bytes; src is a file to copy them from"));
-                }
-                (None, None) => {
-                    return Err(body
-                        .err("`file` state file needs `content` or `src`")
-                        .with_note("an empty file is `content: \"\"` — there is no touch"));
-                }
-                (Some(c), None) => {
-                    let Some(text) = render(c.as_str()?) else { return Ok(None) };
-                    content = Some(text.into_bytes());
-                }
-                (None, Some(s)) => {
-                    let Some(rel) = render(s.as_str()?) else { return Ok(None) };
-                    let from = crate::config::load::resolve(s.file, &expanduser(&rel));
-                    match std::fs::read(&from) {
-                        Ok(bytes) => content = Some(bytes),
-                        Err(e) => {
-                            return Err(s.err(format!("cannot read {}: {e}", from.display())));
-                        }
+        State::File => match (content_at, src_at) {
+            (Some(_), Some(s)) => {
+                return Err(s
+                    .err("`content` and `src` are mutually exclusive")
+                    .with_note("content is the bytes; src is a file to copy them from"));
+            }
+            (None, None) => {
+                return Err(body
+                    .err("`file` state file needs `content` or `src`")
+                    .with_note("an empty file is `content: \"\"` — there is no touch"));
+            }
+            (Some(c), None) => {
+                let Some(text) = render(c.as_str()?) else {
+                    return Ok(None);
+                };
+                content = Some(text.into_bytes());
+            }
+            (None, Some(s)) => {
+                let Some(rel) = render(s.as_str()?) else {
+                    return Ok(None);
+                };
+                let from = crate::config::load::resolve(s.file, &expanduser(&rel));
+                match std::fs::read(&from) {
+                    Ok(bytes) => content = Some(bytes),
+                    Err(e) => {
+                        return Err(s.err(format!("cannot read {}: {e}", from.display())));
                     }
                 }
             }
-        }
+        },
         State::Link => {
             let Some(s) = src_at else {
                 return Err(body
                     .err("`file` state link needs `src`")
                     .with_note("src is what the link points at"));
             };
-            let Some(target) = render(s.as_str()?) else { return Ok(None) };
+            let Some(target) = render(s.as_str()?) else {
+                return Ok(None);
+            };
             // Spec §3: `~` expands in every path field the tool owns, and
             // `src` is one of them. "Stored as given" in §6.3 rules out
             // canonicalising — resolving `..`, following links, making a
@@ -211,9 +242,11 @@ pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result
             // Spec §6.3: a symlink has no mode of its own worth setting, and
             // silently ignoring one is how a plan grows a line that does
             // nothing for a year.
-            for (name, node) in
-                [("mode", body.get("mode")), ("owner", body.get("owner")), ("group", body.get("group"))]
-            {
+            for (name, node) in [
+                ("mode", body.get("mode")),
+                ("owner", body.get("owner")),
+                ("group", body.get("group")),
+            ] {
                 if let Some(n) = node {
                     return Err(n
                         .err(format!("`{name}` does not apply to `state: link`"))
@@ -223,7 +256,10 @@ pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result
         }
         State::Dir | State::Absent => {
             if let Some(n) = content_at {
-                return Err(n.err(format!("`content` does not apply to `state: {}`", state_name(state))));
+                return Err(n.err(format!(
+                    "`content` does not apply to `state: {}`",
+                    state_name(state)
+                )));
             }
         }
     }
@@ -279,7 +315,12 @@ struct Meta {
 
 impl Meta {
     fn missing() -> Meta {
-        Meta { kind: Kind::Missing, mode: 0, owner: String::new(), group: String::new() }
+        Meta {
+            kind: Kind::Missing,
+            mode: 0,
+            owner: String::new(),
+            group: String::new(),
+        }
     }
 }
 
@@ -301,7 +342,12 @@ fn stat(spec: &Spec, ctx: &Ctx<'_>) -> std::result::Result<Meta, String> {
     }
 
     match std::fs::symlink_metadata(&spec.path) {
-        Ok(m) => Ok(Meta { kind: kind_of(&m), mode: mode_of(&m), owner: String::new(), group: String::new() }),
+        Ok(m) => Ok(Meta {
+            kind: kind_of(&m),
+            mode: mode_of(&m),
+            owner: String::new(),
+            group: String::new(),
+        }),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Meta::missing()),
         Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => Err(format!(
             "cannot read {} ({e}); add `sudo: true` to read it as root",
@@ -335,7 +381,10 @@ fn parse_stat(text: &str) -> Meta {
     } else {
         Kind::Other
     };
-    let mode = parts.next().and_then(|m| u32::from_str_radix(m.trim(), 8).ok()).unwrap_or(0);
+    let mode = parts
+        .next()
+        .and_then(|m| u32::from_str_radix(m.trim(), 8).ok())
+        .unwrap_or(0);
     Meta {
         kind,
         mode,
@@ -424,7 +473,10 @@ impl Spec {
                 if act && let Err(e) = self.make_dir(ctx, mode) {
                     return failed(e);
                 }
-                Effect::Changed(Some(format!("create directory {} mode {mode:04o}", self.path)))
+                Effect::Changed(Some(format!(
+                    "create directory {} mode {mode:04o}",
+                    self.path
+                )))
             }
             Kind::Dir => self.metadata_only(ctx, meta, act),
             _ => failed(format!("{} exists and is not a directory", self.path)),
@@ -559,13 +611,20 @@ impl Spec {
                 return Err(format!("reading {} did not finish", self.path));
             }
             if got.rc != 0 {
-                return Err(format!("cannot read {} as root: {}", self.path, got.stderr_text().trim()));
+                return Err(format!(
+                    "cannot read {} as root: {}",
+                    self.path,
+                    got.stderr_text().trim()
+                ));
             }
             return Ok(got.stdout);
         }
         std::fs::read(&self.path).map_err(|e| {
             if e.kind() == std::io::ErrorKind::PermissionDenied {
-                format!("cannot read {} ({e}); add `sudo: true` to read it as root", self.path)
+                format!(
+                    "cannot read {} ({e}); add `sudo: true` to read it as root",
+                    self.path
+                )
             } else {
                 format!("cannot read {}: {e}", self.path)
             }
@@ -580,7 +639,9 @@ impl Spec {
             }
             return Some(String::from_utf8_lossy(&got.stdout).trim_end().to_string());
         }
-        std::fs::read_link(&self.path).ok().map(|p| p.display().to_string())
+        std::fs::read_link(&self.path)
+            .ok()
+            .map(|p| p.display().to_string())
     }
 
     fn dir_is_empty(&self, ctx: &Ctx<'_>) -> bool {
@@ -590,7 +651,9 @@ impl Spec {
                 Err(_) => false,
             };
         }
-        std::fs::read_dir(&self.path).map(|mut d| d.next().is_none()).unwrap_or(false)
+        std::fs::read_dir(&self.path)
+            .map(|mut d| d.next().is_none())
+            .unwrap_or(false)
     }
 
     fn write(&self, ctx: &Ctx<'_>, bytes: &[u8], mode: u32) -> std::result::Result<(), String> {
@@ -613,7 +676,8 @@ impl Spec {
             // there is usually the reason the step said sudo. `install`
             // copies, so nothing here depends on a shared filesystem.
             let mut tmp = tempfile::NamedTempFile::new().map_err(|x| e("make a temp file", x))?;
-            tmp.write_all(bytes).map_err(|x| e("write the temp file", x))?;
+            tmp.write_all(bytes)
+                .map_err(|x| e("write the temp file", x))?;
             tmp.flush().map_err(|x| e("write the temp file", x))?;
             set_mode(tmp.path(), 0o600).map_err(|x| e("secure the temp file", x))?;
             let staged = tmp.into_temp_path();
@@ -648,11 +712,14 @@ impl Spec {
         }
         let mut tmp = tempfile::NamedTempFile::new_in(dir)
             .map_err(|x| e(&format!("make a temp file in {}", dir.display()), x))?;
-        tmp.write_all(bytes).map_err(|x| e("write the temp file", x))?;
+        tmp.write_all(bytes)
+            .map_err(|x| e("write the temp file", x))?;
         tmp.flush().map_err(|x| e("write the temp file", x))?;
         let staged = tmp.into_temp_path();
         set_mode(&staged, mode).map_err(|x| e("set the mode", x))?;
-        staged.persist(&self.path).map_err(|x| format!("cannot place {}: {x}", self.path))?;
+        staged
+            .persist(&self.path)
+            .map_err(|x| format!("cannot place {}: {x}", self.path))?;
         Ok(())
     }
 
@@ -760,8 +827,16 @@ fn diff(old: &str, new: &str, path: &str) -> String {
         return format!("{path}: binary content differs");
     }
     let d = similar::TextDiff::from_lines(old, new);
-    let text = d.unified_diff().context_radius(3).header("current", path).to_string();
-    if text.trim().is_empty() { format!("{path}: content differs") } else { text }
+    let text = d
+        .unified_diff()
+        .context_radius(3)
+        .header("current", path)
+        .to_string();
+    if text.trim().is_empty() {
+        format!("{path}: content differs")
+    } else {
+        text
+    }
 }
 
 /// Create the target and any missing parents, giving the parents `0755` and
@@ -786,7 +861,11 @@ fn create_dirs(path: &Path, leaf_mode: u32) -> std::io::Result<()> {
     }
     for (i, dir) in missing.iter().rev().enumerate() {
         std::fs::create_dir(dir)?;
-        let mode = if i + 1 == missing.len() { leaf_mode } else { 0o755 };
+        let mode = if i + 1 == missing.len() {
+            leaf_mode
+        } else {
+            0o755
+        };
         set_mode(dir, mode)?;
     }
     Ok(())
@@ -810,6 +889,7 @@ fn symlink(target: &str, path: &str) -> std::io::Result<()> {
 
 #[cfg(not(unix))]
 fn symlink(_target: &str, _path: &str) -> std::io::Result<()> {
-    Err(std::io::Error::other("symlinks are not supported on this platform"))
+    Err(std::io::Error::other(
+        "symlinks are not supported on this platform",
+    ))
 }
-

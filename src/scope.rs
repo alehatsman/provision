@@ -120,14 +120,20 @@ mod tests {
     use std::path::Path;
 
     fn globals(cli: &[(&str, &str)]) -> Rc<Globals> {
-        let cli = cli.iter().map(|(k, v)| (k.to_string(), Value::from(*v))).collect();
+        let cli = cli
+            .iter()
+            .map(|(k, v)| (k.to_string(), Value::from(*v)))
+            .collect();
         Rc::new(Globals::new(&Facts::detect(), cli))
     }
 
     #[test]
     fn vars_beat_facts_and_the_cli_beats_vars() {
         let mut s = Scope::root(globals(&[]));
-        assert_eq!(s.get("os").unwrap().to_string(), std::env::consts::OS.replace("macos", "darwin"));
+        assert_eq!(
+            s.get("os").unwrap().to_string(),
+            std::env::consts::OS.replace("macos", "darwin")
+        );
         s.set("os", Value::from("overridden"));
         assert_eq!(s.get("os").unwrap().to_string(), "overridden");
 
@@ -166,10 +172,19 @@ mod tests {
     fn a_component_scope_carries_its_own_directory() {
         let parent = Scope::root(globals(&[]));
         let child = parent.child_with_props(Map::new(), Path::new("/tools/rq"));
-        assert_eq!(child.ctx().get_attr("component_dir").unwrap().to_string(), "/tools/rq");
+        assert_eq!(
+            child.ctx().get_attr("component_dir").unwrap().to_string(),
+            "/tools/rq"
+        );
         // A plan's own scope has none: `import` shares the caller's scope and
         // is not a component.
-        assert!(parent.ctx().get_attr("component_dir").unwrap().is_undefined());
+        assert!(
+            parent
+                .ctx()
+                .get_attr("component_dir")
+                .unwrap()
+                .is_undefined()
+        );
     }
 
     #[test]
@@ -179,7 +194,14 @@ mod tests {
         props.insert("variant".to_string(), Value::from("dark"));
         let child = parent.child_with_props(props, Path::new("/c"));
         let ctx = child.ctx();
-        assert_eq!(ctx.get_attr("props").unwrap().get_attr("variant").unwrap().to_string(), "dark");
+        assert_eq!(
+            ctx.get_attr("props")
+                .unwrap()
+                .get_attr("variant")
+                .unwrap()
+                .to_string(),
+            "dark"
+        );
         // No collision with a same-named variable.
         assert!(child.get("variant").is_none());
     }

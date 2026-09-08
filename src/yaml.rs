@@ -34,8 +34,14 @@ impl Doc {
         })?;
         match docs.len() {
             0 => Err(Diag::file_level(path, "is empty")),
-            1 => Ok(Box::leak(Box::new(Doc { path, root: docs.remove(0) }))),
-            n => Err(Diag::file_level(path, format!("holds {n} documents; give one step"))),
+            1 => Ok(Box::leak(Box::new(Doc {
+                path,
+                root: docs.remove(0),
+            }))),
+            n => Err(Diag::file_level(
+                path,
+                format!("holds {n} documents; give one step"),
+            )),
         }
     }
 
@@ -61,7 +67,10 @@ impl Doc {
     }
 
     pub fn node(&'static self) -> N<'static> {
-        N { node: &self.root, file: &self.path }
+        N {
+            node: &self.root,
+            file: &self.path,
+        }
     }
 }
 
@@ -74,7 +83,10 @@ pub struct N<'a> {
 
 impl<'a> N<'a> {
     fn wrap(&self, node: &'a MarkedYaml<'static>) -> N<'a> {
-        N { node, file: self.file }
+        N {
+            node,
+            file: self.file,
+        }
     }
 
     pub fn line(&self) -> usize {
@@ -130,9 +142,10 @@ impl<'a> N<'a> {
 
     pub fn as_map(&self) -> Result<Vec<(N<'a>, N<'a>)>> {
         match &self.node.data {
-            YamlData::Mapping(m) => {
-                Ok(m.iter().map(|(k, v)| (self.wrap(k), self.wrap(v))).collect())
-            }
+            YamlData::Mapping(m) => Ok(m
+                .iter()
+                .map(|(k, v)| (self.wrap(k), self.wrap(v)))
+                .collect()),
             _ => Err(self.err(format!("expected a mapping, found {}", self.kind()))),
         }
     }
@@ -148,7 +161,9 @@ impl<'a> N<'a> {
 
     /// Look up one key. `None` when absent.
     pub fn get(&self, key: &str) -> Option<N<'a>> {
-        let YamlData::Mapping(m) = &self.node.data else { return None };
+        let YamlData::Mapping(m) = &self.node.data else {
+            return None;
+        };
         m.iter()
             .find(|(k, _)| matches!(&k.data, YamlData::Value(Scalar::String(s)) if s == key))
             .map(|(_, v)| self.wrap(v))
@@ -156,7 +171,8 @@ impl<'a> N<'a> {
 
     /// Look up one key, erroring at *this* node when it is missing.
     pub fn require(&self, key: &str) -> Result<N<'a>> {
-        self.get(key).ok_or_else(|| self.err(format!("missing required key `{key}`")))
+        self.get(key)
+            .ok_or_else(|| self.err(format!("missing required key `{key}`")))
     }
 
     /// Reject any key not in `allowed`, pointing at the offending key. Spec §3:
@@ -267,7 +283,10 @@ mod tests {
     fn doc(text: &str) -> &'static Doc {
         let text: &'static str = Box::leak(text.to_string().into_boxed_str());
         let mut docs = MarkedYaml::load_from_str(text).unwrap();
-        Box::leak(Box::new(Doc { path: PathBuf::from("t.yml"), root: docs.remove(0) }))
+        Box::leak(Box::new(Doc {
+            path: PathBuf::from("t.yml"),
+            root: docs.remove(0),
+        }))
     }
 
     #[test]
@@ -282,7 +301,9 @@ mod tests {
     fn unknown_key_points_at_the_key_and_suggests() {
         let d = doc("- name: a\n  shel: b\n");
         let step = d.node().as_seq().unwrap()[0];
-        let e = step.deny_unknown_keys(&["name", "shell"], "a step").unwrap_err();
+        let e = step
+            .deny_unknown_keys(&["name", "shell"], "a step")
+            .unwrap_err();
         assert_eq!((e.line, e.col), (2, 3));
         assert_eq!(e.note.as_deref(), Some("did you mean `shell`?"));
     }
@@ -291,9 +312,15 @@ mod tests {
     fn scalars_keep_their_yaml_type() {
         let d = doc("mode: 0644\nflag: true\nnames: [a, b]\n");
         let n = d.node();
-        assert_eq!(n.require("mode").unwrap().as_scalar_string().unwrap(), "644");
+        assert_eq!(
+            n.require("mode").unwrap().as_scalar_string().unwrap(),
+            "644"
+        );
         assert!(n.require("flag").unwrap().as_bool().unwrap());
-        assert_eq!(n.require("names").unwrap().as_str_or_seq().unwrap(), vec!["a", "b"]);
+        assert_eq!(
+            n.require("names").unwrap().as_str_or_seq().unwrap(),
+            vec!["a", "b"]
+        );
     }
 
     #[test]

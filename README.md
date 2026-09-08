@@ -82,6 +82,41 @@ The job is small and stable. The tool should be too.
 - Not a secrets manager. `{{ env.TOKEN }}` and file permissions.
 - Not audited. No run log, no state directory.
 
+## Development
+
+provision provisions itself. The tasks live in `tasks/` and are components
+run with `provision run` — the same executor the machine plans use (D17).
+
+```
+$ provision run tasks/
+  build                     build the release binary for this machine
+  ci                        full pre-push gate — fmt, clippy, test, rustdoc, deny, machete, lint drift
+  ci-fast                   fast pre-commit gate — lockfile drift, fmt, clippy, ai-lint, soft caps
+  ...
+```
+
+Once, to check out the quality gate and install the three tools it runs
+(cargo-nextest, cargo-deny, cargo-machete — from source, so it is slow):
+
+```
+$ provision run tasks/tools.yml
+```
+
+Then `provision run tasks/ci-fast.yml` before a commit and
+`provision run tasks/ci.yml` before a push.
+
+The gate itself is [rust-quality](https://github.com/alehatsman/rust-quality),
+pinned at a tag in `tasks/tools.yml` and checked out under
+`~/.cache/provision/tools/`. It ships config and scripts rather than wrappers,
+so `clippy.toml`, `rustfmt.toml`, `deny.toml` and `.cargo/config.toml` in this
+repo are its files, copied verbatim, and the `[workspace.lints]` block in
+`Cargo.toml` is its canonical lint block — cargo has no include mechanism for
+manifests, so `tasks/lints-check.yml` reports drift instead.
+
+**There is no CI for this repo yet.** No `mgitci.yml`, no Rust CI image; both
+wait on moongit's runner switching to `provision run --step`. Until then the
+gate is a local one, and running it before a push is the whole of it.
+
 ## Documents
 
 | File | What |
@@ -92,6 +127,7 @@ The job is small and stable. The tool should be too.
 | [docs/migration.md](docs/migration.md) | Moving the existing dotfiles off mooncake |
 | [docs/audit.md](docs/audit.md) | The spec §11 gate: every construct in the real configs, mapped |
 | [examples/](examples/) | A machine plan and a component |
+| [tasks/](tasks/) | This repo's own tasks, run with `provision run` |
 
 ## Status
 

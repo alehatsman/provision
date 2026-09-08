@@ -51,11 +51,7 @@ impl Engine {
         }
     }
 
-    pub fn eval(
-        &self,
-        expr: &str,
-        ctx: &Value,
-    ) -> std::result::Result<Value, minijinja::Error> {
+    pub fn eval(&self, expr: &str, ctx: &Value) -> std::result::Result<Value, minijinja::Error> {
         self.env.compile_expression(expr)?.eval(ctx)
     }
 
@@ -67,7 +63,8 @@ impl Engine {
             Kind::Bool => Ok(v.is_true()),
             _ => Err(at(format!(
                 "condition `{expr}` evaluated to {} ({}), not true or false",
-                v, kind_name(&v)
+                v,
+                kind_name(&v)
             ))),
         }
     }
@@ -76,7 +73,10 @@ impl Engine {
     /// depends on a `register` that has not run yet.
     /// Top-level names, so `r.changed` reports `r`.
     pub fn undeclared(&self, expr: &str) -> Option<std::collections::HashSet<String>> {
-        self.env.compile_expression(expr).ok().map(|e| e.undeclared_variables(false))
+        self.env
+            .compile_expression(expr)
+            .ok()
+            .map(|e| e.undeclared_variables(false))
     }
 
     /// Render a spanned node into a value: strings through the field rule of
@@ -90,8 +90,10 @@ impl Engine {
             // Non-strings are taken as written, but their strings are rendered.
             Err(_) => match at.as_seq() {
                 Ok(items) => {
-                    let vs: Result<Vec<Value>> =
-                        items.into_iter().map(|i| self.render_node(i, ctx)).collect();
+                    let vs: Result<Vec<Value>> = items
+                        .into_iter()
+                        .map(|i| self.render_node(i, ctx))
+                        .collect();
                     Ok(Value::from(vs?))
                 }
                 Err(_) => match at.as_map() {
@@ -138,8 +140,14 @@ impl Engine {
             return base;
         }
         let referenced = match sole_expression(src) {
-            Some(expr) => self.env.compile_expression(expr).map(|c| c.undeclared_variables(false)),
-            None => self.env.template_from_str(src).map(|t| t.undeclared_variables(false)),
+            Some(expr) => self
+                .env
+                .compile_expression(expr)
+                .map(|c| c.undeclared_variables(false)),
+            None => self
+                .env
+                .template_from_str(src)
+                .map(|t| t.undeclared_variables(false)),
         };
         let Ok(names) = referenced else { return base };
         let mut missing: Vec<String> = names
@@ -188,7 +196,9 @@ fn f_expanduser(s: String) -> String {
 /// `~` and `~/…` only. `~other` is left alone: the tool has no business
 /// guessing another account's home (D8 — root or the current user).
 pub fn expanduser(s: &str) -> String {
-    let Some(rest) = s.strip_prefix('~') else { return s.to_string() };
+    let Some(rest) = s.strip_prefix('~') else {
+        return s.to_string();
+    };
     if !(rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\')) {
         return s.to_string();
     }
@@ -199,11 +209,17 @@ pub fn expanduser(s: &str) -> String {
 }
 
 fn f_basename(s: String) -> String {
-    Path::new(&s).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(s)
+    Path::new(&s)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or(s)
 }
 
 fn f_dirname(s: String) -> String {
-    Path::new(&s).parent().map(|n| n.display().to_string()).unwrap_or_default()
+    Path::new(&s)
+        .parent()
+        .map(|n| n.display().to_string())
+        .unwrap_or_default()
 }
 
 /// POSIX single-quote shell escaping. Safe for every byte.
@@ -212,9 +228,8 @@ fn f_quote(s: String) -> String {
 }
 
 fn f_to_json(v: Value) -> std::result::Result<String, minijinja::Error> {
-    serde_json::to_string(&v).map_err(|e| {
-        minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
-    })
+    serde_json::to_string(&v)
+        .map_err(|e| minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string()))
 }
 
 fn f_to_yaml(v: Value) -> String {
@@ -314,7 +329,10 @@ mod tests {
 
     fn ctx(pairs: &[(&str, Value)]) -> Value {
         Value::from(
-            pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect::<BTreeMap<_, _>>(),
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect::<BTreeMap<_, _>>(),
         )
     }
 
@@ -323,7 +341,10 @@ mod tests {
         let e = Engine::new();
         let c = ctx(&[]);
         let err = e.render("{{ nope }}", &c).unwrap_err();
-        assert_eq!(e.describe_with("{{ nope }}", &c, &err), "undefined variable `nope`");
+        assert_eq!(
+            e.describe_with("{{ nope }}", &c, &err),
+            "undefined variable `nope`"
+        );
     }
 
     #[test]
@@ -348,7 +369,10 @@ mod tests {
     fn two_expressions_are_a_string() {
         let e = Engine::new();
         let c = ctx(&[("a", Value::from(1)), ("b", Value::from(2))]);
-        assert_eq!(e.render_field("{{ a }}{{ b }}", &c).unwrap().to_string(), "12");
+        assert_eq!(
+            e.render_field("{{ a }}{{ b }}", &c).unwrap().to_string(),
+            "12"
+        );
     }
 
     #[test]
@@ -367,7 +391,10 @@ mod tests {
         let c = ctx(&[("p", Value::from("/a/b/c.txt"))]);
         assert_eq!(e.render("{{ p | basename }}", &c).unwrap(), "c.txt");
         assert_eq!(e.render("{{ p | dirname }}", &c).unwrap(), "/a/b");
-        assert_eq!(e.render("{{ \"it's\" | quote }}", &c).unwrap(), r"'it'\''s'");
+        assert_eq!(
+            e.render("{{ \"it's\" | quote }}", &c).unwrap(),
+            r"'it'\''s'"
+        );
         assert_eq!(e.render("{{ [1,2] | to_json }}", &c).unwrap(), "[1,2]");
     }
 
@@ -385,7 +412,9 @@ mod tests {
         m.insert("name".to_string(), Value::from("zsh"));
         m.insert("names".to_string(), Value::from(vec!["git", "curl"]));
         m.insert("on".to_string(), Value::from(true));
-        let out = e.render("{{ m | to_yaml }}", &ctx(&[("m", Value::from(m))])).unwrap();
+        let out = e
+            .render("{{ m | to_yaml }}", &ctx(&[("m", Value::from(m))]))
+            .unwrap();
         use saphyr::LoadableYamlNode;
         let parsed = saphyr::Yaml::load_from_str(&out).unwrap();
         assert_eq!(parsed.len(), 1, "emitted YAML did not parse: {out}");
@@ -394,7 +423,9 @@ mod tests {
     #[test]
     fn raw_blocks_survive() {
         let e = Engine::new();
-        let out = e.render("{% raw %}${{ x }}{% endraw %}", &ctx(&[])).unwrap();
+        let out = e
+            .render("{% raw %}${{ x }}{% endraw %}", &ctx(&[]))
+            .unwrap();
         assert_eq!(out, "${{ x }}");
     }
 
@@ -403,6 +434,9 @@ mod tests {
         let e = Engine::new();
         let c = ctx(&[("known", Value::from(1))]);
         let err = e.render("{{ known }}{{ palette.bg }}", &c).unwrap_err();
-        assert_eq!(e.describe_with("{{ known }}{{ palette.bg }}", &c, &err), "undefined variable `palette`");
+        assert_eq!(
+            e.describe_with("{{ known }}{{ palette.bg }}", &c, &err),
+            "undefined variable `palette`"
+        );
     }
 }

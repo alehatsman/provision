@@ -37,7 +37,11 @@ const EXIT_USAGE: u8 = 3;
 const EXIT_INTERRUPTED: u8 = 130;
 
 #[derive(Parser)]
-#[command(name = "provision", version, about = "Converge one machine from one YAML plan")]
+#[command(
+    name = "provision",
+    version,
+    about = "Converge one machine from one YAML plan"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -161,7 +165,10 @@ enum Color {
 
 impl RunArgs {
     fn selection(&self) -> Selection {
-        Selection { tags: self.tags.clone(), skip_tags: self.skip_tags.clone() }
+        Selection {
+            tags: self.tags.clone(),
+            skip_tags: self.skip_tags.clone(),
+        }
     }
 
     /// Spec §9.1: `NO_COLOR` and `--color=never` are honored. anstream reads
@@ -186,7 +193,10 @@ impl RunArgs {
             text = text.no_spinner();
         }
         if self.json {
-            Box::new(output::Both(Box::new(output::json::Json::new(base)), Box::new(text)))
+            Box::new(output::Both(
+                Box::new(output::json::Json::new(base)),
+                Box::new(text),
+            ))
         } else {
             Box::new(text)
         }
@@ -213,16 +223,17 @@ impl VarArgs {
             if root.is_null() {
                 continue;
             }
-            for (k, v) in root.as_map().map_err(|_| {
-                Diag::file_level(path, "--vars-file must be a mapping of variables")
-            })? {
+            for (k, v) in root
+                .as_map()
+                .map_err(|_| Diag::file_level(path, "--vars-file must be a mapping of variables"))?
+            {
                 m.insert(k.as_scalar_string()?, v.to_value()?);
             }
         }
         for pair in &self.var {
-            let (k, v) = pair.split_once('=').ok_or_else(|| {
-                Diag::file_level("--var", format!("`{pair}` is not KEY=VALUE"))
-            })?;
+            let (k, v) = pair
+                .split_once('=')
+                .ok_or_else(|| Diag::file_level("--var", format!("`{pair}` is not KEY=VALUE")))?;
             m.insert(k.to_string(), minijinja::Value::from(v));
         }
         Ok(m)
@@ -277,10 +288,18 @@ fn run() -> Result<u8, Diag> {
             Ok(EXIT_OK)
         }
 
-        Command::Validate { plan, strict, prop, vars } => {
+        Command::Validate {
+            plan,
+            strict,
+            prop,
+            vars,
+        } => {
             let plan = check_exists(&plan)?;
             let props = pairs(&prop, "--prop")?;
-            let selection = Selection { tags: Vec::new(), skip_tags: Vec::new() };
+            let selection = Selection {
+                tags: Vec::new(),
+                skip_tags: Vec::new(),
+            };
             let mut ex = expander(&vars, Mode::Validate { strict }, selection)?;
             // D17: the same file check `run` makes. A mapping is a component
             // and a sequence is a plan, which is what their own parse errors
@@ -300,11 +319,17 @@ fn run() -> Result<u8, Diag> {
             Ok(EXIT_USAGE)
         }
 
-        Command::Plan { plan, plan_no_probe, run } => {
+        Command::Plan {
+            plan,
+            plan_no_probe,
+            run,
+        } => {
             run.apply_color();
             let plan = check_exists(&plan)?;
             let base = cwd();
-            let mode = Mode::Plan { probe: !plan_no_probe };
+            let mode = Mode::Plan {
+                probe: !plan_no_probe,
+            };
             let mut ex = expander(&run.vars, mode, run.selection())?
                 // Gates run with their step's sudo (§4), so plan has to know
                 // whether root is reachable. Unlike apply it must not fail
@@ -337,10 +362,23 @@ fn run() -> Result<u8, Diag> {
             if plan_no_probe {
                 return Ok(EXIT_OK);
             }
-            Ok(if ex.summary.has_changes() { EXIT_CHANGES } else { EXIT_OK })
+            Ok(if ex.summary.has_changes() {
+                EXIT_CHANGES
+            } else {
+                EXIT_OK
+            })
         }
 
-        Command::Run { target, step, prop, ask_sudo_pass, verbose, stream, keep_going, run } => {
+        Command::Run {
+            target,
+            step,
+            prop,
+            ask_sudo_pass,
+            verbose,
+            stream,
+            keep_going,
+            run,
+        } => {
             run.apply_color();
             let base = cwd();
 
@@ -381,7 +419,12 @@ fn run() -> Result<u8, Diag> {
             exec::process::catch_interrupts();
             let mut ex = expander(&run.vars, Mode::Run, run.selection())?
                 .keep_going(keep_going)
-                .with_runner(Runner { sudo, stream, root_available: true, ungated_ok: true })
+                .with_runner(Runner {
+                    sudo,
+                    stream,
+                    root_available: true,
+                    ungated_ok: true,
+                })
                 .with_sink(run.sink(base.clone(), verbose, stream));
 
             let started = Instant::now();
@@ -398,10 +441,21 @@ fn run() -> Result<u8, Diag> {
             }
             // Never 2: a task has nothing to plan, so "found changes" is not
             // an answer `run` can give (D17).
-            Ok(if ex.summary.failed > 0 { EXIT_FAILED } else { EXIT_OK })
+            Ok(if ex.summary.failed > 0 {
+                EXIT_FAILED
+            } else {
+                EXIT_OK
+            })
         }
 
-        Command::Apply { plan, ask_sudo_pass, verbose, stream, keep_going, run } => {
+        Command::Apply {
+            plan,
+            ask_sudo_pass,
+            verbose,
+            stream,
+            keep_going,
+            run,
+        } => {
             run.apply_color();
             let plan = check_exists(&plan)?;
             let base = cwd();
@@ -409,8 +463,7 @@ fn run() -> Result<u8, Diag> {
             // Spec §7: the walk that finds the sudo steps also validates the
             // whole plan, so a typo in the last step fails before the first
             // step runs. It renders everything and touches nothing.
-            let mut check =
-                expander(&run.vars, Mode::Validate { strict: false }, run.selection())?;
+            let mut check = expander(&run.vars, Mode::Validate { strict: false }, run.selection())?;
             check.run(&plan)?;
             if !check.diags.is_empty() {
                 report(&check, &base, Some(&plan));
@@ -421,7 +474,12 @@ fn run() -> Result<u8, Diag> {
             exec::process::catch_interrupts();
             let mut ex = expander(&run.vars, Mode::Apply, run.selection())?
                 .keep_going(keep_going)
-                .with_runner(Runner { sudo, stream, root_available: true, ungated_ok: false })
+                .with_runner(Runner {
+                    sudo,
+                    stream,
+                    root_available: true,
+                    ungated_ok: false,
+                })
                 .with_sink(run.sink(base.clone(), verbose, stream));
 
             let started = Instant::now();
@@ -436,7 +494,11 @@ fn run() -> Result<u8, Diag> {
             if ex.summary.interrupted {
                 return Ok(EXIT_INTERRUPTED);
             }
-            Ok(if ex.summary.failed > 0 { EXIT_FAILED } else { EXIT_OK })
+            Ok(if ex.summary.failed > 0 {
+                EXIT_FAILED
+            } else {
+                EXIT_OK
+            })
         }
     }
 }
@@ -478,9 +540,9 @@ fn run_one_step(
     // A list is the plan shape, and `--step` takes one step. Saying which it
     // got beats a mapping error from three layers down.
     if node.as_seq().is_ok() {
-        return Err(node.err("--step takes one step, not a list").with_note(
-            "run a list of steps by putting them in a component and running the file",
-        ));
+        return Err(node
+            .err("--step takes one step, not a list")
+            .with_note("run a list of steps by putting them in a component and running the file"));
     }
     let step = config::model::parse_step(node)?;
     if step.is_structural() {
@@ -504,7 +566,12 @@ nothing later could read",
 
     exec::process::catch_interrupts();
     let mut ex = expander(&run.vars, Mode::Run, run.selection())?
-        .with_runner(Runner { sudo, stream, root_available: true, ungated_ok: true })
+        .with_runner(Runner {
+            sudo,
+            stream,
+            root_available: true,
+            ungated_ok: true,
+        })
         .with_sink(run.sink(base.clone(), verbose, stream));
 
     let started = Instant::now();
@@ -519,7 +586,11 @@ nothing later could read",
     if ex.summary.interrupted {
         return Ok(EXIT_INTERRUPTED);
     }
-    Ok(if ex.summary.failed > 0 { EXIT_FAILED } else { EXIT_OK })
+    Ok(if ex.summary.failed > 0 {
+        EXIT_FAILED
+    } else {
+        EXIT_OK
+    })
 }
 
 /// `KEY=VALUE` pairs from a repeatable flag. Shared by `--prop` on `run` and
@@ -547,7 +618,10 @@ fn is_component(path: &Path) -> Result<bool, Diag> {
 /// directory somebody meant to run, and `Path::ends_with` compares whole
 /// components rather than characters.
 fn listing_requested(target: &Path) -> bool {
-    target.as_os_str().to_string_lossy().ends_with(std::path::MAIN_SEPARATOR)
+    target
+        .as_os_str()
+        .to_string_lossy()
+        .ends_with(std::path::MAIN_SEPARATOR)
 }
 
 /// `provision run <dir>/`. One line per `.yml` file, sorted by name: the

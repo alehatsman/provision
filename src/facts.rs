@@ -30,7 +30,11 @@ impl Facts {
         set("username", Value::from(username()));
         set(
             "home",
-            Value::from(home::home_dir().map(|p| p.display().to_string()).unwrap_or_default()),
+            Value::from(
+                home::home_dir()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default(),
+            ),
         );
 
         let (distro, distro_version) = os_release();
@@ -42,7 +46,10 @@ impl Facts {
             set(&format!("{bin}_available"), Value::from(on_path(bin)));
         }
         set("systemd_available", Value::from(systemd_available()));
-        set("launchd_available", Value::from(os == "darwin" && on_path("launchctl")));
+        set(
+            "launchd_available",
+            Value::from(os == "darwin" && on_path("launchctl")),
+        );
 
         Facts(f)
     }
@@ -83,7 +90,9 @@ fn os_release() -> (String, String) {
     let mut id = String::new();
     let mut version = String::new();
     for line in text.lines() {
-        let Some((k, v)) = line.split_once('=') else { continue };
+        let Some((k, v)) = line.split_once('=') else {
+            continue;
+        };
         let v = v.trim().trim_matches('"').to_string();
         match k.trim() {
             "ID" => id = v,
@@ -115,9 +124,21 @@ mod tests {
     fn every_fact_in_the_spec_is_present() {
         let f = Facts::detect();
         for k in [
-            "os", "arch", "hostname", "username", "home", "distro", "distro_version",
-            "is_wsl", "apt_available", "pacman_available", "brew_available",
-            "winget_available", "yay_available", "systemd_available", "launchd_available",
+            "os",
+            "arch",
+            "hostname",
+            "username",
+            "home",
+            "distro",
+            "distro_version",
+            "is_wsl",
+            "apt_available",
+            "pacman_available",
+            "brew_available",
+            "winget_available",
+            "yay_available",
+            "systemd_available",
+            "launchd_available",
         ] {
             assert!(f.get(k).is_some(), "missing fact `{k}`");
         }

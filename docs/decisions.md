@@ -359,6 +359,12 @@ justfile goes is the owner's call, not a gate. The dotfiles `justfile` is
 interim and becomes `tasks/` once `run` lands. Spec §2, §3.2, §6.1 and §8;
 plan.md phase 5; migration.md §6.
 
+**First consumer.** provision's own repo, 2026-09-08: the `justfile` is
+gone, `tasks/` holds one component per task, and the quality gate is
+rust-quality's, `use`d by path from a pinned checkout. Dogfooding it found
+the two things the machine plans never would have — a component had no way to
+name its own directory, and a task inherited the wrong working directory.
+
 **Overturned by.** A second consumer of `run` that needs something a
 component cannot say — task dependencies, positional arguments, a registry.
 Any of those is the road back to mooncake, and the answer is still no.

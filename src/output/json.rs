@@ -25,7 +25,10 @@ impl Json {
     }
 
     fn rel(&self, p: &Path) -> String {
-        p.strip_prefix(&self.base).unwrap_or(p).display().to_string()
+        p.strip_prefix(&self.base)
+            .unwrap_or(p)
+            .display()
+            .to_string()
     }
 }
 

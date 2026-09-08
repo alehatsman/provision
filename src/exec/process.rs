@@ -100,14 +100,19 @@ impl Raw {
 }
 
 fn run_raw(s: Spawn<'_>) -> std::io::Result<Raw> {
-    let (program, args) = s.argv.split_first().ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty command")
-    })?;
+    let (program, args) = s
+        .argv
+        .split_first()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty command"))?;
 
     let mut cmd = Command::new(program);
     cmd.args(args)
         .envs(s.env)
-        .stdin(if s.stdin.is_some() { Stdio::piped() } else { Stdio::null() })
+        .stdin(if s.stdin.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if let Some(dir) = s.cwd {
@@ -138,7 +143,12 @@ fn run_raw(s: Spawn<'_>) -> std::io::Result<Raw> {
         How::Interrupted => 130,
     };
 
-    Ok(Raw { rc, stdout: out.join().unwrap_or_default(), stderr: err.join().unwrap_or_default(), how })
+    Ok(Raw {
+        rc,
+        stdout: out.join().unwrap_or_default(),
+        stderr: err.join().unwrap_or_default(),
+        how,
+    })
 }
 
 /// Wait, but wake up often enough to notice a Ctrl-C or a blown deadline.
@@ -194,12 +204,10 @@ fn signal_code(_st: &std::process::ExitStatus) -> i32 {
 /// Read a pipe to the end on its own thread, optionally teeing it to the
 /// terminal. Two threads, because a child that fills the stderr pipe while
 /// provision reads stdout would deadlock (spec §6.1 promises full capture).
-fn drain(
-    pipe: Option<impl Read + Send + 'static>,
-    stream: bool,
-    is_err: bool,
-) -> Reader {
-    let Some(mut pipe) = pipe else { return Reader(None) };
+fn drain(pipe: Option<impl Read + Send + 'static>, stream: bool, is_err: bool) -> Reader {
+    let Some(mut pipe) = pipe else {
+        return Reader(None);
+    };
     let (tx, rx) = mpsc::channel();
     let h = std::thread::spawn(move || {
         let mut buf = Vec::new();
@@ -281,5 +289,3 @@ fn kill_group(pid: u32) {
         .stderr(Stdio::null())
         .status();
 }
-
-

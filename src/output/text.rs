@@ -109,7 +109,10 @@ impl Sink for Text {
         if !self.spinner {
             return;
         }
-        self.live = Some(Spinner::start(self.target, format!("{}{name}", indent(depth))));
+        self.live = Some(Spinner::start(
+            self.target,
+            format!("{}{name}", indent(depth)),
+        ));
     }
 
     fn step(&mut self, ev: &Event) {
@@ -151,7 +154,11 @@ impl Sink for Text {
 
     fn summary(&mut self, plan: &Path, s: &Summary) {
         let name = plan.strip_prefix(&self.base).unwrap_or(plan).display();
-        let mut parts = vec![format!("{} step{}", s.total, if s.total == 1 { "" } else { "s" })];
+        let mut parts = vec![format!(
+            "{} step{}",
+            s.total,
+            if s.total == 1 { "" } else { "s" }
+        )];
         parts.extend(s.parts());
         parts.push(human(s.duration));
         self.write(format_args!("\n  {name} · {}\n", parts.join(" · ")));
@@ -183,7 +190,11 @@ impl Text {
     fn failure(&self, ev: &Event, f: &super::event::Failure) {
         let dim = Style::new().dimmed();
         let red = Style::new().fg_color(Some(AnsiColor::Red.into()));
-        let body = if f.stderr.trim().is_empty() { &ev.stdout } else { &f.stderr };
+        let body = if f.stderr.trim().is_empty() {
+            &ev.stdout
+        } else {
+            &f.stderr
+        };
         let lines = if self.verbose {
             body.lines().collect::<Vec<_>>()
         } else {
@@ -258,7 +269,11 @@ impl Spinner {
                 std::thread::sleep(Duration::from_millis(80));
             }
         });
-        Spinner { stop, handle, target }
+        Spinner {
+            stop,
+            handle,
+            target,
+        }
     }
 
     fn stop(self) {

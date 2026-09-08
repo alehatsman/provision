@@ -88,17 +88,39 @@ pub const MANAGERS: &[Manager] = &[
         // Plain `-W` also lists removed-but-config packages, which would read
         // as present and make `present` a silent no-op on a package that is
         // not installed. The status column is what rules those out.
-        query: &["dpkg-query", "-W", "-f", "${Package}\\t${Version}\\t${Status}\\n"],
+        query: &[
+            "dpkg-query",
+            "-W",
+            "-f",
+            "${Package}\\t${Version}\\t${Status}\\n",
+        ],
         query_cask: None,
         parse: parse_dpkg,
         // `env VAR=…` in front rather than a row field: it survives the
         // sudo wrapper with no new machinery. Without it a fresh machine
         // hits a debconf prompt, which waits on a stdin nobody is holding
         // until the watchdog kills the step ten minutes later.
-        install: &["env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y"],
-        remove: &["env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "remove", "-y"],
+        install: &[
+            "env",
+            "DEBIAN_FRONTEND=noninteractive",
+            "apt-get",
+            "install",
+            "-y",
+        ],
+        remove: &[
+            "env",
+            "DEBIAN_FRONTEND=noninteractive",
+            "apt-get",
+            "remove",
+            "-y",
+        ],
         upgrade: &[
-            "env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y", "--only-upgrade",
+            "env",
+            "DEBIAN_FRONTEND=noninteractive",
+            "apt-get",
+            "install",
+            "-y",
+            "--only-upgrade",
         ],
         refresh: Some(&["env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "update"]),
         cask_flag: None,
@@ -128,8 +150,12 @@ pub const MANAGERS: &[Manager] = &[
         query_cask: None,
         parse: parse_winget,
         install: &[
-            "winget", "install", "-e", "--accept-package-agreements",
-            "--accept-source-agreements", "--id",
+            "winget",
+            "install",
+            "-e",
+            "--accept-package-agreements",
+            "--accept-source-agreements",
+            "--id",
         ],
         remove: &["winget", "uninstall", "-e", "--id"],
         upgrade: &["winget", "upgrade", "-e", "--id"],
@@ -203,7 +229,11 @@ fn parse_winget(out: &str) -> BTreeMap<String, String> {
             return String::new();
         }
         let end = to.unwrap_or(chars.len()).min(chars.len());
-        chars[from..end.max(from)].iter().collect::<String>().trim().to_string()
+        chars[from..end.max(from)]
+            .iter()
+            .collect::<String>()
+            .trim()
+            .to_string()
     };
     lines
         .skip_while(|l| l.starts_with('-'))
@@ -228,7 +258,11 @@ pub struct Spec {
 pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result<Option<Spec>> {
     let body = step.body;
     let render = |src: &str| -> Option<String> {
-        if raw { Some(src.to_string()) } else { engine.render(src, ctx).ok() }
+        if raw {
+            Some(src.to_string())
+        } else {
+            engine.render(src, ctx).ok()
+        }
     };
 
     let names = match (body.get("name"), body.get("names")) {
@@ -236,11 +270,15 @@ pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result
             return Err(n.err("`name` and `names` are mutually exclusive"));
         }
         (Some(n), None) => {
-            let Some(one) = render(n.as_str()?) else { return Ok(None) };
+            let Some(one) = render(n.as_str()?) else {
+                return Ok(None);
+            };
             vec![one]
         }
         (None, Some(n)) => {
-            let Ok(value) = engine.render_node(n, ctx) else { return Ok(None) };
+            let Ok(value) = engine.render_node(n, ctx) else {
+                return Ok(None);
+            };
             // A string answers `try_iter` by yielding its characters — the
             // same rule `{% for c in "abc" %}` follows — so asking only
             // whether it iterates would take `names: git` for three packages
@@ -261,7 +299,9 @@ pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result
 
     let state = match body.get("state") {
         Some(n) => {
-            let Some(text) = render(n.as_str()?) else { return Ok(None) };
+            let Some(text) = render(n.as_str()?) else {
+                return Ok(None);
+            };
             match text.as_str() {
                 "present" => State::Present,
                 "absent" => State::Absent,
@@ -276,13 +316,25 @@ pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result
         None => State::Present,
     };
 
-    let cask = body.get("cask").and_then(|n| n.as_bool().ok()).unwrap_or(false);
-    let update_cache = body.get("update_cache").and_then(|n| n.as_bool().ok()).unwrap_or(false);
-    let sudo = step.mods.sudo.map(|n| n.as_bool().unwrap_or(false)).unwrap_or(false);
+    let cask = body
+        .get("cask")
+        .and_then(|n| n.as_bool().ok())
+        .unwrap_or(false);
+    let update_cache = body
+        .get("update_cache")
+        .and_then(|n| n.as_bool().ok())
+        .unwrap_or(false);
+    let sudo = step
+        .mods
+        .sudo
+        .map(|n| n.as_bool().unwrap_or(false))
+        .unwrap_or(false);
 
     let manager = match body.get("manager") {
         Some(n) => {
-            let Some(text) = render(n.as_str()?) else { return Ok(None) };
+            let Some(text) = render(n.as_str()?) else {
+                return Ok(None);
+            };
             match find(&text) {
                 Some(m) => m,
                 None => {
@@ -320,7 +372,13 @@ pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result
             .with_note("casks are a brew concept"));
     }
 
-    Ok(Some(Spec { names, state, manager, cask, update_cache }))
+    Ok(Some(Spec {
+        names,
+        state,
+        manager,
+        cask,
+        update_cache,
+    }))
 }
 
 // ── the verdict, which asks the row and never switches on it ─────────────
@@ -399,12 +457,20 @@ impl Spec {
                 // upgrading the whole list would return ok with the missing
                 // package still missing — plan saying `install X` and apply
                 // quietly not doing it.
-                if !missing.is_empty() && let Err(bad) = self.run_on(ctx, m.install, &missing) {
+                if !missing.is_empty()
+                    && let Err(bad) = self.run_on(ctx, m.install, &missing)
+                {
                     return bad;
                 }
-                let held: Vec<String> =
-                    self.names.iter().filter(|n| !missing.contains(n)).cloned().collect();
-                if !held.is_empty() && let Err(bad) = self.run_on(ctx, m.upgrade, &held) {
+                let held: Vec<String> = self
+                    .names
+                    .iter()
+                    .filter(|n| !missing.contains(n))
+                    .cloned()
+                    .collect();
+                if !held.is_empty()
+                    && let Err(bad) = self.run_on(ctx, m.upgrade, &held)
+                {
                     return bad;
                 }
                 let after = match self.installed(ctx) {
@@ -465,7 +531,11 @@ impl Spec {
     /// One query for the whole set (spec §6.5), not one per package.
     fn installed(&self, ctx: &Ctx<'_>) -> std::result::Result<BTreeMap<String, String>, Effect> {
         let m = self.manager;
-        let argv = if self.cask { m.query_cask.unwrap_or(m.query) } else { m.query };
+        let argv = if self.cask {
+            m.query_cask.unwrap_or(m.query)
+        } else {
+            m.query
+        };
         // A query reads a local database and needs no privilege, so it never
         // escalates — the same rule the gates and `service` probes follow.
         let got = ctx
@@ -494,7 +564,9 @@ impl Spec {
         names: &[String],
     ) -> std::result::Result<(), Effect> {
         let m = self.manager;
-        if self.update_cache && let Some(refresh) = m.refresh {
+        if self.update_cache
+            && let Some(refresh) = m.refresh
+        {
             let argv: Vec<&str> = refresh.to_vec();
             self.exec(ctx, &argv)?;
         }
@@ -505,7 +577,9 @@ impl Spec {
         };
         for batch in batches {
             let mut argv: Vec<&str> = verb.to_vec();
-            if self.cask && let Some(flag) = m.cask_flag {
+            if self.cask
+                && let Some(flag) = m.cask_flag
+            {
                 argv.push(flag);
             }
             argv.extend(batch.iter().map(String::as_str));

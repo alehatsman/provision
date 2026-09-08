@@ -32,8 +32,7 @@ fn validate(fixture: &str) -> (i32, String) {
     let out = run(&["validate", path.to_str().unwrap()]);
     (
         out.status.code().unwrap_or(-1),
-        String::from_utf8_lossy(&out.stderr).into_owned()
-            + &String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr).into_owned() + &String::from_utf8_lossy(&out.stdout),
     )
 }
 
@@ -43,8 +42,7 @@ fn plan(args: &[&str]) -> (i32, String) {
     let out = run(&all);
     (
         out.status.code().unwrap_or(-1),
-        String::from_utf8_lossy(&out.stdout).into_owned()
-            + &String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr),
     )
 }
 
@@ -54,14 +52,19 @@ fn fixture_arg(name: &str) -> String {
 
 /// Every error must name a file, a line and a column.
 fn assert_positioned(out: &str) {
-    let errors: Vec<&str> = out.lines().filter(|l| l.trim_start().starts_with("error:")).collect();
+    let errors: Vec<&str> = out
+        .lines()
+        .filter(|l| l.trim_start().starts_with("error:"))
+        .collect();
     assert!(!errors.is_empty(), "expected at least one error in:\n{out}");
     for e in errors {
         let after = e.split_once("error:").unwrap().1.trim();
         let (loc, _) = after.split_once(' ').unwrap_or((after, ""));
         let parts: Vec<&str> = loc.trim_end_matches(':').rsplitn(3, ':').collect();
         assert!(
-            parts.len() == 3 && parts[0].parse::<usize>().is_ok() && parts[1].parse::<usize>().is_ok(),
+            parts.len() == 3
+                && parts[0].parse::<usize>().is_ok()
+                && parts[1].parse::<usize>().is_ok(),
             "error has no file:line:col — {e}"
         );
     }
@@ -94,7 +97,10 @@ fn an_unknown_field_in_an_action_body_is_an_error() {
     // validation silently. Both are mooncake spellings a migration hits.
     let (code, out) = validate("unknown_action_field.yml");
     assert_eq!(code, EXIT_VALIDATION);
-    assert!(out.contains("unknown key `daemon_reload` in `service`"), "{out}");
+    assert!(
+        out.contains("unknown key `daemon_reload` in `service`"),
+        "{out}"
+    );
     assert!(out.contains("name, state, enabled, scope"), "{out}");
     assert_positioned(&out);
 }
@@ -109,8 +115,14 @@ fn validate_rejects_what_plan_would_reject() {
     let (code, out) = validate("bad_action_bodies.yml");
     assert_eq!(code, EXIT_VALIDATION, "{out}");
     assert!(out.contains("`pkg` requires `name` or `names`"), "{out}");
-    assert!(out.contains("`file` state file needs `content` or `src`"), "{out}");
-    assert!(out.contains("`service` needs `state` or `enabled`"), "{out}");
+    assert!(
+        out.contains("`file` state file needs `content` or `src`"),
+        "{out}"
+    );
+    assert!(
+        out.contains("`service` needs `state` or `enabled`"),
+        "{out}"
+    );
     assert_positioned(&out);
 }
 
@@ -123,7 +135,10 @@ fn snapshot_three_problems_across_two_files() {
     // are in the imported file, not in the one named.
     let (code, out) = validate("three_problems_a.yml");
     assert_eq!(code, EXIT_VALIDATION, "{out}");
-    assert!(out.contains("three_problems_a.yml") && out.contains("three_problems_b.yml"), "{out}");
+    assert!(
+        out.contains("three_problems_a.yml") && out.contains("three_problems_b.yml"),
+        "{out}"
+    );
     assert!(out.contains("3 problems validating"), "{out}");
     assert_positioned(&out);
     snapshot!("three_problems", out);
@@ -161,7 +176,10 @@ fn an_import_cycle_is_named() {
     let (code, out) = validate("cycle_a.yml");
     assert_eq!(code, EXIT_VALIDATION, "{out}");
     assert!(out.contains("import cycle"), "{out}");
-    assert!(out.contains("cycle_a.yml") && out.contains("cycle_b.yml"), "{out}");
+    assert!(
+        out.contains("cycle_a.yml") && out.contains("cycle_b.yml"),
+        "{out}"
+    );
     assert_positioned(&out);
 }
 
@@ -170,7 +188,10 @@ fn a_missing_import_says_where_it_looked() {
     let (code, out) = validate("missing_import.yml");
     assert_eq!(code, EXIT_VALIDATION, "{out}");
     assert!(out.contains("import not found"), "{out}");
-    assert!(out.contains("relative to the file that names them"), "{out}");
+    assert!(
+        out.contains("relative to the file that names them"),
+        "{out}"
+    );
     assert_positioned(&out);
 }
 
@@ -180,7 +201,10 @@ fn a_child_scope_does_not_leak_back_to_its_parent() {
     assert_eq!(code, EXIT_VALIDATION, "{out}");
     // The component sees `from_parent`; the parent must not see `inside_only`.
     assert!(out.contains("undefined variable `inside_only`"), "{out}");
-    assert!(!out.contains("from_parent"), "the child could not read the parent: {out}");
+    assert!(
+        !out.contains("from_parent"),
+        "the child could not read the parent: {out}"
+    );
     assert_positioned(&out);
 }
 
@@ -208,7 +232,10 @@ fn a_missing_required_prop_points_at_its_declaration() {
 fn a_prop_of_the_wrong_type_is_rejected_after_rendering() {
     let (code, out) = validate("props_wrong_type.yml");
     assert_eq!(code, EXIT_VALIDATION, "{out}");
-    assert!(out.contains("prop `count` is declared int but got the string `two`"), "{out}");
+    assert!(
+        out.contains("prop `count` is declared int but got the string `two`"),
+        "{out}"
+    );
     assert_positioned(&out);
 }
 
@@ -251,7 +278,9 @@ fn a_positive_tag_filter_excludes_untagged_steps() {
     let (code, out) = plan(&[&fixture_arg("tags.yml"), "--tags", "x"]);
     assert_eq!(code, 0, "{out}");
     let line = |name: &str| {
-        out.lines().find(|l| l.contains(name)).unwrap_or_else(|| panic!("no line for {name}:\n{out}"))
+        out.lines()
+            .find(|l| l.contains(name))
+            .unwrap_or_else(|| panic!("no line for {name}:\n{out}"))
     };
     assert!(line("tagged-x").contains("would run"), "{out}");
     assert!(line("tagged-always").contains("would run"), "{out}");
@@ -276,7 +305,10 @@ fn skip_tags_wins_over_everything() {
     let line = out.lines().find(|l| l.contains("tagged-always")).unwrap();
     assert!(line.contains("skipped"), "{out}");
     let untagged = out.lines().find(|l| l.contains("untagged")).unwrap();
-    assert!(untagged.contains("would run"), "no positive filter, so untagged runs: {out}");
+    assert!(
+        untagged.contains("would run"),
+        "no positive filter, so untagged runs: {out}"
+    );
 }
 
 // ── strict ────────────────────────────────────────────────────────────────
@@ -311,7 +343,10 @@ fn the_readme_example_validates_and_plans() {
     let (code, text) = plan(&[example.to_str().unwrap()]);
     assert_eq!(code, 0, "{text}");
     // The step gated on a `register` cannot be judged before the run.
-    let hint = text.lines().find(|l| l.contains("Reload shell hint")).unwrap();
+    let hint = text
+        .lines()
+        .find(|l| l.contains("Reload shell hint"))
+        .unwrap();
     assert!(hint.contains("would run (unprobed)"), "{text}");
 }
 

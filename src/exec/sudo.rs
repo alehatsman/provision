@@ -22,8 +22,10 @@ impl Sudo {
             return Ok(Sudo { password: None });
         }
         if cfg!(windows) {
-            return Err(Diag::file_level("sudo", "`sudo` is not supported on Windows")
-                .with_note("run provision from an elevated PowerShell prompt instead"));
+            return Err(
+                Diag::file_level("sudo", "`sudo` is not supported on Windows")
+                    .with_note("run provision from an elevated PowerShell prompt instead"),
+            );
         }
         if ask {
             let password = read_password()?;
@@ -45,14 +47,19 @@ impl Sudo {
             if !ok {
                 return Err(Diag::file_level("sudo", "that password was not accepted"));
             }
-            return Ok(Sudo { password: Some(password) });
+            return Ok(Sudo {
+                password: Some(password),
+            });
         }
 
         if root_is_reachable() {
             Ok(Sudo { password: None })
         } else {
-            Err(Diag::file_level("sudo", "this plan has steps with `sudo: true` and sudo wants a password")
-                .with_note("re-run with --ask-sudo-pass, or warm the credential with `sudo -v` first"))
+            Err(Diag::file_level(
+                "sudo",
+                "this plan has steps with `sudo: true` and sudo wants a password",
+            )
+            .with_note("re-run with --ask-sudo-pass, or warm the credential with `sudo -v` first"))
         }
     }
 
@@ -129,7 +136,10 @@ fn read_password() -> Result<String, Diag> {
 
 #[cfg(not(unix))]
 fn read_password() -> Result<String, Diag> {
-    Err(Diag::file_level("sudo", "`sudo` is not supported on Windows"))
+    Err(Diag::file_level(
+        "sudo",
+        "`sudo` is not supported on Windows",
+    ))
 }
 
 /// Can sudo escalate right now without asking for anything? `apply` turns a

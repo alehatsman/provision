@@ -172,7 +172,11 @@ impl Summary {
 /// column, not for a benchmark.
 pub fn human(d: Duration) -> String {
     let ms = d.as_millis();
-    if ms < 1000 { format!("{ms}ms") } else { format!("{:.1}s", d.as_secs_f64()) }
+    if ms < 1000 {
+        format!("{ms}ms")
+    } else {
+        format!("{:.1}s", d.as_secs_f64())
+    }
 }
 
 /// The last `n` lines, for the failure block. Spec §9.1 shows 20.

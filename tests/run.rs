@@ -11,7 +11,9 @@ use std::process::{Command, Output};
 const EXIT_VALIDATION: i32 = 3;
 
 fn fixture(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/run").join(name)
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/run")
+        .join(name)
 }
 
 fn listing_dir() -> PathBuf {
@@ -31,8 +33,7 @@ fn run(args: &[&str]) -> (i32, String) {
     let out = provision(args);
     (
         out.status.code().unwrap_or(-1),
-        String::from_utf8_lossy(&out.stdout).into_owned()
-            + &String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr),
     )
 }
 
@@ -51,11 +52,17 @@ fn task(extra: &[&str]) -> (i32, String) {
 fn a_prop_takes_its_default_and_an_override_wins() {
     let (code, out) = task(&["--prop", "target=/tmp/x"]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains("/tmp/x dev 1 False 0"), "defaults did not reach the step:\n{out}");
+    assert!(
+        out.contains("/tmp/x dev 1 False 0"),
+        "defaults did not reach the step:\n{out}"
+    );
 
     let (code, out) = task(&["--prop", "target=/tmp/x", "--prop", "label=prod"]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains("/tmp/x prod 1 False 0"), "the override did not win:\n{out}");
+    assert!(
+        out.contains("/tmp/x prod 1 False 0"),
+        "the override did not win:\n{out}"
+    );
 }
 
 #[test]
@@ -64,7 +71,10 @@ fn a_missing_required_prop_is_an_error_not_a_placeholder() {
     assert_eq!(code, EXIT_VALIDATION, "{out}");
     assert!(out.contains("missing required prop `target`"), "{out}");
     // The declaration is where the reader has to go to fix it.
-    assert!(out.contains("task.yml:4"), "the note should point at the prop:\n{out}");
+    assert!(
+        out.contains("task.yml:4"),
+        "the note should point at the prop:\n{out}"
+    );
 }
 
 #[test]
@@ -72,7 +82,10 @@ fn an_unknown_prop_names_the_ones_that_exist() {
     let (code, out) = task(&["--prop", "target=/tmp/x", "--prop", "nope=1"]);
     assert_eq!(code, EXIT_VALIDATION, "{out}");
     assert!(out.contains("has no prop `nope`"), "{out}");
-    assert!(out.contains("it declares: target, label, count, flag, items"), "{out}");
+    assert!(
+        out.contains("it declares: target, label, count, flag, items"),
+        "{out}"
+    );
 }
 
 // Spec §8: a `--prop` value is rendered, then read as the prop's *declared*
@@ -82,18 +95,36 @@ fn an_unknown_prop_names_the_ones_that_exist() {
 fn a_prop_is_read_as_the_type_its_declaration_gives_it() {
     // `True` rather than `true`: minijinja renders booleans Python-style,
     // the same quirk `provision facts` works around.
-    let (code, out) =
-        task(&["--prop", "target=/tmp/x", "--prop", "count=3", "--prop", "flag=true", "--prop", "items=[a, b]"]);
+    let (code, out) = task(&[
+        "--prop",
+        "target=/tmp/x",
+        "--prop",
+        "count=3",
+        "--prop",
+        "flag=true",
+        "--prop",
+        "items=[a, b]",
+    ]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("/tmp/x dev 3 True 2"), "{out}");
 
     // A `string` prop given something that looks like a number stays text.
     let (code, out) = task(&["--prop", "target=3"]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains("3 dev 1 False 0"), "a string prop should stay a string:\n{out}");
+    assert!(
+        out.contains("3 dev 1 False 0"),
+        "a string prop should stay a string:\n{out}"
+    );
 
     // The template runs first, so a var can carry the value in.
-    let (code, out) = task(&["--prop", "target=/tmp/x", "--prop", "count={{ n }}", "--var", "n=7"]);
+    let (code, out) = task(&[
+        "--prop",
+        "target=/tmp/x",
+        "--prop",
+        "count={{ n }}",
+        "--var",
+        "n=7",
+    ]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("/tmp/x dev 7"), "{out}");
 }
@@ -107,8 +138,14 @@ fn a_prop_that_does_not_read_as_its_type_names_what_was_expected() {
     ] {
         let (code, out) = task(&["--prop", "target=/tmp/x", "--prop", arg]);
         assert_eq!(code, EXIT_VALIDATION, "{arg}:\n{out}");
-        assert!(out.contains(&format!("is declared {ty}, and")), "{arg}:\n{out}");
-        assert!(out.contains(takes), "the note should say what it takes:\n{out}");
+        assert!(
+            out.contains(&format!("is declared {ty}, and")),
+            "{arg}:\n{out}"
+        );
+        assert!(
+            out.contains(takes),
+            "the note should say what it takes:\n{out}"
+        );
         // The note is one line; a wrapped literal used to smear it across
         // thirty spaces of indentation.
         assert!(!out.contains("  takes"), "the note wrapped:\n{out}");
@@ -118,7 +155,12 @@ fn a_prop_that_does_not_read_as_its_type_names_what_was_expected() {
 #[test]
 fn validate_checks_a_component_and_its_props_without_running_it() {
     let path = fixture("task.yml");
-    let (code, out) = run(&["validate", path.to_str().unwrap(), "--prop", "target=/tmp/x"]);
+    let (code, out) = run(&[
+        "validate",
+        path.to_str().unwrap(),
+        "--prop",
+        "target=/tmp/x",
+    ]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("  ok  "), "{out}");
 
@@ -138,7 +180,10 @@ fn an_ungated_step_is_ok_under_run_and_unknown_under_apply() {
     let path = fixture("plain.yml");
     let (code, out) = run(&["run", path.to_str().unwrap()]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains(" ok "), "an ungated step should be ok under run:\n{out}");
+    assert!(
+        out.contains(" ok "),
+        "an ungated step should be ok under run:\n{out}"
+    );
     assert!(!out.contains("unknown"), "{out}");
 
     // `apply` cannot read the component form, so the same step is applied
@@ -211,7 +256,10 @@ fn a_structural_key_is_not_one_step() {
 fn a_step_from_a_string_carries_its_own_position() {
     let (code, out) = run(&["run", "--step", "name: x\nshell: y\nbogus: 1"]);
     assert_eq!(code, EXIT_VALIDATION, "{out}");
-    assert!(out.contains("<step>:"), "the diagnostic should be located:\n{out}");
+    assert!(
+        out.contains("<step>:"),
+        "the diagnostic should be located:\n{out}"
+    );
 }
 
 // ── component_dir and the run cwd ─────────────────────────────────────────

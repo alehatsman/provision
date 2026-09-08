@@ -68,7 +68,14 @@ pub struct Done {
 
 impl Done {
     fn one(status: Status) -> Done {
-        Done { status, out: None, attempt: 1, attempts: 1, detail: None, note: None }
+        Done {
+            status,
+            out: None,
+            attempt: 1,
+            attempts: 1,
+            detail: None,
+            note: None,
+        }
     }
 
     /// Ctrl-C rather than the step's own fault. `--keep-going` reads this:
@@ -129,7 +136,6 @@ impl Runner {
     }
 
     fn apply_inner(&self, p: &Prepared, judge: &dyn Judge) -> R<Done> {
-
         match self.gate(p)? {
             Gate::Skip(why) => return Ok(Done::one(Status::Skipped(why))),
             Gate::NoRoot => return Err(Stop::Fail(no_root())),
@@ -187,14 +193,21 @@ impl Runner {
             return self.attempt_loop(p, judge, 1, Duration::ZERO);
         }
         // A gate that said "run" is a verdict; no gate at all is not.
-        Ok(Done::one(if p.gated() { Status::WouldRun } else { Status::Unknown }))
+        Ok(Done::one(if p.gated() {
+            Status::WouldRun
+        } else {
+            Status::Unknown
+        }))
     }
 
     /// Run the action once. `assert: {expr: …}` spawns nothing, so it gets a
     /// synthetic result rather than its own path through the retry loop —
     /// `retry` has to behave identically for both assert forms.
     fn once(&self, p: &Prepared, judge: &dyn Judge) -> R<Output> {
-        if let Action::Assert { expr: Some(src), .. } = &p.action {
+        if let Action::Assert {
+            expr: Some(src), ..
+        } = &p.action
+        {
             let ok = judge.expr(src)?;
             return Ok(Output {
                 rc: i32::from(!ok),
@@ -203,13 +216,20 @@ impl Runner {
                 how: How::Exited,
             });
         }
-        let argv = p.action.argv().expect("every remaining action runs a command");
+        let argv = p
+            .action
+            .argv()
+            .expect("every remaining action runs a command");
         self.spawn(p, argv, p.sudo)
     }
 
     fn spawn(&self, p: &Prepared, argv: Vec<String>, as_root: bool) -> R<Output> {
         let keys: Vec<String> = p.env.keys().cloned().collect();
-        let argv = if as_root { self.sudo.wrap(argv, &keys) } else { argv };
+        let argv = if as_root {
+            self.sudo.wrap(argv, &keys)
+        } else {
+            argv
+        };
         let stdin = if as_root { self.sudo.stdin() } else { None };
         process::run(Spawn {
             argv: &argv,
@@ -271,7 +291,14 @@ impl Runner {
                 None => Status::Unknown,
             },
         };
-        Ok(Done { status, out: Some(out), attempt, attempts, detail: None, note: None })
+        Ok(Done {
+            status,
+            out: Some(out),
+            attempt,
+            attempts,
+            detail: None,
+            note: None,
+        })
     }
 
     /// A typed action inspects and changes state itself, so there is no exit
@@ -287,15 +314,30 @@ impl Runner {
             env: &p.env,
         };
         let (effect, mut note) = match &p.action {
-            Action::File(spec) => {
-                (if act { spec.apply(&ctx) } else { spec.plan(&ctx) }, None)
-            }
-            Action::Service(spec) => {
-                (if act { spec.apply(&ctx) } else { spec.plan(&ctx) }, None)
-            }
-            Action::Pkg(spec) => {
-                (if act { spec.apply(&ctx) } else { spec.plan(&ctx) }, None)
-            }
+            Action::File(spec) => (
+                if act {
+                    spec.apply(&ctx)
+                } else {
+                    spec.plan(&ctx)
+                },
+                None,
+            ),
+            Action::Service(spec) => (
+                if act {
+                    spec.apply(&ctx)
+                } else {
+                    spec.plan(&ctx)
+                },
+                None,
+            ),
+            Action::Pkg(spec) => (
+                if act {
+                    spec.apply(&ctx)
+                } else {
+                    spec.plan(&ctx)
+                },
+                None,
+            ),
             Action::Template(spec) => {
                 if act {
                     spec.apply(&ctx)
@@ -309,12 +351,26 @@ impl Runner {
         let (mut status, detail) = match effect {
             Effect::Ok => (Status::Ok, None),
             Effect::Unknown => (Status::Unknown, None),
-            Effect::Changed(d) => {
-                (if act { Status::Changed } else { Status::WouldChange }, d)
-            }
+            Effect::Changed(d) => (
+                if act {
+                    Status::Changed
+                } else {
+                    Status::WouldChange
+                },
+                d,
+            ),
             Effect::Unprobed => (Status::WouldRunUnprobed, None),
-            Effect::Failed { msg, detail, interrupted } => (
-                Status::Failed(Failure { msg, rc: Some(1), stderr: detail, interrupted }),
+            Effect::Failed {
+                msg,
+                detail,
+                interrupted,
+            } => (
+                Status::Failed(Failure {
+                    msg,
+                    rc: Some(1),
+                    stderr: detail,
+                    interrupted,
+                }),
                 None,
             ),
         };
@@ -346,7 +402,14 @@ impl Runner {
             }
         }
 
-        Ok(Done { status, out: Some(out), attempt: 1, attempts: 1, detail, note })
+        Ok(Done {
+            status,
+            out: Some(out),
+            attempt: 1,
+            attempts: 1,
+            detail,
+            note,
+        })
     }
 
     fn gate(&self, p: &Prepared) -> R<Gate> {
@@ -369,7 +432,10 @@ impl Runner {
                 // to assume.
                 How::Exited if out.rc == 126 || out.rc == 127 => {
                     return Err(Stop::Fail(Failure {
-                        msg: format!("`unless` could not run: {}", cmd.lines().next().unwrap_or("")),
+                        msg: format!(
+                            "`unless` could not run: {}",
+                            cmd.lines().next().unwrap_or("")
+                        ),
                         rc: Some(out.rc),
                         stderr: out.stderr,
                         interrupted: false,
@@ -431,7 +497,12 @@ fn no_root() -> Failure {
 }
 
 fn interrupted() -> Failure {
-    Failure { msg: "interrupted".into(), rc: None, stderr: String::new(), interrupted: true }
+    Failure {
+        msg: "interrupted".into(),
+        rc: None,
+        stderr: String::new(),
+        interrupted: true,
+    }
 }
 
 /// A `Failure` is an outcome, not an error: it lands on the step's line and

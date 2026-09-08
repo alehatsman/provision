@@ -171,7 +171,8 @@ pub fn parse_component(doc: &'static Doc) -> Result<Component> {
                 &format!("prop `{name}`"),
             )?;
             let ty = PropType::parse(schema.require("type").map_err(|_| {
-                schema.err(format!("prop `{name}` has no `type`"))
+                schema
+                    .err(format!("prop `{name}` has no `type`"))
                     .with_note("one of: string, bool, int, list")
             })?)?;
             let required = match schema.get("required") {
@@ -184,7 +185,13 @@ pub fn parse_component(doc: &'static Doc) -> Result<Component> {
                     .err(format!("prop `{name}` is both required and has a default"))
                     .with_note("a default makes it optional; drop one"));
             }
-            props.push(PropSchema { name: name.to_string(), ty, required, default, at: name_at });
+            props.push(PropSchema {
+                name: name.to_string(),
+                ty,
+                required,
+                default,
+                at: name_at,
+            });
         }
     }
 
@@ -193,7 +200,12 @@ pub fn parse_component(doc: &'static Doc) -> Result<Component> {
         None => None,
     };
 
-    Ok(Component { path: doc.path.clone(), props, steps, description })
+    Ok(Component {
+        path: doc.path.clone(),
+        props,
+        steps,
+        description,
+    })
 }
 
 /// A missing file, reported against the node that named it.
@@ -209,7 +221,10 @@ mod tests {
     #[test]
     fn paths_resolve_against_the_naming_file() {
         let from = Path::new("/p/machines/x1/index.yml");
-        assert_eq!(resolve(from, "./vars.yml"), PathBuf::from("/p/machines/x1/vars.yml"));
+        assert_eq!(
+            resolve(from, "./vars.yml"),
+            PathBuf::from("/p/machines/x1/vars.yml")
+        );
         assert_eq!(
             resolve(from, "../../components/zsh/index.yml"),
             PathBuf::from("/p/components/zsh/index.yml")
@@ -220,7 +235,10 @@ mod tests {
     #[test]
     fn tilde_expands_before_resolution() {
         let home = home::home_dir().unwrap();
-        assert_eq!(resolve(Path::new("/p/a.yml"), "~/x.yml"), home.join("x.yml"));
+        assert_eq!(
+            resolve(Path::new("/p/a.yml"), "~/x.yml"),
+            home.join("x.yml")
+        );
     }
 
     #[test]

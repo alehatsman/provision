@@ -23,9 +23,17 @@ use std::time::Duration;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
-    Shell { script: String, interpreter: Interpreter, login: bool },
+    Shell {
+        script: String,
+        interpreter: Interpreter,
+        login: bool,
+    },
     Cmd(Vec<String>),
-    Assert { command: Option<String>, expr: Option<String>, msg: Option<String> },
+    Assert {
+        command: Option<String>,
+        expr: Option<String>,
+        msg: Option<String>,
+    },
     File(file::Spec),
     Template(template::Spec),
     Service(service::Spec),
@@ -50,7 +58,11 @@ pub enum Interpreter {
 impl Interpreter {
     /// Spec §6.1: bash on unix, powershell on Windows.
     pub fn default_for_host() -> Interpreter {
-        if cfg!(windows) { Interpreter::PowerShell } else { Interpreter::Bash }
+        if cfg!(windows) {
+            Interpreter::PowerShell
+        } else {
+            Interpreter::Bash
+        }
     }
 
     pub fn parse(name: &str, at: N<'_>) -> Result<Interpreter> {
@@ -86,7 +98,11 @@ impl Interpreter {
                 v
             }
             Interpreter::PowerShell | Interpreter::Pwsh => {
-                let prog = if self == Interpreter::Pwsh { "pwsh" } else { "powershell" };
+                let prog = if self == Interpreter::Pwsh {
+                    "pwsh"
+                } else {
+                    "powershell"
+                };
                 // -NonInteractive so a step that would prompt fails instead of
                 // hanging behind a spinner with no way to type at it.
                 vec![
@@ -106,13 +122,15 @@ impl Action {
     /// and every phase 2 action return `None`.
     pub fn argv(&self) -> Option<Vec<String>> {
         match self {
-            Action::Shell { script, interpreter, login } => {
-                Some(interpreter.argv(script, *login))
-            }
+            Action::Shell {
+                script,
+                interpreter,
+                login,
+            } => Some(interpreter.argv(script, *login)),
             Action::Cmd(argv) => Some(argv.clone()),
-            Action::Assert { command: Some(c), .. } => {
-                Some(Interpreter::default_for_host().argv(c, false))
-            }
+            Action::Assert {
+                command: Some(c), ..
+            } => Some(Interpreter::default_for_host().argv(c, false)),
             _ => None,
         }
     }
@@ -126,7 +144,10 @@ impl Action {
     /// An action that inspects and changes state itself, rather than reporting
     /// through an exit code. It never reaches the runner's argv path.
     pub fn is_typed(&self) -> bool {
-        matches!(self, Action::File(_) | Action::Template(_) | Action::Service(_) | Action::Pkg(_))
+        matches!(
+            self,
+            Action::File(_) | Action::Template(_) | Action::Service(_) | Action::Pkg(_)
+        )
     }
 }
 
@@ -146,7 +167,11 @@ impl Action {
         // `raw: true` means the body is not a template (spec §4). It still
         // reaches the action; it just arrives as written.
         let render = |src: &str| -> Option<String> {
-            if raw { Some(src.to_string()) } else { engine.render(src, ctx).ok() }
+            if raw {
+                Some(src.to_string())
+            } else {
+                engine.render(src, ctx).ok()
+            }
         };
 
         let action = match step.key {
@@ -164,16 +189,27 @@ impl Action {
                 } else {
                     body
                 };
-                let Some(script) = render(script_at.as_str()?) else { return Ok(None) };
+                let Some(script) = render(script_at.as_str()?) else {
+                    return Ok(None);
+                };
                 let interpreter = match long.then(|| body.get("interpreter")).flatten() {
                     Some(n) => {
-                        let Some(name) = render(n.as_str()?) else { return Ok(None) };
+                        let Some(name) = render(n.as_str()?) else {
+                            return Ok(None);
+                        };
                         Interpreter::parse(&name, n)?
                     }
                     None => Interpreter::default_for_host(),
                 };
-                let login = body.get("login").and_then(|n| n.as_bool().ok()).unwrap_or(false);
-                Action::Shell { script, interpreter, login }
+                let login = body
+                    .get("login")
+                    .and_then(|n| n.as_bool().ok())
+                    .unwrap_or(false);
+                Action::Shell {
+                    script,
+                    interpreter,
+                    login,
+                }
             }
 
             "cmd" => {
@@ -191,7 +227,9 @@ impl Action {
                         v
                     }
                     Err(_) => {
-                        let Ok(value) = engine.render_node(body, ctx) else { return Ok(None) };
+                        let Ok(value) = engine.render_node(body, ctx) else {
+                            return Ok(None);
+                        };
                         match value.try_iter() {
                             Ok(it) => it.collect(),
                             Err(_) => {
@@ -215,13 +253,20 @@ impl Action {
                 let command = field("command");
                 // An `expr` is an expression, not a template: it is evaluated
                 // against the scope at run time, not rendered into text first.
-                let expr = body.get("expr").and_then(|n| n.as_str().ok()).map(str::to_string);
+                let expr = body
+                    .get("expr")
+                    .and_then(|n| n.as_str().ok())
+                    .map(str::to_string);
                 if command.is_none() && expr.is_none() {
-                    return Err(body.err("`assert` needs `command` or `expr`").with_note(
-                        "command: a shell command that exits 0 · expr: an expression",
-                    ));
+                    return Err(body
+                        .err("`assert` needs `command` or `expr`")
+                        .with_note("command: a shell command that exits 0 · expr: an expression"));
                 }
-                Action::Assert { command, expr, msg: field("msg") }
+                Action::Assert {
+                    command,
+                    expr,
+                    msg: field("msg"),
+                }
             }
 
             "file" => match file::parse(step, engine, ctx, raw)? {
@@ -345,7 +390,10 @@ impl Ctx<'_> {
         let got = match self.exec(argv, as_root) {
             Ok(g) => g,
             Err(e) => {
-                return Some(Effect::fail(format!("cannot run {}: {e}", command_name(argv))));
+                return Some(Effect::fail(format!(
+                    "cannot run {}: {e}",
+                    command_name(argv)
+                )));
             }
         };
         if let Some(bad) = self.stopped(&got) {
@@ -375,7 +423,10 @@ impl Ctx<'_> {
         match got.how {
             process::How::Exited => None,
             process::How::TimedOut => Some(Effect::Failed {
-                msg: format!("timed out after {}", crate::output::event::human(self.timeout)),
+                msg: format!(
+                    "timed out after {}",
+                    crate::output::event::human(self.timeout)
+                ),
                 detail: got.stderr_text(),
                 interrupted: false,
             }),
@@ -398,7 +449,11 @@ impl Ctx<'_> {
 impl Effect {
     /// A failure with no captured output behind it.
     pub fn fail(msg: impl Into<String>) -> Effect {
-        Effect::Failed { msg: msg.into(), detail: String::new(), interrupted: false }
+        Effect::Failed {
+            msg: msg.into(),
+            detail: String::new(),
+            interrupted: false,
+        }
     }
 }
 

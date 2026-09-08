@@ -186,7 +186,13 @@ impl Expander {
         Ok(())
     }
 
-    fn walk(&mut self, steps: &[Step<'static>], scope: &mut Scope, depth: usize, inherited: &BTreeSet<String>) {
+    fn walk(
+        &mut self,
+        steps: &[Step<'static>],
+        scope: &mut Scope,
+        depth: usize,
+        inherited: &BTreeSet<String>,
+    ) {
         for step in steps {
             if self.stopped {
                 return;
@@ -199,7 +205,13 @@ impl Expander {
         }
     }
 
-    fn step(&mut self, step: &Step<'static>, scope: &mut Scope, depth: usize, inherited: &BTreeSet<String>) {
+    fn step(
+        &mut self,
+        step: &Step<'static>,
+        scope: &mut Scope,
+        depth: usize,
+        inherited: &BTreeSet<String>,
+    ) {
         let mut tags = inherited.clone();
         if let Some(n) = step.mods.tags {
             match n.as_str_or_seq() {
@@ -273,7 +285,9 @@ impl Expander {
     // ── conditions ────────────────────────────────────────────────────────
 
     fn condition(&mut self, step: &Step<'static>, scope: &Scope) -> Cond {
-        let Some(when) = step.mods.when else { return Cond::True };
+        let Some(when) = step.mods.when else {
+            return Cond::True;
+        };
         let expr = match when.as_scalar_string() {
             Ok(s) => s,
             Err(d) => return Cond::Error(d),
@@ -309,9 +323,13 @@ impl Expander {
     // ── structural keywords ───────────────────────────────────────────────
 
     fn do_vars(&mut self, step: &Step<'static>, scope: &mut Scope) {
-        let Some(pairs) = self.diags.absorb(step.body.as_map()) else { return };
+        let Some(pairs) = self.diags.absorb(step.body.as_map()) else {
+            return;
+        };
         for (k, v) in pairs {
-            let Some(name) = self.diags.absorb(k.as_scalar_string()) else { continue };
+            let Some(name) = self.diags.absorb(k.as_scalar_string()) else {
+                continue;
+            };
             let ctx = scope.ctx();
             match self.engine.render_node(v, &ctx) {
                 Ok(value) => scope.set(name, value),
@@ -321,13 +339,20 @@ impl Expander {
     }
 
     fn do_vars_file(&mut self, step: &Step<'static>, scope: &mut Scope) {
-        let optional =
-            step.mods.optional.map(|n| n.as_bool().unwrap_or(false)).unwrap_or(false);
-        let Some(entries) = self.diags.absorb(step.body.as_str_or_seq_nodes()) else { return };
+        let optional = step
+            .mods
+            .optional
+            .map(|n| n.as_bool().unwrap_or(false))
+            .unwrap_or(false);
+        let Some(entries) = self.diags.absorb(step.body.as_str_or_seq_nodes()) else {
+            return;
+        };
 
         for entry in entries {
             let ctx = scope.ctx();
-            let Some(rel) = self.diags.absorb(self.render_str(entry, &ctx)) else { continue };
+            let Some(rel) = self.diags.absorb(self.render_str(entry, &ctx)) else {
+                continue;
+            };
             let path = load::resolve(entry.file, &rel);
             if !path.exists() {
                 if !optional {
@@ -335,7 +360,9 @@ impl Expander {
                 }
                 continue;
             }
-            let Some(doc) = self.diags.absorb(self.loader.load(&path)) else { continue };
+            let Some(doc) = self.diags.absorb(self.loader.load(&path)) else {
+                continue;
+            };
             let root = doc.node();
             if root.is_null() {
                 continue; // an empty vars file sets nothing, which is not an error
@@ -350,7 +377,9 @@ impl Expander {
                 continue;
             };
             for (k, v) in pairs {
-                let Some(name) = self.diags.absorb(k.as_scalar_string()) else { continue };
+                let Some(name) = self.diags.absorb(k.as_scalar_string()) else {
+                    continue;
+                };
                 // A vars file is data, not a template: values are taken as
                 // written. Templating them would make `{{` in a config value
                 // an error, and these files hold shell snippets.
@@ -362,15 +391,25 @@ impl Expander {
         }
     }
 
-    fn do_import(&mut self, step: &Step<'static>, scope: &mut Scope, depth: usize, tags: &BTreeSet<String>) {
+    fn do_import(
+        &mut self,
+        step: &Step<'static>,
+        scope: &mut Scope,
+        depth: usize,
+        tags: &BTreeSet<String>,
+    ) {
         let ctx = scope.ctx();
-        let Some(rel) = self.diags.absorb(self.render_str(step.body, &ctx)) else { return };
+        let Some(rel) = self.diags.absorb(self.render_str(step.body, &ctx)) else {
+            return;
+        };
         let path = load::resolve(step.body.file, &rel);
         if !path.exists() {
             self.diags.push(load::missing(step.body, &path, "import"));
             return;
         }
-        let Some(_guard) = self.enter(&path, step.body) else { return };
+        let Some(_guard) = self.enter(&path, step.body) else {
+            return;
+        };
 
         let Some(doc) = self.diags.absorb(self.loader.load(&path)) else {
             self.stack.pop();
@@ -390,15 +429,25 @@ impl Expander {
         self.stack.pop();
     }
 
-    fn do_use(&mut self, step: &Step<'static>, scope: &mut Scope, depth: usize, tags: &BTreeSet<String>) {
+    fn do_use(
+        &mut self,
+        step: &Step<'static>,
+        scope: &mut Scope,
+        depth: usize,
+        tags: &BTreeSet<String>,
+    ) {
         let ctx = scope.ctx();
-        let Some(rel) = self.diags.absorb(self.render_str(step.body, &ctx)) else { return };
+        let Some(rel) = self.diags.absorb(self.render_str(step.body, &ctx)) else {
+            return;
+        };
         let path = load::resolve(step.body.file, &rel);
         if !path.exists() {
             self.diags.push(load::missing(step.body, &path, "use"));
             return;
         }
-        let Some(_guard) = self.enter(&path, step.body) else { return };
+        let Some(_guard) = self.enter(&path, step.body) else {
+            return;
+        };
 
         let Some(doc) = self.diags.absorb(self.loader.load(&path)) else {
             self.stack.pop();
@@ -486,10 +535,15 @@ impl Expander {
         }
 
         fill_defaults(component, &mut out, &mut errors, &|schema| {
-            step.at.err(format!("missing required prop `{}`", schema.name))
+            step.at
+                .err(format!("missing required prop `{}`", schema.name))
         });
 
-        if errors.is_empty() { Ok(out) } else { Err(errors) }
+        if errors.is_empty() {
+            Ok(out)
+        } else {
+            Err(errors)
+        }
     }
 
     /// D17: the same three checks as a `use` site, against `--prop k=v`
@@ -540,12 +594,22 @@ impl Expander {
             Diag::file_level("--prop", format!("missing required prop `{}`", schema.name))
         });
 
-        if errors.is_empty() { Ok(out) } else { Err(errors) }
+        if errors.is_empty() {
+            Ok(out)
+        } else {
+            Err(errors)
+        }
     }
 
     // ── actions ───────────────────────────────────────────────────────────
 
-    fn do_action(&mut self, step: &Step<'static>, scope: &mut Scope, depth: usize, tags: BTreeSet<String>) {
+    fn do_action(
+        &mut self,
+        step: &Step<'static>,
+        scope: &mut Scope,
+        depth: usize,
+        tags: BTreeSet<String>,
+    ) {
         let ctx = scope.ctx();
 
         // Render every string field. This is where an undefined variable in a
@@ -553,14 +617,23 @@ impl Expander {
         // is also the only place that reports render errors: `prepare` below
         // renders the same nodes again and stays quiet, so one bad `{{ … }}`
         // is one diagnostic rather than two.
-        let raw = step.mods.raw.map(|n| n.as_bool().unwrap_or(false)).unwrap_or(false);
+        let raw = step
+            .mods
+            .raw
+            .map(|n| n.as_bool().unwrap_or(false))
+            .unwrap_or(false);
         let mut fields: Vec<N<'static>> = Vec::new();
         if !raw {
             collect_strings(step.body, &mut fields);
         }
-        for n in [step.mods.unless, step.mods.creates, step.mods.cwd, step.mods.env]
-            .into_iter()
-            .flatten()
+        for n in [
+            step.mods.unless,
+            step.mods.creates,
+            step.mods.cwd,
+            step.mods.env,
+        ]
+        .into_iter()
+        .flatten()
         {
             collect_strings(n, &mut fields);
         }
@@ -597,7 +670,9 @@ impl Expander {
 
         if let Some(allowed) = model::action_body_keys(step.key)
             && step.body.as_map().is_ok()
-            && let Err(d) = step.body.deny_unknown_keys(allowed, &format!("`{}`", step.key))
+            && let Err(d) = step
+                .body
+                .deny_unknown_keys(allowed, &format!("`{}`", step.key))
         {
             self.diags.push(d);
             renderable = false;
@@ -610,7 +685,12 @@ impl Expander {
             self.check_file_source(step, &ctx);
         }
 
-        if step.mods.sudo.map(|n| n.as_bool().unwrap_or(false)).unwrap_or(false) {
+        if step
+            .mods
+            .sudo
+            .map(|n| n.as_bool().unwrap_or(false))
+            .unwrap_or(false)
+        {
             self.needs_sudo = true;
         }
 
@@ -639,7 +719,11 @@ impl Expander {
 
         // A step whose fields would not render cannot be run or judged, and
         // the diagnostic already says why.
-        let prepared = if renderable { self.prepare(step, &ctx, raw) } else { None };
+        let prepared = if renderable {
+            self.prepare(step, &ctx, raw)
+        } else {
+            None
+        };
         let Some(prepared) = prepared else {
             self.bind_register(step, scope, None, &Status::WouldRunUnprobed);
             self.record(step, scope, depth, tags, Status::WouldRunUnprobed);
@@ -663,11 +747,20 @@ impl Expander {
                 base: scope.ctx_map(),
                 // Non-scalars already produced a diagnostic above and never
                 // reach here, so this cannot silently discard an opinion.
-                failed_when: step.mods.failed_when.and_then(|n| n.as_scalar_string().ok()),
-                changed_when: step.mods.changed_when.and_then(|n| n.as_scalar_string().ok()),
+                failed_when: step
+                    .mods
+                    .failed_when
+                    .and_then(|n| n.as_scalar_string().ok()),
+                changed_when: step
+                    .mods
+                    .changed_when
+                    .and_then(|n| n.as_scalar_string().ok()),
                 at: step.at,
             };
-            let runner = self.runner.as_ref().expect("plan and apply always attach a runner");
+            let runner = self
+                .runner
+                .as_ref()
+                .expect("plan and apply always attach a runner");
             if self.mode.executes() {
                 runner.apply(&prepared, &judge)
             } else {
@@ -694,7 +787,8 @@ impl Expander {
         // `--keep-going` carries on past a failed step, but never past an
         // interrupt: Ctrl-C is the operator saying stop, not a step saying it
         // could not do its work.
-        if done.status.failed() && self.mode.executes() && (!self.keep_going || done.interrupted()) {
+        if done.status.failed() && self.mode.executes() && (!self.keep_going || done.interrupted())
+        {
             self.stopped = true;
         }
         self.emit(step, scope, depth, &tags, done, elapsed);
@@ -726,8 +820,14 @@ impl Expander {
         if let Some(n) = step.mods.env {
             for (k, v) in n.as_map().ok()? {
                 let key = k.as_scalar_string().ok()?;
-                let val = v.as_str().ok().and_then(|s| self.engine.render(s, ctx).ok());
-                env.insert(key, val.unwrap_or_else(|| v.to_value().map(|x| x.to_string()).unwrap_or_default()));
+                let val = v
+                    .as_str()
+                    .ok()
+                    .and_then(|s| self.engine.render(s, ctx).ok());
+                env.insert(
+                    key,
+                    val.unwrap_or_else(|| v.to_value().map(|x| x.to_string()).unwrap_or_default()),
+                );
             }
         }
 
@@ -762,8 +862,16 @@ impl Expander {
             creates: text(step.mods.creates),
             cwd,
             env,
-            sudo: step.mods.sudo.map(|n| n.as_bool().unwrap_or(false)).unwrap_or(false),
-            timeout: step.mods.timeout.and_then(|n| model::parse_duration(n).ok()).unwrap_or(DEFAULT_TIMEOUT),
+            sudo: step
+                .mods
+                .sudo
+                .map(|n| n.as_bool().unwrap_or(false))
+                .unwrap_or(false),
+            timeout: step
+                .mods
+                .timeout
+                .and_then(|n| model::parse_duration(n).ok())
+                .unwrap_or(DEFAULT_TIMEOUT),
             retry: step.mods.retry.and_then(|n| model::parse_retry(n).ok()),
             has_changed_when: step.mods.changed_when.is_some(),
         })
@@ -779,7 +887,9 @@ impl Expander {
         out: Option<&Output>,
         status: &Status,
     ) {
-        let Some(reg) = step.mods.register.and_then(|n| n.as_str().ok()) else { return };
+        let Some(reg) = step.mods.register.and_then(|n| n.as_str().ok()) else {
+            return;
+        };
         self.registers.insert(reg.to_string());
         scope.set(reg, result_value(out, status));
     }
@@ -810,17 +920,21 @@ impl Expander {
             self.diags.push(step.body.err("`template` requires `src`"));
             return;
         };
-        let Some(rel) = self.diags.absorb(self.render_str(src_at, ctx)) else { return };
+        let Some(rel) = self.diags.absorb(self.render_str(src_at, ctx)) else {
+            return;
+        };
         let path = load::resolve(src_at.file, &rel);
         if !path.exists() {
-            self.diags.push(load::missing(src_at, &path, "template src"));
+            self.diags
+                .push(load::missing(src_at, &path, "template src"));
             return;
         }
         let files = if path.is_dir() {
             match collect_tree(&path) {
                 Ok(f) => f,
                 Err(e) => {
-                    self.diags.push(src_at.err(format!("cannot walk {}: {e}", path.display())));
+                    self.diags
+                        .push(src_at.err(format!("cannot walk {}: {e}", path.display())));
                     return;
                 }
             }
@@ -849,8 +963,12 @@ impl Expander {
     }
 
     fn check_file_source(&mut self, step: &Step<'static>, ctx: &Value) {
-        let Some(src_at) = step.body.get("src") else { return };
-        let Some(rel) = self.diags.absorb(self.render_str(src_at, ctx)) else { return };
+        let Some(src_at) = step.body.get("src") else {
+            return;
+        };
+        let Some(rel) = self.diags.absorb(self.render_str(src_at, ctx)) else {
+            return;
+        };
         // A `link` target need not exist on this machine.
         let is_link = step
             .body
@@ -870,9 +988,27 @@ impl Expander {
     // ── helpers ───────────────────────────────────────────────────────────
 
     /// A step that reached a verdict without running: skipped, or unprobed.
-    fn record(&mut self, step: &Step<'static>, scope: &Scope, depth: usize, tags: BTreeSet<String>, status: Status) {
+    fn record(
+        &mut self,
+        step: &Step<'static>,
+        scope: &Scope,
+        depth: usize,
+        tags: BTreeSet<String>,
+        status: Status,
+    ) {
         let _ = tags;
-        self.finish(step, scope, depth, status, None, 1, 1, Duration::ZERO, None, None);
+        self.finish(
+            step,
+            scope,
+            depth,
+            status,
+            None,
+            1,
+            1,
+            Duration::ZERO,
+            None,
+            None,
+        );
     }
 
     /// A step the runner actually reached.
@@ -887,7 +1023,18 @@ impl Expander {
     ) {
         let _ = tags;
         let (detail, note) = (done.detail.clone(), done.note.clone());
-        self.finish(step, scope, depth, done.status, done.out.as_ref(), done.attempt, done.attempts, elapsed, detail, note);
+        self.finish(
+            step,
+            scope,
+            depth,
+            done.status,
+            done.out.as_ref(),
+            done.attempt,
+            done.attempts,
+            elapsed,
+            detail,
+            note,
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -932,8 +1079,12 @@ impl Expander {
     /// its first argument. A skipped step is not rendered at all, so it uses
     /// the raw name — it may reference a variable that does not exist.
     fn step_name(&mut self, step: &Step<'static>, scope: &Scope, status: &Status) -> String {
-        let Some(n) = step.mods.name else { return step.fallback_name() };
-        let Ok(raw) = n.as_str() else { return step.fallback_name() };
+        let Some(n) = step.mods.name else {
+            return step.fallback_name();
+        };
+        let Ok(raw) = n.as_str() else {
+            return step.fallback_name();
+        };
         if matches!(status, Status::Skipped(_)) {
             return raw.to_string();
         }
@@ -950,19 +1101,18 @@ impl Expander {
 
     fn render_str(&self, at: N<'static>, ctx: &Value) -> Result<String> {
         let s = at.as_str()?;
-        self.engine.render(s, ctx).map_err(|e| at.err(self.engine.describe_with(s, ctx, &e)))
+        self.engine
+            .render(s, ctx)
+            .map_err(|e| at.err(self.engine.describe_with(s, ctx, &e)))
     }
 
     /// Push a file onto the include stack, reporting a cycle by naming it.
     fn enter(&mut self, path: &Path, at: N<'static>) -> Option<()> {
         if let Some(i) = self.stack.iter().position(|p| p == path) {
-            let mut chain: Vec<String> =
-                self.stack[i..].iter().map(|p| rel_display(p)).collect();
+            let mut chain: Vec<String> = self.stack[i..].iter().map(|p| rel_display(p)).collect();
             chain.push(rel_display(path));
-            self.diags.push(
-                at.err("import cycle")
-                    .with_note(chain.join(" → ")),
-            );
+            self.diags
+                .push(at.err("import cycle").with_note(chain.join(" → ")));
             return None;
         }
         self.stack.push(path.to_path_buf());
@@ -982,11 +1132,26 @@ enum Cond {
 /// false and the reader is reported unprobed rather than skipped.
 fn result_value(out: Option<&Output>, status: &Status) -> Value {
     let mut m = BTreeMap::new();
-    m.insert("rc".to_string(), Value::from(out.map(|o| o.rc).unwrap_or(0)));
-    m.insert("stdout".to_string(), Value::from(out.map(|o| o.stdout.as_str()).unwrap_or("")));
-    m.insert("stderr".to_string(), Value::from(out.map(|o| o.stderr.as_str()).unwrap_or("")));
-    m.insert("changed".to_string(), Value::from(matches!(status, Status::Changed)));
-    m.insert("skipped".to_string(), Value::from(matches!(status, Status::Skipped(_))));
+    m.insert(
+        "rc".to_string(),
+        Value::from(out.map(|o| o.rc).unwrap_or(0)),
+    );
+    m.insert(
+        "stdout".to_string(),
+        Value::from(out.map(|o| o.stdout.as_str()).unwrap_or("")),
+    );
+    m.insert(
+        "stderr".to_string(),
+        Value::from(out.map(|o| o.stderr.as_str()).unwrap_or("")),
+    );
+    m.insert(
+        "changed".to_string(),
+        Value::from(matches!(status, Status::Changed)),
+    );
+    m.insert(
+        "skipped".to_string(),
+        Value::from(matches!(status, Status::Skipped(_))),
+    );
     Value::from(m)
 }
 
@@ -1051,15 +1216,22 @@ fn typed_prop(schema: &load::PropSchema, text: &str) -> std::result::Result<Valu
             schema.name,
             schema.ty.name()
         );
-        Diag::file_level("--prop", msg)
-            .with_note(format!("{} takes {}", schema.ty.name(), schema.ty.example()))
+        Diag::file_level("--prop", msg).with_note(format!(
+            "{} takes {}",
+            schema.ty.name(),
+            schema.ty.example()
+        ))
     };
     // Read through the same YAML the rest of the crate reads, so `3`, `true`
     // and `[a, b]` mean here exactly what they mean in a plan file.
     let value = crate::yaml::Doc::from_str("--prop", text)
         .and_then(|d| d.node().to_value())
         .map_err(|_| bad())?;
-    if schema.ty.accepts(&value) { Ok(value) } else { Err(bad()) }
+    if schema.ty.accepts(&value) {
+        Ok(value)
+    } else {
+        Err(bad())
+    }
 }
 
 /// The half of prop binding that does not care where the values came from:

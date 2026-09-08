@@ -36,7 +36,9 @@ macro_rules! snapshot {
 }
 
 fn fixture(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/apply").join(name)
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/apply")
+        .join(name)
 }
 
 /// Run a command with `$PROVISION_SCRATCH` pointed at a directory the plan
@@ -58,8 +60,7 @@ fn apply(scratch: &Path, plan: &str, extra: &[&str]) -> (i32, String) {
     let out = run_in(scratch, &args);
     (
         out.status.code().unwrap_or(-1),
-        String::from_utf8_lossy(&out.stdout).into_owned()
-            + &String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr),
     )
 }
 
@@ -88,20 +89,47 @@ fn the_scratch_home_plan_applies_twice_changed_then_skipped() {
 
     let (code, first) = apply(dir.path(), "scratch_home.yml", &[]);
     assert_eq!(code, 0, "{first}");
-    assert!(line_for(&first, "scratch directory").contains("changed"), "{first}");
-    assert!(line_for(&first, "identity key").contains("changed"), "{first}");
-    assert!(line_for(&first, "identity key present").contains("ok"), "{first}");
-    assert!(dir.path().join(".ssh").is_dir(), "the directory was not made");
-    assert!(dir.path().join("id_ed25519").is_file(), "the key was not written");
+    assert!(
+        line_for(&first, "scratch directory").contains("changed"),
+        "{first}"
+    );
+    assert!(
+        line_for(&first, "identity key").contains("changed"),
+        "{first}"
+    );
+    assert!(
+        line_for(&first, "identity key present").contains("ok"),
+        "{first}"
+    );
+    assert!(
+        dir.path().join(".ssh").is_dir(),
+        "the directory was not made"
+    );
+    assert!(
+        dir.path().join("id_ed25519").is_file(),
+        "the key was not written"
+    );
 
     let (code, second) = apply(dir.path(), "scratch_home.yml", &[]);
     assert_eq!(code, 0, "{second}");
     // `creates` and `unless` are the two ways a shell step declares that it is
     // already done. Both must fire on the second run and neither on the first.
-    assert!(line_for(&second, "scratch directory").contains("creates exists"), "{second}");
-    assert!(line_for(&second, "identity key").contains("unless"), "{second}");
-    assert!(line_for(&second, "identity key present").contains("ok"), "{second}");
-    assert!(!second.contains("changed"), "nothing should change twice:\n{second}");
+    assert!(
+        line_for(&second, "scratch directory").contains("creates exists"),
+        "{second}"
+    );
+    assert!(
+        line_for(&second, "identity key").contains("unless"),
+        "{second}"
+    );
+    assert!(
+        line_for(&second, "identity key present").contains("ok"),
+        "{second}"
+    );
+    assert!(
+        !second.contains("changed"),
+        "nothing should change twice:\n{second}"
+    );
 }
 
 #[test]
@@ -110,23 +138,38 @@ fn plan_probes_the_same_gates_apply_uses() {
     let path = fixture("scratch_home.yml");
     let plan = |d: &Path| {
         let out = run_in(d, &["plan", path.to_str().unwrap()]);
-        (out.status.code().unwrap_or(-1), String::from_utf8_lossy(&out.stdout).into_owned())
+        (
+            out.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+        )
     };
 
     // Nothing has run, so the closing assert cannot hold yet: exit 1. Spec
     // §6.7 — plan reports that and keeps walking, so all three steps are here.
     let (code, before) = plan(dir.path());
     assert_eq!(code, 1, "{before}");
-    assert!(line_for(&before, "scratch directory").contains("would run"), "{before}");
-    assert!(line_for(&before, "identity key present").contains("FAILED"), "{before}");
+    assert!(
+        line_for(&before, "scratch directory").contains("would run"),
+        "{before}"
+    );
+    assert!(
+        line_for(&before, "identity key present").contains("FAILED"),
+        "{before}"
+    );
     assert!(before.contains("3 steps"), "{before}");
-    assert!(!dir.path().join(".ssh").exists(), "plan must not create anything");
+    assert!(
+        !dir.path().join(".ssh").exists(),
+        "plan must not create anything"
+    );
 
     apply(dir.path(), "scratch_home.yml", &[]);
 
     let (code, after) = plan(dir.path());
     assert_eq!(code, 0, "a converged plan has nothing to do:\n{after}");
-    assert!(line_for(&after, "scratch directory").contains("creates exists"), "{after}");
+    assert!(
+        line_for(&after, "scratch directory").contains("creates exists"),
+        "{after}"
+    );
 }
 
 // ── verdicts ──────────────────────────────────────────────────────────────
@@ -162,11 +205,17 @@ fn an_unknown_verdict_makes_plan_exit_two() {
 fn plan_no_probe_claims_nothing_and_exits_zero() {
     let dir = tempfile::tempdir().unwrap();
     let path = fixture("verdicts.yml");
-    let out = run_in(dir.path(), &["plan", "--plan-no-probe", path.to_str().unwrap()]);
+    let out = run_in(
+        dir.path(),
+        &["plan", "--plan-no-probe", path.to_str().unwrap()],
+    );
     let text = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{text}");
     assert!(text.contains("would run (unprobed)"), "{text}");
-    assert!(!text.contains("unknown"), "nothing was probed, so nothing is unknown:\n{text}");
+    assert!(
+        !text.contains("unknown"),
+        "nothing was probed, so nothing is unknown:\n{text}"
+    );
 }
 
 // ── failure ───────────────────────────────────────────────────────────────
@@ -179,7 +228,10 @@ fn a_failure_stops_the_run_and_shows_the_stderr_tail() {
     assert!(out.contains("FAILED"), "{out}");
     assert!(out.contains("sed: can't read /etc/pacman.conf"), "{out}");
     assert!(out.contains("exit 2"), "{out}");
-    assert!(!out.contains("Never reached"), "the run must stop at the failure:\n{out}");
+    assert!(
+        !out.contains("Never reached"),
+        "the run must stop at the failure:\n{out}"
+    );
 }
 
 // Spec §8 `--keep-going`. The point of the flag is the list: on a bare
@@ -191,7 +243,10 @@ fn keep_going_carries_on_past_a_failed_step() {
     let dir = tempfile::tempdir().unwrap();
     let (code, out) = apply(dir.path(), "failure.yml", &["--keep-going"]);
     assert_eq!(code, 1, "a kept-going run still fails:\n{out}");
-    assert!(out.contains("Never reached"), "the run stopped anyway:\n{out}");
+    assert!(
+        out.contains("Never reached"),
+        "the run stopped anyway:\n{out}"
+    );
     assert!(out.contains("sed: can't read /etc/pacman.conf"), "{out}");
 }
 
@@ -200,12 +255,23 @@ fn keep_going_reports_every_failure_and_the_register_of_one() {
     let dir = tempfile::tempdir().unwrap();
     let (code, out) = apply(dir.path(), "keep_going.yml", &["--keep-going"]);
     assert_eq!(code, 1, "{out}");
-    assert_eq!(out.matches("FAILED").count(), 2, "both failures should show:\n{out}");
+    assert_eq!(
+        out.matches("FAILED").count(),
+        2,
+        "both failures should show:\n{out}"
+    );
     // The register holds the failed step's own result, so a later `when`
     // reading it sees what happened rather than a placeholder.
-    assert_eq!(verdict(&out, "Reads the failed step's register"), "ok", "{out}");
+    assert_eq!(
+        verdict(&out, "Reads the failed step's register"),
+        "ok",
+        "{out}"
+    );
     assert_eq!(verdict(&out, "Last step still runs"), "ok", "{out}");
-    assert!(out.contains("2 failed"), "the summary should count both:\n{out}");
+    assert!(
+        out.contains("2 failed"),
+        "the summary should count both:\n{out}"
+    );
 }
 
 // Without the flag the same plan stops at the first of the two, which is what
@@ -233,9 +299,17 @@ fn retry_reruns_until_the_step_passes() {
     let dir = tempfile::tempdir().unwrap();
     let (code, out) = apply(dir.path(), "retry.yml", &[]);
     assert_eq!(code, 0, "{out}");
-    assert!(line_for(&out, "third attempt").contains("attempt 3/3"), "{out}");
+    assert!(
+        line_for(&out, "third attempt").contains("attempt 3/3"),
+        "{out}"
+    );
     assert!(line_for(&out, "third attempt").contains("changed"), "{out}");
-    assert_eq!(std::fs::read_to_string(dir.path().join("tries")).unwrap().trim(), "3");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("tries"))
+            .unwrap()
+            .trim(),
+        "3"
+    );
 }
 
 #[test]
@@ -257,7 +331,10 @@ fn a_timeout_kills_the_children_not_only_the_shell() {
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false);
-    assert!(!alive, "pid {pid} outlived the process group it was killed with");
+    assert!(
+        !alive,
+        "pid {pid} outlived the process group it was killed with"
+    );
 }
 
 // ── output forms ──────────────────────────────────────────────────────────
@@ -269,12 +346,13 @@ fn json_emits_one_object_per_step_and_a_summary() {
     let out = run_in(dir.path(), &["apply", path.to_str().unwrap(), "--json"]);
     let stdout = String::from_utf8_lossy(&out.stdout);
 
-    let rows: Vec<serde_json::Value> =
-        stdout.lines().map(|l| serde_json::from_str(l).expect(l)).collect();
+    let rows: Vec<serde_json::Value> = stdout
+        .lines()
+        .map(|l| serde_json::from_str(l).expect(l))
+        .collect();
     assert_eq!(rows.last().unwrap()["event"], "summary");
 
-    let steps: Vec<&serde_json::Value> =
-        rows.iter().filter(|r| r["event"] == "step").collect();
+    let steps: Vec<&serde_json::Value> = rows.iter().filter(|r| r["event"] == "step").collect();
     assert_eq!(steps.len(), 5, "{stdout}");
     assert_eq!(steps[0]["status"], "unknown");
     assert_eq!(steps[1]["status"], "skipped");
@@ -282,7 +360,10 @@ fn json_emits_one_object_per_step_and_a_summary() {
     assert_eq!(steps[2]["status"], "changed");
     // Spec §9.3: every step carries the file and line it came from.
     assert!(steps[0]["line"].as_u64().unwrap() > 0, "{stdout}");
-    assert!(steps[0]["file"].as_str().unwrap().ends_with("verdicts.yml"), "{stdout}");
+    assert!(
+        steps[0]["file"].as_str().unwrap().ends_with("verdicts.yml"),
+        "{stdout}"
+    );
 
     // Human output moved to stderr so stdout stays parseable.
     assert!(String::from_utf8_lossy(&out.stderr).contains("ungated shell"));
@@ -296,7 +377,10 @@ fn hide_skipped_drops_the_lines_but_not_the_count() {
     let (code, out) = apply(dir.path(), "verdicts.yml", &["--hide-skipped"]);
     assert_eq!(code, 0, "{out}");
     assert!(!out.contains("work is done"), "{out}");
-    assert!(out.contains("1 skipped"), "the summary still counts it:\n{out}");
+    assert!(
+        out.contains("1 skipped"),
+        "the summary still counts it:\n{out}"
+    );
     snapshot!("hide_skipped", out);
 }
 
@@ -371,7 +455,10 @@ fn snapshot_plan_text_shows_every_verdict() {
 fn snapshot_plan_no_probe_is_would_run_unprobed_throughout() {
     let dir = tempfile::tempdir().unwrap();
     let path = fixture("plan_all_verdicts.yml");
-    let out = run_in(dir.path(), &["plan", "--plan-no-probe", path.to_str().unwrap()]);
+    let out = run_in(
+        dir.path(),
+        &["plan", "--plan-no-probe", path.to_str().unwrap()],
+    );
     assert_eq!(out.status.code(), Some(0));
     let text = String::from_utf8_lossy(&out.stdout);
     // 6, not 5: the summary line names the verdict too ("5 would run
@@ -390,16 +477,29 @@ fn plan_json_status_matches_spec_9_3_exactly() {
     let path = fixture("plan_all_verdicts.yml");
     let out = run_in(dir.path(), &["plan", path.to_str().unwrap(), "--json"]);
     let stdout = redact_scratch(&String::from_utf8_lossy(&out.stdout), dir.path());
-    let rows: Vec<serde_json::Value> = stdout.lines().map(|l| serde_json::from_str(l).expect(l)).collect();
+    let rows: Vec<serde_json::Value> = stdout
+        .lines()
+        .map(|l| serde_json::from_str(l).expect(l))
+        .collect();
 
     let steps: Vec<&serde_json::Value> = rows.iter().filter(|r| r["event"] == "step").collect();
     assert_eq!(steps.len(), 5, "{stdout}");
-    let statuses: Vec<&str> = steps.iter().map(|s| s["status"].as_str().unwrap()).collect();
+    let statuses: Vec<&str> = steps
+        .iter()
+        .map(|s| s["status"].as_str().unwrap())
+        .collect();
     // Spec §9.3's exact vocabulary, no others — `ok`, `would_change`,
     // `would_run`, `unknown`, `skipped` here; `changed`, `failed` and
     // `would_run_unprobed` belong to fixtures elsewhere.
-    assert_eq!(statuses, vec!["ok", "would_change", "would_run", "unknown", "skipped"], "{stdout}");
-    assert!(steps[1]["diff"].as_str().unwrap().contains("+one"), "{stdout}");
+    assert_eq!(
+        statuses,
+        vec!["ok", "would_change", "would_run", "unknown", "skipped"],
+        "{stdout}"
+    );
+    assert!(
+        steps[1]["diff"].as_str().unwrap().contains("+one"),
+        "{stdout}"
+    );
     assert_eq!(steps[4]["reason"], "unless", "{stdout}");
 
     let summary = rows.last().unwrap();
@@ -422,8 +522,7 @@ fn the_json_summary_counts_a_would_change_step() {
     let path = fixture("plan_all_verdicts.yml");
     let out = run_in(dir.path(), &["plan", path.to_str().unwrap(), "--json"]);
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let summary: serde_json::Value =
-        serde_json::from_str(stdout.lines().last().unwrap()).unwrap();
+    let summary: serde_json::Value = serde_json::from_str(stdout.lines().last().unwrap()).unwrap();
     assert_eq!(summary["would_change"], 1, "{stdout}");
     let counted = summary["ok"].as_u64().unwrap()
         + summary["changed"].as_u64().unwrap()
@@ -449,9 +548,15 @@ fn a_when_reading_a_register_stays_unprobed_under_plan() {
     // test for that fix instead.
     let dir = tempfile::tempdir().unwrap();
     let path = fixture("register_unprobed.yml");
-    let out = run_in(dir.path(), &["plan", path.to_str().unwrap(), "--json", "--color=never"]);
+    let out = run_in(
+        dir.path(),
+        &["plan", path.to_str().unwrap(), "--json", "--color=never"],
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let rows: Vec<serde_json::Value> = stdout.lines().map(|l| serde_json::from_str(l).expect(l)).collect();
+    let rows: Vec<serde_json::Value> = stdout
+        .lines()
+        .map(|l| serde_json::from_str(l).expect(l))
+        .collect();
     let steps: Vec<&serde_json::Value> = rows.iter().filter(|r| r["event"] == "step").collect();
     assert_eq!(steps.len(), 3, "{stdout}");
     assert_eq!(steps[0]["status"], "would_run", "{stdout}");
@@ -466,8 +571,14 @@ fn a_when_reading_a_register_stays_unprobed_under_plan() {
     let (code, out) = apply(dir.path(), "register_unprobed.yml", &[]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(verdict(&out, "Registers a result"), "changed", "{out}");
-    assert!(!line_for(&out, "Gated on that register").contains("skipped"), "{out}");
-    assert!(!line_for(&out, "Same gate, no other modifier").contains("skipped"), "{out}");
+    assert!(
+        !line_for(&out, "Gated on that register").contains("skipped"),
+        "{out}"
+    );
+    assert!(
+        !line_for(&out, "Same gate, no other modifier").contains("skipped"),
+        "{out}"
+    );
 }
 
 // ── context, streaming, and Ctrl-C ────────────────────────────────────────
@@ -478,7 +589,10 @@ fn cwd_and_env_both_reach_the_step() {
     let (code, out) = apply(dir.path(), "context.yml", &[]);
     assert_eq!(code, 0, "{out}");
     // Written by a relative path, so it landed only if `cwd` was honored.
-    assert_eq!(std::fs::read_to_string(dir.path().join("from-cwd")).unwrap(), "hello");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("from-cwd")).unwrap(),
+        "hello"
+    );
 }
 
 #[test]
@@ -507,13 +621,18 @@ fn keep_going_does_not_carry_the_run_past_ctrl_c() {
         .unwrap();
 
     std::thread::sleep(std::time::Duration::from_millis(600));
-    let _ = Command::new("kill").args(["-INT", &child.id().to_string()]).status();
+    let _ = Command::new("kill")
+        .args(["-INT", &child.id().to_string()])
+        .status();
 
     let out = child.wait_with_output().unwrap();
-    let text = String::from_utf8_lossy(&out.stdout).into_owned()
-        + &String::from_utf8_lossy(&out.stderr);
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(130), "{text}");
-    assert!(!text.contains("Must not run after an interrupt"), "kept going past Ctrl-C:\n{text}");
+    assert!(
+        !text.contains("Must not run after an interrupt"),
+        "kept going past Ctrl-C:\n{text}"
+    );
 }
 
 #[test]
@@ -531,16 +650,21 @@ fn ctrl_c_kills_the_step_and_exits_130() {
 
     // Long enough for the step to be running, short enough to stay a test.
     std::thread::sleep(std::time::Duration::from_millis(600));
-    let _ = Command::new("kill").args(["-INT", &child.id().to_string()]).status();
+    let _ = Command::new("kill")
+        .args(["-INT", &child.id().to_string()])
+        .status();
 
     let out = child.wait_with_output().unwrap();
-    let text = String::from_utf8_lossy(&out.stdout).into_owned()
-        + &String::from_utf8_lossy(&out.stderr);
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
     // Spec §10: the current step is killed, the summary is still printed, and
     // the shell's convention for SIGINT is the exit code.
     assert_eq!(out.status.code(), Some(130), "{text}");
     assert!(text.contains("interrupted"), "{text}");
-    assert!(text.contains("1 step"), "the summary is still printed:\n{text}");
+    assert!(
+        text.contains("1 step"),
+        "the summary is still printed:\n{text}"
+    );
     // The step's own duration varies with exactly when the signal lands, but
     // every other line is the same fixture, the same status, and the same
     // "(interrupted)" body every time — stable enough for a snapshot once
@@ -572,15 +696,24 @@ fn cmd_runs_an_argv_and_is_idempotent() {
 
     let (code, first) = apply(dir.path(), "cmd.yml", &[]);
     assert_eq!(code, 0, "{first}");
-    assert!(line_for(&first, "spaces in it").contains("changed"), "{first}");
-    assert!(line_for(&first, "built in vars").contains("changed"), "{first}");
+    assert!(
+        line_for(&first, "spaces in it").contains("changed"),
+        "{first}"
+    );
+    assert!(
+        line_for(&first, "built in vars").contains("changed"),
+        "{first}"
+    );
     // No shell means no quoting: the space survives as one argument.
     assert!(dir.path().join("a dir with spaces").is_dir(), "{first}");
     assert!(dir.path().join("from-a-list").is_file(), "{first}");
 
     let (code, second) = apply(dir.path(), "cmd.yml", &[]);
     assert_eq!(code, 0, "{second}");
-    assert!(!second.contains("changed"), "nothing should change twice:\n{second}");
+    assert!(
+        !second.contains("changed"),
+        "nothing should change twice:\n{second}"
+    );
     assert!(second.contains("2 skipped"), "{second}");
 }
 
@@ -589,7 +722,10 @@ fn cwd_defaults_to_the_plan_files_directory_and_can_be_overridden() {
     let dir = tempfile::tempdir().unwrap();
     let (code, out) = apply(dir.path(), "cwd_default.yml", &[]);
     assert_eq!(code, 0, "{out}");
-    assert_eq!(std::fs::read_to_string(dir.path().join("from-cwd-override")).unwrap(), "here");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("from-cwd-override")).unwrap(),
+        "here"
+    );
 }
 
 #[test]
@@ -624,7 +760,10 @@ fn a_bare_plan_filename_runs_from_its_own_directory() {
     for arg in ["bare_path.yml", "./bare_path.yml", plan.to_str().unwrap()] {
         let (code, out) = run(arg);
         assert_eq!(code, 0, "{arg}: {out}");
-        assert!(out.contains(&here.display().to_string()), "{arg}: pwd was not the tempdir:\n{out}");
+        assert!(
+            out.contains(&here.display().to_string()),
+            "{arg}: pwd was not the tempdir:\n{out}"
+        );
         assert_eq!(
             std::fs::read_to_string(dir.path().join("out.txt")).unwrap(),
             "here\n",
@@ -665,7 +804,10 @@ fn a_gate_that_cannot_run_fails_the_step() {
     assert_eq!(code, 1, "{out}");
     assert!(out.contains("`unless` could not run"), "{out}");
     assert!(out.contains("exit 127"), "{out}");
-    assert!(!out.contains("this must never run"), "the step ran anyway:\n{out}");
+    assert!(
+        !out.contains("this must never run"),
+        "the step ran anyway:\n{out}"
+    );
 }
 
 #[test]
@@ -680,11 +822,20 @@ fn an_unless_that_hangs_fails_the_step_instead_of_running_it() {
     let (code, out) = apply(dir.path(), "hung_unless.yml", &[]);
     let elapsed = began.elapsed();
     assert_eq!(code, 1, "{out}");
-    assert!(line_for(&out, "unless gate hangs").contains("FAILED"), "{out}");
+    assert!(
+        line_for(&out, "unless gate hangs").contains("FAILED"),
+        "{out}"
+    );
     assert!(out.contains("`unless` timed out after 2"), "{out}");
-    assert!(elapsed < std::time::Duration::from_secs(60), "the gate was never killed: {elapsed:?}");
+    assert!(
+        elapsed < std::time::Duration::from_secs(60),
+        "the gate was never killed: {elapsed:?}"
+    );
     // The part that matters: the step's own script never ran.
-    assert!(!dir.path().join("ran").exists(), "the step ran despite its gate timing out");
+    assert!(
+        !dir.path().join("ran").exists(),
+        "the step ran despite its gate timing out"
+    );
 
     // And the gate's own child died with the process group, the same
     // guarantee `a_typed_actions_command_is_bound_by_the_steps_timeout` and
@@ -710,9 +861,15 @@ fn plan_reports_a_hung_unless_as_failed_and_keeps_walking() {
     let out = run_in(dir.path(), &["plan", path.to_str().unwrap()]);
     let text = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(1), "{text}");
-    assert!(line_for(&text, "unless gate hangs").contains("FAILED"), "{text}");
+    assert!(
+        line_for(&text, "unless gate hangs").contains("FAILED"),
+        "{text}"
+    );
     assert!(text.contains("`unless` timed out after 2"), "{text}");
-    assert!(text.contains("1 step"), "the summary is still printed:\n{text}");
+    assert!(
+        text.contains("1 step"),
+        "the summary is still printed:\n{text}"
+    );
 }
 
 #[test]
@@ -737,7 +894,6 @@ fn root_is_reachable() -> bool {
         .unwrap_or(false)
 }
 
-
 // ── file ──────────────────────────────────────────────────────────────────
 
 #[test]
@@ -746,8 +902,16 @@ fn every_file_state_applies_twice_changed_then_ok() {
 
     let (code, first) = apply(dir.path(), "file_states.yml", &[]);
     assert_eq!(code, 0, "{first}");
-    for name in ["directory with an explicit mode", "inline content", "copied from src", "symlink"] {
-        assert!(line_for(&first, name).contains("changed"), "{name}:\n{first}");
+    for name in [
+        "directory with an explicit mode",
+        "inline content",
+        "copied from src",
+        "symlink",
+    ] {
+        assert!(
+            line_for(&first, name).contains("changed"),
+            "{name}:\n{first}"
+        );
     }
     // Spec §6.3: `absent` on a path that was never there is ok, not changed.
     // This is the case the second run of an idempotency test lands on, and
@@ -756,22 +920,40 @@ fn every_file_state_applies_twice_changed_then_ok() {
 
     let conf = dir.path().join("conf");
     assert_eq!(mode_of(&conf), 0o700, "the explicit mode was not applied");
-    assert_eq!(std::fs::read_to_string(conf.join("hello.txt")).unwrap(), "one\ntwo\n");
-    assert_eq!(std::fs::read_to_string(conf.join("copied")).unwrap(), "copied from src\n");
+    assert_eq!(
+        std::fs::read_to_string(conf.join("hello.txt")).unwrap(),
+        "one\ntwo\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(conf.join("copied")).unwrap(),
+        "copied from src\n"
+    );
     // Stored exactly as written: a relative link stays relative.
-    assert_eq!(std::fs::read_link(conf.join("link")).unwrap().to_str().unwrap(), "./hello.txt");
+    assert_eq!(
+        std::fs::read_link(conf.join("link"))
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "./hello.txt"
+    );
     // But `~` is a path field the tool owns (spec §3), so it expands. Without
     // this the link never matches what is on disk and the step reports
     // changed on every run — which is how this was found, on a real plan.
     let home = std::env::var("HOME").unwrap();
     assert_eq!(
-        std::fs::read_link(conf.join("home-link")).unwrap().to_str().unwrap(),
+        std::fs::read_link(conf.join("home-link"))
+            .unwrap()
+            .to_str()
+            .unwrap(),
         format!("{home}/.bashrc")
     );
 
     let (code, second) = apply(dir.path(), "file_states.yml", &[]);
     assert_eq!(code, 0, "{second}");
-    assert!(!second.contains("changed"), "nothing should change twice:\n{second}");
+    assert!(
+        !second.contains("changed"),
+        "nothing should change twice:\n{second}"
+    );
     assert!(second.contains("6 ok"), "{second}");
 }
 
@@ -787,7 +969,10 @@ fn a_mode_that_drifts_is_brought_back() {
     assert_eq!(code, 0, "{out}");
     let line = line_for(&out, "directory with an explicit mode");
     assert!(line.contains("changed"), "{out}");
-    assert!(out.contains("mode 0755 → 0700"), "the delta is not reported:\n{out}");
+    assert!(
+        out.contains("mode 0755 → 0700"),
+        "the delta is not reported:\n{out}"
+    );
     assert_eq!(mode_of(&conf), 0o700);
 }
 
@@ -799,14 +984,20 @@ fn plan_shows_a_diff_and_no_diff_suppresses_it() {
     let out = run_in(dir.path(), &["plan", path.to_str().unwrap()]);
     let text = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(2), "{text}");
-    assert!(line_for(&text, "inline content").contains("would change"), "{text}");
+    assert!(
+        line_for(&text, "inline content").contains("would change"),
+        "{text}"
+    );
     assert!(text.contains("+one"), "the diff is missing:\n{text}");
     assert!(!dir.path().join("conf").exists(), "plan created something");
 
     let out = run_in(dir.path(), &["plan", path.to_str().unwrap(), "--no-diff"]);
     let quiet = String::from_utf8_lossy(&out.stdout);
     assert!(quiet.contains("would change"), "{quiet}");
-    assert!(!quiet.contains("+one"), "--no-diff did not suppress it:\n{quiet}");
+    assert!(
+        !quiet.contains("+one"),
+        "--no-diff did not suppress it:\n{quiet}"
+    );
 }
 
 #[test]
@@ -818,11 +1009,13 @@ fn a_file_that_cannot_be_read_says_sudo_is_how() {
         let secret = dir.path().join("secret");
         std::fs::write(&secret, "x").unwrap();
         set_mode(&secret, 0o000);
-        assert!(Command::new("sudo")
-            .args(["-n", "chown", "root:root", secret.to_str().unwrap()])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false));
+        assert!(
+            Command::new("sudo")
+                .args(["-n", "chown", "root:root", secret.to_str().unwrap()])
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        );
 
         let plan = dir.path().join("unreadable.yml");
         std::fs::write(
@@ -840,7 +1033,9 @@ fn a_file_that_cannot_be_read_says_sudo_is_how() {
         .unwrap();
         let out = run_in(dir.path(), &["apply", plan.to_str().unwrap()]);
         let text = String::from_utf8_lossy(&out.stdout).into_owned();
-        let _ = Command::new("sudo").args(["-n", "rm", "-f", secret.to_str().unwrap()]).status();
+        let _ = Command::new("sudo")
+            .args(["-n", "rm", "-f", secret.to_str().unwrap()])
+            .status();
 
         assert_eq!(out.status.code(), Some(1), "{text}");
         assert!(text.contains("sudo: true"), "{text}");
@@ -884,23 +1079,38 @@ fn the_sudo_write_path_stages_outside_the_destination() {
     let (code, first) = run(&[]);
     let (code2, second) = run(&[]);
     let stat = Command::new("sudo")
-        .args(["-n", "stat", "-c%a %U %G", &format!("{owned}/provision.conf")])
+        .args([
+            "-n",
+            "stat",
+            "-c%a %U %G",
+            &format!("{owned}/provision.conf"),
+        ])
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_default();
     let _ = sudo(&["rm", "-rf", &owned]);
 
     assert_eq!(code, 0, "{first}");
-    assert!(line_for(&first, "root-owned config").contains("changed"), "{first}");
+    assert!(
+        line_for(&first, "root-owned config").contains("changed"),
+        "{first}"
+    );
     assert_eq!(stat, "440 root root", "install did not land the metadata");
     assert_eq!(code2, 0, "{second}");
-    assert!(!second.contains("changed"), "the sudo path is not idempotent:\n{second}");
+    assert!(
+        !second.contains("changed"),
+        "the sudo path is not idempotent:\n{second}"
+    );
 }
 
 fn sudo(args: &[&str]) -> bool {
     let mut all = vec!["-n"];
     all.extend_from_slice(args);
-    Command::new("sudo").args(&all).status().map(|s| s.success()).unwrap_or(false)
+    Command::new("sudo")
+        .args(&all)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 fn mode_of(p: &Path) -> u32 {
@@ -927,10 +1137,27 @@ fn parent_directories_are_deterministic_not_umask_derived() {
     .unwrap();
 
     let out = run_in(dir.path(), &["apply", plan.to_str().unwrap()]);
-    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stdout));
-    assert_eq!(mode_of(&dir.path().join("a")), 0o755, "parent took the umask");
-    assert_eq!(mode_of(&dir.path().join("a/b")), 0o755, "parent took the umask");
-    assert_eq!(mode_of(&dir.path().join("a/b/c")), 0o700, "the mode missed the leaf");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert_eq!(
+        mode_of(&dir.path().join("a")),
+        0o755,
+        "parent took the umask"
+    );
+    assert_eq!(
+        mode_of(&dir.path().join("a/b")),
+        0o755,
+        "parent took the umask"
+    );
+    assert_eq!(
+        mode_of(&dir.path().join("a/b/c")),
+        0o700,
+        "the mode missed the leaf"
+    );
 }
 
 #[test]
@@ -949,10 +1176,12 @@ fn an_unquoted_mode_says_to_quote_it() {
     let text = String::from_utf8_lossy(&out.stderr).into_owned();
     assert_eq!(out.status.code(), Some(3), "{text}");
     assert!(text.contains("`mode` must be a quoted string"), "{text}");
-    assert!(text.contains("\"0644\""), "the note does not show the fix: {text}");
+    assert!(
+        text.contains("\"0644\""),
+        "the note does not show the fix: {text}"
+    );
     assert!(text.contains("unquoted.yml:6:11"), "{text}");
 }
-
 
 // ── template ──────────────────────────────────────────────────────────────
 
@@ -962,18 +1191,32 @@ fn a_template_and_a_tree_apply_twice_changed_then_ok() {
 
     let (code, first) = apply(dir.path(), "template.yml", &[]);
     assert_eq!(code, 0, "{first}");
-    assert!(line_for(&first, "single template").contains("changed"), "{first}");
+    assert!(
+        line_for(&first, "single template").contains("changed"),
+        "{first}"
+    );
     // Spec §6.4: one step, one line, and the line carries the count.
     assert!(line_for(&first, "whole tree").contains("3 of 3"), "{first}");
 
     let out = dir.path().join("rendered");
-    assert_eq!(std::fs::read_to_string(dir.path().join("one")).unwrap(), "single file for linux\n");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("one")).unwrap(),
+        "single file for linux\n"
+    );
     // The `.j2` comes off the destination name; a file without one is still
     // rendered.
-    assert!(out.join("top.conf").is_file(), "the .j2 suffix was not stripped");
-    assert!(std::fs::read_to_string(out.join("nested/inner.conf")).unwrap().contains("linux"));
+    assert!(
+        out.join("top.conf").is_file(),
+        "the .j2 suffix was not stripped"
+    );
+    assert!(
+        std::fs::read_to_string(out.join("nested/inner.conf"))
+            .unwrap()
+            .contains("linux")
+    );
     // Spec §6.4: a file that is not valid UTF-8 is placed byte for byte.
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/apply/tree/nested/blob.bin");
+    let src =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/apply/tree/nested/blob.bin");
     assert_eq!(
         std::fs::read(out.join("nested/blob.bin")).unwrap(),
         std::fs::read(src).unwrap(),
@@ -986,7 +1229,10 @@ fn a_template_and_a_tree_apply_twice_changed_then_ok() {
 
     let (code, second) = apply(dir.path(), "template.yml", &[]);
     assert_eq!(code, 0, "{second}");
-    assert!(!second.contains("changed"), "nothing should change twice:\n{second}");
+    assert!(
+        !second.contains("changed"),
+        "nothing should change twice:\n{second}"
+    );
 }
 
 #[test]
@@ -1000,7 +1246,10 @@ fn a_tree_reports_only_the_files_that_changed() {
     assert!(line_for(&out, "whole tree").contains("1 of 3"), "{out}");
     // Spec §6.4: each diff is headed by the path relative to the tree root.
     assert!(out.contains("+++ top.conf"), "{out}");
-    assert!(!out.contains("inner.conf"), "an unchanged file was reported:\n{out}");
+    assert!(
+        !out.contains("inner.conf"),
+        "an unchanged file was reported:\n{out}"
+    );
 }
 
 #[test]
@@ -1040,7 +1289,6 @@ fn a_symlink_in_the_source_tree_is_an_error() {
     assert!(text.contains("is a symlink"), "{text}");
     assert!(text.contains("does not follow symlinks"), "{text}");
 }
-
 
 // ── service ───────────────────────────────────────────────────────────────
 
@@ -1121,7 +1369,10 @@ fn a_user_unit_starts_stops_and_restarts_idempotently() {
     let run = |body: &str| {
         let plan = service_plan(dir.path(), &unit.name, body);
         let out = run_in(dir.path(), &["apply", plan.to_str().unwrap()]);
-        (out.status.code().unwrap_or(-1), String::from_utf8_lossy(&out.stdout).into_owned())
+        (
+            out.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+        )
     };
 
     let (code, first) = run("    state: started\n");
@@ -1131,19 +1382,33 @@ fn a_user_unit_starts_stops_and_restarts_idempotently() {
 
     let (code, second) = run("    state: started\n");
     assert_eq!(code, 0, "{second}");
-    assert_eq!(verdict(&second, "test unit"), "ok", "already started:\n{second}");
+    assert_eq!(
+        verdict(&second, "test unit"),
+        "ok",
+        "already started:\n{second}"
+    );
 
     // Spec §6.6: `restarted` has no before-state, so it is always changed.
     let (code, restarted) = run("    state: restarted\n");
     assert_eq!(code, 0, "{restarted}");
-    assert!(line_for(&restarted, "test unit").contains("changed"), "{restarted}");
+    assert!(
+        line_for(&restarted, "test unit").contains("changed"),
+        "{restarted}"
+    );
 
     let (code, stopped) = run("    state: stopped\n");
     assert_eq!(code, 0, "{stopped}");
-    assert!(line_for(&stopped, "test unit").contains("changed"), "{stopped}");
+    assert!(
+        line_for(&stopped, "test unit").contains("changed"),
+        "{stopped}"
+    );
     let (code, again) = run("    state: stopped\n");
     assert_eq!(code, 0, "{again}");
-    assert_eq!(verdict(&again, "test unit"), "ok", "already stopped:\n{again}");
+    assert_eq!(
+        verdict(&again, "test unit"),
+        "ok",
+        "already stopped:\n{again}"
+    );
 }
 
 #[test]
@@ -1166,7 +1431,11 @@ fn enabled_is_probed_without_being_set() {
     let plan = service_plan(dir.path(), &unit.name, "    enabled: false\n");
     let out = run_in(dir.path(), &["plan", plan.to_str().unwrap()]);
     let text = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0), "a disabled unit is already so:\n{text}");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "a disabled unit is already so:\n{text}"
+    );
 }
 
 #[test]
@@ -1197,14 +1466,17 @@ fn a_service_that_declares_nothing_is_an_error() {
     assert!(text.contains("needs `state` or `enabled`"), "{text}");
 }
 
-
 // ── pkg ───────────────────────────────────────────────────────────────────
 
 /// The host-side `pkg` tests read this machine's dpkg database and never
 /// write to it. There is nothing to read on a box without apt.
 fn apt_is_local() -> bool {
     let on_path = |bin: &str| {
-        Command::new(bin).arg("--version").output().map(|o| o.status.success()).unwrap_or(false)
+        Command::new(bin)
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
     };
     on_path("apt-get") && on_path("dpkg-query")
 }
@@ -1219,8 +1491,7 @@ fn pkg_plan(dir: &Path, body: &str) -> (i32, String) {
     let out = run_in(dir, &["plan", path.to_str().unwrap()]);
     (
         out.status.code().unwrap_or(-1),
-        String::from_utf8_lossy(&out.stdout).into_owned()
-            + &String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr),
     )
 }
 
@@ -1238,7 +1509,10 @@ fn pkg_leaves_a_host_that_already_matches_alone() {
     assert_eq!(code, 0, "{out}");
     assert_eq!(verdict(&out, "base system always has"), "ok", "{out}");
     assert_eq!(verdict(&out, "An absent package"), "ok", "{out}");
-    assert!(!out.contains("changed"), "nothing may change on this host:\n{out}");
+    assert!(
+        !out.contains("changed"),
+        "nothing may change on this host:\n{out}"
+    );
 }
 
 #[test]
@@ -1254,7 +1528,10 @@ fn pkg_plan_names_what_it_would_install_and_admits_what_it_cannot_know() {
 
     // Spec §6.5: plan lists the packages that would be installed, by actual
     // query — the name is in the detail, not just the count.
-    assert!(line_for(&text, "not installed").contains("would change"), "{text}");
+    assert!(
+        line_for(&text, "not installed").contains("would change"),
+        "{text}"
+    );
     assert!(text.contains("install provision-no-such-package"), "{text}");
     // Spec §6.5: whether a newer version exists is not a question the local
     // database answers, so `latest` on an installed package says so.
@@ -1276,19 +1553,27 @@ fn the_managers_that_refuse_root_refuse_sudo() {
             ),
         );
         assert_eq!(code, 3, "{out}");
-        assert!(out.contains(&format!("`{manager}` must not run as root")), "{out}");
+        assert!(
+            out.contains(&format!("`{manager}` must not run as root")),
+            "{out}"
+        );
     }
 }
 
 #[test]
 fn an_unknown_manager_lists_the_ones_that_exist() {
     let dir = tempfile::tempdir().unwrap();
-    let (code, out) =
-        pkg_plan(dir.path(), "- name: Nope\n  pkg:\n    name: git\n    manager: nix\n");
+    let (code, out) = pkg_plan(
+        dir.path(),
+        "- name: Nope\n  pkg:\n    name: git\n    manager: nix\n",
+    );
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("unknown package manager `nix`"), "{out}");
     for known in ["pacman", "yay", "apt", "brew", "winget"] {
-        assert!(out.contains(known), "the note does not name {known}:\n{out}");
+        assert!(
+            out.contains(known),
+            "the note does not name {known}:\n{out}"
+        );
     }
 }
 
@@ -1298,10 +1583,15 @@ fn cask_belongs_to_brew_and_nowhere_else() {
     for manager in ["apt", "pacman"] {
         let (code, out) = pkg_plan(
             dir.path(),
-            &format!("- name: A cask\n  pkg:\n    name: git\n    manager: {manager}\n    cask: true\n"),
+            &format!(
+                "- name: A cask\n  pkg:\n    name: git\n    manager: {manager}\n    cask: true\n"
+            ),
         );
         assert_eq!(code, 3, "{out}");
-        assert!(out.contains(&format!("`cask` does not apply to `{manager}`")), "{out}");
+        assert!(
+            out.contains(&format!("`cask` does not apply to `{manager}`")),
+            "{out}"
+        );
         assert!(out.contains("casks are a brew concept"), "{out}");
     }
 }
@@ -1314,7 +1604,10 @@ fn pkg_wants_exactly_one_of_name_and_names() {
         "- name: Both\n  pkg:\n    name: git\n    names: [git]\n    manager: apt\n",
     );
     assert_eq!(code, 3, "{out}");
-    assert!(out.contains("`name` and `names` are mutually exclusive"), "{out}");
+    assert!(
+        out.contains("`name` and `names` are mutually exclusive"),
+        "{out}"
+    );
 
     let (code, out) = pkg_plan(dir.path(), "- name: Neither\n  pkg:\n    manager: apt\n");
     assert_eq!(code, 3, "{out}");
@@ -1324,8 +1617,10 @@ fn pkg_wants_exactly_one_of_name_and_names() {
 #[test]
 fn an_empty_names_list_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
-    let (code, out) =
-        pkg_plan(dir.path(), "- name: Empty\n  pkg:\n    names: []\n    manager: apt\n");
+    let (code, out) = pkg_plan(
+        dir.path(),
+        "- name: Empty\n  pkg:\n    names: []\n    manager: apt\n",
+    );
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("`pkg` names no packages"), "{out}");
 }
@@ -1340,8 +1635,10 @@ fn a_scalar_names_field_is_rejected_not_iterated_by_character() {
     // `t`. `pkg::parse` never checks that the rendered value is actually a
     // sequence.
     let dir = tempfile::tempdir().unwrap();
-    let (code, out) =
-        pkg_plan(dir.path(), "- name: A scalar\n  pkg:\n    names: git\n    manager: apt\n");
+    let (code, out) = pkg_plan(
+        dir.path(),
+        "- name: A scalar\n  pkg:\n    names: git\n    manager: apt\n",
+    );
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("`names` is a list of package names"), "{out}");
 }
@@ -1375,10 +1672,13 @@ fn yay_is_never_chosen_as_the_default_manager() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    let text = String::from_utf8_lossy(&out.stdout).into_owned()
-        + &String::from_utf8_lossy(&out.stderr);
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(3), "{text}");
-    assert!(text.contains("no package manager found"), "yay must not be picked by default:\n{text}");
+    assert!(
+        text.contains("no package manager found"),
+        "yay must not be picked by default:\n{text}"
+    );
 }
 
 #[test]
@@ -1393,9 +1693,15 @@ fn a_names_list_mixing_installed_and_missing_lists_only_the_missing_one() {
         "- name: Mixed names list\n  pkg:\n    names: [coreutils, provision-no-such-package]\n    manager: apt\n",
     );
     assert_eq!(code, 2, "{out}");
-    assert!(line_for(&out, "Mixed names list").contains("would change"), "{out}");
+    assert!(
+        line_for(&out, "Mixed names list").contains("would change"),
+        "{out}"
+    );
     assert!(out.contains("install provision-no-such-package"), "{out}");
-    assert!(!out.contains("install coreutils"), "an installed package was named too:\n{out}");
+    assert!(
+        !out.contains("install coreutils"),
+        "an installed package was named too:\n{out}"
+    );
 }
 
 #[test]
@@ -1427,7 +1733,11 @@ fn state_latest_on_a_missing_package_is_knowable_and_would_install() {
         "- name: Latest on a missing package\n  pkg:\n    name: provision-no-such-package\n    state: latest\n    manager: apt\n",
     );
     assert_eq!(code, 2, "{out}");
-    assert_eq!(verdict(&out, "Latest on a missing package"), "would change", "{out}");
+    assert_eq!(
+        verdict(&out, "Latest on a missing package"),
+        "would change",
+        "{out}"
+    );
     assert!(out.contains("install provision-no-such-package"), "{out}");
 }
 
@@ -1453,12 +1763,19 @@ fn update_cache_never_runs_a_command_under_plan() {
     .unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_provision"))
         .args(["plan", path.to_str().unwrap()])
-        .env("PATH", format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default()))
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                bin.display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    let text = String::from_utf8_lossy(&out.stdout).into_owned()
-        + &String::from_utf8_lossy(&out.stderr);
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(2), "{text}");
     assert!(text.contains("install provision-no-such-package"), "{text}");
     assert!(!marker.exists(), "apt-get ran under plan:\n{text}");
@@ -1515,14 +1832,20 @@ fn pkg_plan_with_path(dir: &Path, body: &str, bin_dir: &Path) -> (i32, String) {
     std::fs::write(&path, body).unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_provision"))
         .args(["plan", path.to_str().unwrap()])
-        .env("PATH", format!("{}:{}", bin_dir.display(), std::env::var("PATH").unwrap_or_default()))
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                bin_dir.display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
     (
         out.status.code().unwrap_or(-1),
-        String::from_utf8_lossy(&out.stdout).into_owned()
-            + &String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr),
     )
 }
 
@@ -1542,7 +1865,10 @@ fn parse_dpkg_keeps_only_the_install_ok_installed_stanza() {
     // `nano` is config-files-only and `ghost` is a status this table never
     // emits for real; neither counts as installed, only `sl` does.
     assert!(out.contains("install nano ghost"), "{out}");
-    assert!(!out.contains("install sl"), "the installed stanza was misread:\n{out}");
+    assert!(
+        !out.contains("install sl"),
+        "the installed stanza was misread:\n{out}"
+    );
 }
 
 #[test]
@@ -1559,7 +1885,10 @@ fn parse_space_pairs_reads_a_pacman_query() {
     );
     assert_eq!(code, 2, "{out}");
     assert!(out.contains("install tree"), "{out}");
-    assert!(!out.contains("install bash") && !out.contains("install coreutils"), "{out}");
+    assert!(
+        !out.contains("install bash") && !out.contains("install coreutils"),
+        "{out}"
+    );
 }
 
 /// Apply with a stubbed manager on PATH. Unlike `pkg_plan_with_path`, this
@@ -1569,14 +1898,20 @@ fn pkg_apply_with_path(dir: &Path, body: &str, bin_dir: &Path) -> (i32, String) 
     std::fs::write(&path, body).unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_provision"))
         .args(["apply", path.to_str().unwrap()])
-        .env("PATH", format!("{}:{}", bin_dir.display(), std::env::var("PATH").unwrap_or_default()))
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                bin_dir.display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
     (
         out.status.code().unwrap_or(-1),
-        String::from_utf8_lossy(&out.stdout).into_owned()
-            + &String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr),
     )
 }
 
@@ -1591,10 +1926,16 @@ fn an_install_that_did_nothing_fails_instead_of_claiming_changed() {
     let bin = dir.path().join("bin");
     std::fs::create_dir(&bin).unwrap();
     // The virtual package: the query never lists it, whatever apt-get says.
-    fake_manager(&bin, "dpkg-query", "printf 'cmdtest\t0.32\tinstall ok installed\n'
-");
-    fake_manager(&bin, "apt-get", "exit 0
-");
+    fake_manager(
+        &bin,
+        "dpkg-query",
+        "printf 'cmdtest\t0.32\tinstall ok installed\n'
+",
+    );
+    fake_manager(
+        &bin, "apt-get", "exit 0
+",
+    );
 
     let (code, out) = pkg_apply_with_path(
         dir.path(),
@@ -1602,8 +1943,14 @@ fn an_install_that_did_nothing_fails_instead_of_claiming_changed() {
         &bin,
     );
     assert_eq!(code, 1, "a no-op install was not a failure:\n{out}");
-    assert!(out.contains("yarn still not installed after `apt-get install`"), "{out}");
-    assert!(!out.contains("install yarn"), "it still claimed the install:\n{out}");
+    assert!(
+        out.contains("yarn still not installed after `apt-get install`"),
+        "{out}"
+    );
+    assert!(
+        !out.contains("install yarn"),
+        "it still claimed the install:\n{out}"
+    );
 }
 
 // The other half: an install that really installs is still `changed`. Without
@@ -1660,7 +2007,10 @@ fn parse_space_pairs_takes_the_first_version_from_a_brew_query() {
     // `wget` lists two versions on one line; the first is enough to read it
     // as installed, and only `curl` is genuinely missing.
     assert!(out.contains("install curl"), "{out}");
-    assert!(!out.contains("install jq") && !out.contains("install wget"), "{out}");
+    assert!(
+        !out.contains("install jq") && !out.contains("install wget"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -1677,7 +2027,10 @@ fn brew_reads_the_cask_list_when_cask_is_true() {
     );
     assert_eq!(code, 2, "{out}");
     assert!(out.contains("install firefox"), "{out}");
-    assert!(!out.contains("install docker"), "the cask list was not consulted:\n{out}");
+    assert!(
+        !out.contains("install docker"),
+        "the cask list was not consulted:\n{out}"
+    );
 }
 
 #[test]
@@ -1696,7 +2049,10 @@ fn brew_matches_a_tap_qualified_name_by_its_last_segment() {
     );
     assert_eq!(code, 2, "{out}");
     assert!(out.contains("install hashicorp/tap/vault"), "{out}");
-    assert!(!out.contains("terraform"), "a tap-qualified name that is installed was re-offered:\n{out}");
+    assert!(
+        !out.contains("terraform"),
+        "a tap-qualified name that is installed was re-offered:\n{out}"
+    );
     assert!(!out.contains("hashicorp/tap/packer"), "{out}");
 }
 
@@ -1717,8 +2073,16 @@ fn parse_winget_cuts_columns_by_the_headers_offsets() {
     );
     assert_eq!(code, 2, "{out}");
     assert!(out.contains("install Nonexistent.App"), "{out}");
-    for id in ["Google.Chrome", "Microsoft.VisualStudioCode", "7zip.7zip", "Cafe.MusicPlayer"] {
-        assert!(!out.contains(&format!("install {id}")), "{id} misread as missing:\n{out}");
+    for id in [
+        "Google.Chrome",
+        "Microsoft.VisualStudioCode",
+        "7zip.7zip",
+        "Cafe.MusicPlayer",
+    ] {
+        assert!(
+            !out.contains(&format!("install {id}")),
+            "{id} misread as missing:\n{out}"
+        );
     }
 }
 
@@ -1750,7 +2114,10 @@ fn a_typed_actions_command_is_bound_by_the_steps_timeout() {
     let stub = bin.join("dpkg-query");
     std::fs::write(
         &stub,
-        format!("#!/bin/sh\nsleep 300 &\necho $! > {}\nsleep 300\n", pidfile.display()),
+        format!(
+            "#!/bin/sh\nsleep 300 &\necho $! > {}\nsleep 300\n",
+            pidfile.display()
+        ),
     )
     .unwrap();
     set_mode(&stub, 0o755);
@@ -1765,19 +2132,29 @@ fn a_typed_actions_command_is_bound_by_the_steps_timeout() {
     let began = std::time::Instant::now();
     let out = Command::new(env!("CARGO_BIN_EXE_provision"))
         .args(["apply", plan.to_str().unwrap()])
-        .env("PATH", format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default()))
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                bin.display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
         .env("NO_COLOR", "1")
         .output()
         .expect("provision failed to start");
     let elapsed = began.elapsed();
-    let text = String::from_utf8_lossy(&out.stdout).into_owned()
-        + &String::from_utf8_lossy(&out.stderr);
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
 
     assert_eq!(out.status.code(), Some(1), "{text}");
     // The step's own 2s, not the ten-minute default of spec §4, and worded
     // the way the shell path words it.
     assert!(text.contains("timed out after 2"), "{text}");
-    assert!(elapsed < std::time::Duration::from_secs(60), "the step was never killed: {elapsed:?}");
+    assert!(
+        elapsed < std::time::Duration::from_secs(60),
+        "the step was never killed: {elapsed:?}"
+    );
 
     // And the kill reached past the command into what the command started.
     let pid = std::fs::read_to_string(&pidfile)
@@ -1789,7 +2166,10 @@ fn a_typed_actions_command_is_bound_by_the_steps_timeout() {
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false);
-    assert!(!alive, "pid {pid} outlived the process group it was killed with");
+    assert!(
+        !alive,
+        "pid {pid} outlived the process group it was killed with"
+    );
 }
 
 // ── pkg, in a container ───────────────────────────────────────────────────
@@ -1813,7 +2193,10 @@ fn in_container(image: &str, script: &str) -> (i32, String) {
         "run".into(),
         "--rm".into(),
         "-v".into(),
-        format!("{}:/usr/local/bin/provision:ro", env!("CARGO_BIN_EXE_provision")),
+        format!(
+            "{}:/usr/local/bin/provision:ro",
+            env!("CARGO_BIN_EXE_provision")
+        ),
         "-v".into(),
         format!("{}:/plan:ro", fixtures.display()),
         "-e".into(),
@@ -1825,11 +2208,13 @@ fn in_container(image: &str, script: &str) -> (i32, String) {
         "-c".into(),
         script.into(),
     ];
-    let out = Command::new("docker").args(&args).output().expect("docker failed to start");
+    let out = Command::new("docker")
+        .args(&args)
+        .output()
+        .expect("docker failed to start");
     (
         out.status.code().unwrap_or(-1),
-        String::from_utf8_lossy(&out.stdout).into_owned()
-            + &String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr),
     )
 }
 
@@ -1853,7 +2238,10 @@ fn apt_installs_a_package_twice_changed_then_ok() {
     let (code, out) = twice("ubuntu:24.04", "pkg_container_apt.yml");
     assert_eq!(code, 0, "{out}");
     let (first, second) = out.split_once("---SECOND---").expect(&out);
-    assert!(line_for(first, "A tiny package").contains("changed"), "{out}");
+    assert!(
+        line_for(first, "A tiny package").contains("changed"),
+        "{out}"
+    );
     assert!(first.contains("install sl"), "{out}");
     assert_eq!(verdict(second, "A tiny package"), "ok", "{out}");
 }
@@ -1867,7 +2255,10 @@ fn pacman_installs_a_package_twice_changed_then_ok() {
     let (code, out) = twice("archlinux:latest", "pkg_container_pacman.yml");
     assert_eq!(code, 0, "{out}");
     let (first, second) = out.split_once("---SECOND---").expect(&out);
-    assert!(line_for(first, "A tiny package").contains("changed"), "{out}");
+    assert!(
+        line_for(first, "A tiny package").contains("changed"),
+        "{out}"
+    );
     assert!(first.contains("install tree"), "{out}");
     assert_eq!(verdict(second, "A tiny package"), "ok", "{out}");
 }
@@ -1890,9 +2281,15 @@ fn the_apt_query_ignores_a_package_that_is_only_config_files() {
          && dpkg-query -W -f '${Package}\\t${Status}\\n' nano \
          && provision plan /plan/pkg_container_config_files.yml",
     );
-    assert!(out.contains("deinstall ok config-files"), "the case was not built:\n{out}");
+    assert!(
+        out.contains("deinstall ok config-files"),
+        "the case was not built:\n{out}"
+    );
     assert_eq!(code, 2, "{out}");
-    assert!(line_for(&out, "only config files").contains("would change"), "{out}");
+    assert!(
+        line_for(&out, "only config files").contains("would change"),
+        "{out}"
+    );
     assert!(out.contains("install nano"), "{out}");
 }
 
@@ -1902,12 +2299,17 @@ fn a_pacman_names_list_installs_only_the_missing_one() {
     if !container_tests_enabled() {
         return;
     }
-    let (code, out) =
-        in_container("archlinux:latest", "provision apply /plan/pkg_container_pacman_mixed.yml");
+    let (code, out) = in_container(
+        "archlinux:latest",
+        "provision apply /plan/pkg_container_pacman_mixed.yml",
+    );
     assert_eq!(code, 0, "{out}");
     assert!(line_for(&out, "already there").contains("changed"), "{out}");
     assert!(out.contains("install tree"), "{out}");
-    assert!(!out.contains("install pacman"), "the preinstalled package was named too:\n{out}");
+    assert!(
+        !out.contains("install pacman"),
+        "the preinstalled package was named too:\n{out}"
+    );
 }
 
 #[test]
@@ -1925,8 +2327,14 @@ fn state_latest_installs_a_package_that_was_never_there() {
          && dpkg -s sl >/dev/null 2>&1 && echo REALLY-INSTALLED",
     );
     assert_eq!(code, 0, "{out}");
-    assert!(line_for(&out, "not yet installed").contains("changed"), "{out}");
-    assert!(out.contains("REALLY-INSTALLED"), "sl was reported changed but is not there:\n{out}");
+    assert!(
+        line_for(&out, "not yet installed").contains("changed"),
+        "{out}"
+    );
+    assert!(
+        out.contains("REALLY-INSTALLED"),
+        "sl was reported changed but is not there:\n{out}"
+    );
 }
 
 #[test]
@@ -1947,7 +2355,11 @@ fn update_cache_refreshes_only_when_there_is_something_to_install() {
         &format!("provision apply /plan/pkg_container_update_cache_noop.yml && {lists}"),
     );
     assert_eq!(code, 0, "{noop}");
-    assert_eq!(noop.trim_end().lines().last(), Some("0"), "refreshed with nothing to do:\n{noop}");
+    assert_eq!(
+        noop.trim_end().lines().last(),
+        Some("0"),
+        "refreshed with nothing to do:\n{noop}"
+    );
 
     let (code, installs) = in_container(
         "ubuntu:24.04",

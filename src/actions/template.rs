@@ -27,7 +27,11 @@ pub struct Spec {
 pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result<Option<Spec>> {
     let body = step.body;
     let render = |src: &str| -> Option<String> {
-        if raw { Some(src.to_string()) } else { engine.render(src, ctx).ok() }
+        if raw {
+            Some(src.to_string())
+        } else {
+            engine.render(src, ctx).ok()
+        }
     };
 
     let Some(src_at) = body.get("src") else {
@@ -36,8 +40,12 @@ pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result
     let Some(dest_at) = body.get("dest") else {
         return Err(body.err("`template` requires `dest`"));
     };
-    let Some(src_rel) = render(src_at.as_str()?) else { return Ok(None) };
-    let Some(dest) = render(dest_at.as_str()?) else { return Ok(None) };
+    let Some(src_rel) = render(src_at.as_str()?) else {
+        return Ok(None);
+    };
+    let Some(dest) = render(dest_at.as_str()?) else {
+        return Ok(None);
+    };
     let dest = expanduser(&dest);
     let src = crate::config::load::resolve(src_at.file, &expanduser(&src_rel));
 
@@ -57,16 +65,27 @@ pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result
             // nothing called `top.conf.j2` is ever written.
             let rel = strip_j2(&rel);
             let out = Path::new(&dest).join(&rel);
-            let Some(content) = render_file(&entry, engine, ctx) else { return Ok(None) };
+            let Some(content) = render_file(&entry, engine, ctx) else {
+                return Ok(None);
+            };
             let label = rel.display().to_string();
-            outputs.push(meta.clone().into_file(out.display().to_string(), content, Some(label)));
+            outputs.push(
+                meta.clone()
+                    .into_file(out.display().to_string(), content, Some(label)),
+            );
         }
     } else {
-        let Some(content) = render_file(&src, engine, ctx) else { return Ok(None) };
+        let Some(content) = render_file(&src, engine, ctx) else {
+            return Ok(None);
+        };
         outputs.push(meta.into_file(dest.clone(), content, None));
     }
 
-    Ok(Some(Spec { outputs, dest, tree }))
+    Ok(Some(Spec {
+        outputs,
+        dest,
+        tree,
+    }))
 }
 
 /// Walk the source tree in sorted order, depth first.
@@ -141,7 +160,9 @@ impl Spec {
     fn reach(&self, ctx: &Ctx<'_>, act: bool) -> (Effect, Option<String>) {
         if let Some(bad) = self.dest_is_a_file() {
             return (
-                Effect::fail(format!("{bad} exists and is a regular file, not a directory")),
+                Effect::fail(format!(
+                    "{bad} exists and is a regular file, not a directory"
+                )),
                 None,
             );
         }
@@ -168,7 +189,9 @@ impl Spec {
         if changed == 0 {
             return (Effect::Ok, None);
         }
-        let note = self.tree.then(|| format!("{changed} of {}", self.outputs.len()));
+        let note = self
+            .tree
+            .then(|| format!("{changed} of {}", self.outputs.len()));
         (Effect::Changed(Some(diffs.join("\n"))), note)
     }
 
@@ -179,6 +202,8 @@ impl Spec {
         if !self.tree {
             return None;
         }
-        Path::new(&self.dest).is_file().then_some(self.dest.as_str())
+        Path::new(&self.dest)
+            .is_file()
+            .then_some(self.dest.as_str())
     }
 }

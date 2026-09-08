@@ -16,12 +16,24 @@ pub struct Diag {
 
 impl Diag {
     pub fn new(file: impl Into<PathBuf>, line: usize, col: usize, msg: impl Into<String>) -> Self {
-        Diag { file: file.into(), line, col, msg: msg.into(), note: None }
+        Diag {
+            file: file.into(),
+            line,
+            col,
+            msg: msg.into(),
+            note: None,
+        }
     }
 
     /// A diagnostic about a whole file rather than a position inside it.
     pub fn file_level(file: impl Into<PathBuf>, msg: impl Into<String>) -> Self {
-        Diag { file: file.into(), line: 0, col: 0, msg: msg.into(), note: None }
+        Diag {
+            file: file.into(),
+            line: 0,
+            col: 0,
+            msg: msg.into(),
+            note: None,
+        }
     }
 
     pub fn with_note(mut self, note: impl Into<String>) -> Self {

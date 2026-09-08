@@ -62,17 +62,25 @@ pub struct Spec {
 pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result<Option<Spec>> {
     let body = step.body;
     let render = |src: &str| -> Option<String> {
-        if raw { Some(src.to_string()) } else { engine.render(src, ctx).ok() }
+        if raw {
+            Some(src.to_string())
+        } else {
+            engine.render(src, ctx).ok()
+        }
     };
 
     let Some(name_at) = body.get("name") else {
         return Err(body.err("`service` requires `name`"));
     };
-    let Some(name) = render(name_at.as_str()?) else { return Ok(None) };
+    let Some(name) = render(name_at.as_str()?) else {
+        return Ok(None);
+    };
 
     let state = match body.get("state") {
         Some(n) => {
-            let Some(text) = render(n.as_str()?) else { return Ok(None) };
+            let Some(text) = render(n.as_str()?) else {
+                return Ok(None);
+            };
             Some(Want::parse(&text, n)?)
         }
         None => None,
@@ -85,7 +93,9 @@ pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result
     let scope_at = body.get("scope");
     let user = match scope_at {
         Some(n) => {
-            let Some(text) = render(n.as_str()?) else { return Ok(None) };
+            let Some(text) = render(n.as_str()?) else {
+                return Ok(None);
+            };
             match text.as_str() {
                 "system" => false,
                 "user" => true,
@@ -102,7 +112,11 @@ pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result
     // Spec §6.6: a user-scope unit belongs to the invoking user's manager.
     // `sudo` would talk to root's, which is a different manager entirely, so
     // the two together mean opposite things.
-    let sudo = step.mods.sudo.map(|n| n.as_bool().unwrap_or(false)).unwrap_or(false);
+    let sudo = step
+        .mods
+        .sudo
+        .map(|n| n.as_bool().unwrap_or(false))
+        .unwrap_or(false);
     if user && sudo {
         return Err(step
             .at
@@ -112,7 +126,11 @@ pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result
 
     // The backend follows the machine, so the error names the fact that
     // decided it rather than a guess about the plan.
-    let os = ctx.get_attr("os").ok().map(|v| v.to_string()).unwrap_or_default();
+    let os = ctx
+        .get_attr("os")
+        .ok()
+        .map(|v| v.to_string())
+        .unwrap_or_default();
     let backend = match os.as_str() {
         "linux" => Backend::Systemd { user },
         "darwin" => Backend::Launchd { user },
@@ -122,9 +140,9 @@ pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result
                 .with_note("use `shell` with the powershell interpreter"));
         }
         other => {
-            return Err(body.err(format!("`service` has no backend for os `{other}`")).with_note(
-                "systemd on linux, launchd on darwin — the `os` fact decides",
-            ));
+            return Err(body
+                .err(format!("`service` has no backend for os `{other}`"))
+                .with_note("systemd on linux, launchd on darwin — the `os` fact decides"));
         }
     };
 
@@ -134,7 +152,12 @@ pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result
             .with_note("otherwise the step declares nothing"));
     }
 
-    Ok(Some(Spec { name, state, enabled, backend }))
+    Ok(Some(Spec {
+        name,
+        state,
+        enabled,
+        backend,
+    }))
 }
 
 // ── the four operations ───────────────────────────────────────────────────
@@ -146,11 +169,15 @@ impl Backend {
     fn is_active(&self, name: &str, ctx: &Ctx<'_>) -> Option<bool> {
         match self {
             Backend::Systemd { user } => {
-                let got = ctx.exec(&["systemctl", scope_flag(*user), "is-active", name], false).ok()?;
+                let got = ctx
+                    .exec(&["systemctl", scope_flag(*user), "is-active", name], false)
+                    .ok()?;
                 Some(got.rc == 0)
             }
             Backend::Launchd { user } => {
-                let got = ctx.exec(&["launchctl", "print", &domain(*user, name)], false).ok()?;
+                let got = ctx
+                    .exec(&["launchctl", "print", &domain(*user, name)], false)
+                    .ok()?;
                 Some(got.rc == 0)
             }
         }
@@ -159,7 +186,9 @@ impl Backend {
     fn is_enabled(&self, name: &str, ctx: &Ctx<'_>) -> Option<bool> {
         match self {
             Backend::Systemd { user } => {
-                let got = ctx.exec(&["systemctl", scope_flag(*user), "is-enabled", name], false).ok()?;
+                let got = ctx
+                    .exec(&["systemctl", scope_flag(*user), "is-enabled", name], false)
+                    .ok()?;
                 Some(got.rc == 0)
             }
             // `print` reports loaded-ness, not enablement, so a unit that is
@@ -168,7 +197,9 @@ impl Backend {
             // worked. `print-disabled` lists exactly the pair `enable` and
             // `disable` write, and takes a domain rather than a path.
             Backend::Launchd { user } => {
-                let got = ctx.exec(&["launchctl", "print-disabled", &domain_root(*user)], false).ok()?;
+                let got = ctx
+                    .exec(&["launchctl", "print-disabled", &domain_root(*user)], false)
+                    .ok()?;
                 let out = String::from_utf8_lossy(&got.stdout);
                 let line = out.lines().find(|l| l.contains(&format!("\"{name}\"")))?;
                 Some(!line.contains("disabled"))
@@ -233,7 +264,11 @@ fn domain(user: bool, name: &str) -> String {
 /// so `getuid` is the only source; `scope: user` with `sudo` is rejected at
 /// parse time, so this is always the invoking user.
 fn domain_root(user: bool) -> String {
-    if user { format!("gui/{}", users_uid()) } else { "system".to_string() }
+    if user {
+        format!("gui/{}", users_uid())
+    } else {
+        "system".to_string()
+    }
 }
 
 #[cfg(unix)]
