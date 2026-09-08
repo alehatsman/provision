@@ -1108,7 +1108,8 @@ impl Expander {
     /// Push a file onto the include stack, reporting a cycle by naming it.
     fn enter(&mut self, path: &Path, at: N<'static>) -> Option<()> {
         if let Some(i) = self.stack.iter().position(|p| p == path) {
-            let mut chain: Vec<String> = self.stack[i..].iter().map(|p| rel_display(p)).collect();
+            let mut chain: Vec<String> =
+                self.stack.iter().skip(i).map(|p| rel_display(p)).collect();
             chain.push(rel_display(path));
             self.diags
                 .push(at.err("import cycle").with_note(chain.join(" → ")));

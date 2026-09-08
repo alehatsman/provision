@@ -264,7 +264,8 @@ impl Spinner {
             let name = truncate(&name, NAME_WIDTH);
             let mut i = 0usize;
             while !flag.load(Ordering::Relaxed) {
-                emit(target, &format!("\r  {} {name}", FRAMES[i % FRAMES.len()]));
+                let frame = FRAMES.get(i % FRAMES.len()).copied().unwrap_or(" ");
+                emit(target, &format!("\r  {frame} {name}"));
                 i += 1;
                 std::thread::sleep(Duration::from_millis(80));
             }

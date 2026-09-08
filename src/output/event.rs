@@ -183,5 +183,5 @@ pub(crate) fn human(d: Duration) -> String {
 pub(crate) fn tail(text: &str, n: usize) -> Vec<&str> {
     let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
     let start = lines.len().saturating_sub(n);
-    lines[start..].to_vec()
+    lines.into_iter().skip(start).collect()
 }

@@ -61,12 +61,13 @@ fn assert_positioned(out: &str) {
         let after = e.split_once("error:").unwrap().1.trim();
         let (loc, _) = after.split_once(' ').unwrap_or((after, ""));
         let parts: Vec<&str> = loc.trim_end_matches(':').rsplitn(3, ':').collect();
-        assert!(
-            parts.len() == 3
-                && parts[0].parse::<usize>().is_ok()
-                && parts[1].parse::<usize>().is_ok(),
-            "error has no file:line:col — {e}"
+        // rsplitn yields col, line, file — so a well-formed position is
+        // exactly three parts with the first two numeric.
+        let located = matches!(
+            parts.as_slice(),
+            [col, line, _file] if col.parse::<usize>().is_ok() && line.parse::<usize>().is_ok()
         );
+        assert!(located, "error has no file:line:col — {e}");
     }
 }
 

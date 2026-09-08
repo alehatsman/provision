@@ -168,9 +168,9 @@ impl Engine {
             .filter(|n| ctx.get_attr(n).map(|v| v.is_undefined()).unwrap_or(true))
             .collect();
         missing.sort();
-        match missing.len() {
-            0 => base,
-            1 => format!("undefined variable `{}`", missing[0]),
+        match missing.as_slice() {
+            [] => base,
+            [one] => format!("undefined variable `{one}`"),
             _ => format!("undefined variables: {}", missing.join(", ")),
         }
     }

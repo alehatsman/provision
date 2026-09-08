@@ -264,6 +264,14 @@ fn nearest<'k>(got: &str, allowed: &[&'k str]) -> Option<&'k str> {
         .map(|(_, a)| a)
 }
 
+// Every index here is proven in range by the loop bounds one line above it,
+// and this is the inner loop of the did-you-mean suggestion: rewriting it
+// through `get` would trade a readable textbook implementation for the same
+// bounds checks, written twice.
+#[expect(
+    clippy::indexing_slicing,
+    reason = "row indices are bounded by b.len() by construction; the loops are the proof"
+)]
 fn levenshtein(a: &str, b: &str) -> usize {
     let b: Vec<char> = b.chars().collect();
     let mut prev: Vec<usize> = (0..=b.len()).collect();

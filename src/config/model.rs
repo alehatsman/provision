@@ -165,7 +165,7 @@ pub(crate) fn parse_step<'a>(at: N<'a>) -> Result<Step<'a>> {
         .collect();
 
     let (key, _key_at) = match subjects.len() {
-        1 => subjects[0],
+        1 if let Some(only) = subjects.first() => *only,
         0 => {
             return Err(at.err("step has no action").with_note(format!(
                 "expected one of: {}",
@@ -175,8 +175,8 @@ pub(crate) fn parse_step<'a>(at: N<'a>) -> Result<Step<'a>> {
         _ => {
             let names: Vec<&str> = subjects.iter().map(|(k, _)| *k).collect();
             // Point at the second one: the first is likely what was meant.
-            return Err(subjects[1]
-                .1
+            let second = subjects.get(1).map_or(at, |(_, n)| *n);
+            return Err(second
                 .err(format!(
                     "step has {} action keys: {}",
                     names.len(),

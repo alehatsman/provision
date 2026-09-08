@@ -229,7 +229,9 @@ fn parse_winget(out: &str) -> BTreeMap<String, String> {
             return String::new();
         }
         let end = to.unwrap_or(chars.len()).min(chars.len());
-        chars[from..end.max(from)]
+        chars
+            .get(from..end.max(from))
+            .unwrap_or_default()
             .iter()
             .collect::<String>()
             .trim()
@@ -543,9 +545,9 @@ impl Spec {
         };
         // A query reads a local database and needs no privilege, so it never
         // escalates — the same rule the gates and `service` probes follow.
-        let got = ctx
-            .exec(argv, false)
-            .map_err(|e| Effect::fail(format!("cannot run {}: {e}", argv[0])))?;
+        let got = ctx.exec(argv, false).map_err(|e| {
+            Effect::fail(format!("cannot run {}: {e}", argv.first().unwrap_or(&"")))
+        })?;
         if let Some(bad) = ctx.stopped(&got) {
             return Err(bad);
         }

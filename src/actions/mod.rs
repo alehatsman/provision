@@ -463,7 +463,7 @@ fn command_name<'a>(argv: &[&'a str]) -> &'a str {
     let mut i = 0;
     if argv.first() == Some(&"env") {
         i = 1;
-        while i < argv.len() && argv[i].contains('=') {
+        while argv.get(i).is_some_and(|a| a.contains('=')) {
             i += 1;
         }
     }

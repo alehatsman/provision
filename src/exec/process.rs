@@ -215,16 +215,20 @@ fn drain(pipe: Option<impl Read + Send + 'static>, stream: bool, is_err: bool) -
         loop {
             match pipe.read(&mut chunk) {
                 Ok(0) | Err(_) => break,
+                // `read` never reports more than it was given, so the slice
+                // is always in range; `get` says so without asking a reader
+                // to know that.
                 Ok(n) => {
+                    let Some(got) = chunk.get(..n) else { break };
                     if stream {
-                        let text = String::from_utf8_lossy(&chunk[..n]);
+                        let text = String::from_utf8_lossy(got);
                         if is_err {
                             eprint!("{text}");
                         } else {
                             print!("{text}");
                         }
                     }
-                    buf.extend_from_slice(&chunk[..n]);
+                    buf.extend_from_slice(got);
                 }
             }
         }
