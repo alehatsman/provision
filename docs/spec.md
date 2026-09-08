@@ -139,6 +139,18 @@ Lowest to highest:
 
 `env.*` exposes the process environment read-only.
 
+**A `vars` step is rendered; a `vars_file` is not.** Values in a `vars:`
+step are templates evaluated against the scope at that point, so
+`rq_dir: "{{ home }}/.cache/x"` is a path. Values loaded by `vars_file` are
+data taken as written: those files hold shell snippets and config text where
+`{{` must survive, and there is no second render pass when a variable is
+later substituted into a field, so a `{{ home }}` inside one stays the
+literal seven characters. A file-loaded value that has to be computed is a
+`vars` step beside the `vars_file`, or uses `~`, which every path field
+expands (§3). Written into the spec 2026-09-08 after a consumer copied
+mooncake's rendered-vars shape and created a directory named `{{ home }}`;
+the rule itself dates from phase 0.
+
 ### 3.4 Templating
 
 Jinja2 via minijinja. Applies to every string value in a step except the
