@@ -6,6 +6,13 @@ One YAML file per machine. Seven actions. Sequential execution, fail-fast,
 honest dry-run, readable output. No fleet, no daemon, no agent, no plugin
 economy.
 
+![provision apply on a real machine](docs/demo.gif)
+
+A real, full `provision apply` — every component of a real desktop's
+plan, dogfooded from a personal dotfiles repo. Recorded with
+[asciinema](https://asciinema.org), converted to gif with
+[agg](https://github.com/asciinema/agg).
+
 ```yaml
 - name: Install zsh
   pkg: { names: [zsh] }
