@@ -569,7 +569,10 @@ git:
   ref on an existing checkout is **`unknown`**, for the reason `pkg`'s
   `latest` is (§6.5): whether the remote moved is not a question the local
   clone answers, and plan does not go to the network to ask. No `ref` means
-  the remote's default branch and is treated as a branch.
+  the remote's default branch and is treated as a branch. A tag or sha
+  that is **not on disk yet** is `unknown` under plan for the same reason:
+  whether HEAD already sits on that commit cannot be known without
+  resolving the ref, and resolving it needs the network.
 - Compared by `git rev-parse`, never by branch name: the ref name alone
   cannot tell a tag from a branch, and an annotated tag's ref resolves to the
   tag object, not the commit HEAD sits on. Tags are told apart with
@@ -588,6 +591,13 @@ git:
   running the plan.
 - `retry` (§4) applies to the clone and fetch calls: the network is the one
   thing here that fails and then works.
+- **Dirty** means tracked modifications or staged changes (`git status
+  --porcelain --untracked-files=no` non-empty); untracked files are
+  ignored, because a checkout cannot destroy one, and if one collides with
+  the target ref git refuses the checkout itself and its message is the
+  better error.
+- Parents of `dest` are created the way `file` creates them (§6.3); `dest`
+  itself must be absent or a checkout of the same `repo`.
 
 ### 6.9 `download`
 
@@ -655,8 +665,10 @@ defaults:
   `true` written as a string is a different key from one written as a bool.
 - **Only these four types.** `array` and `dict` are deferred with a reopen
   condition (plan.md); the one array in the fleet stays in shell.
-- Not macOS: **fails** at apply, `unknown` at plan, and `validate --strict`
-  warns when a `defaults` step has no `when` naming the os. The action does
+- Not macOS: **fails** at apply, `unknown` at plan, and under
+  `validate --strict` a `defaults` step with no `when` naming the os is an
+  **error**, the way an ungated `shell` is (D3). Strict has one severity;
+  a second one is a bigger idea than this rule pays for. The action does
   not skip itself; a plan says where it runs.
 - The write takes effect for the running user. An app that caches its
   preferences (Finder, Dock, SystemUIServer) needs a restart, which is a
