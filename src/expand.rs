@@ -187,7 +187,31 @@ impl Expander {
                 self.diags.push(d);
                 return;
             }
-            Cond::True | Cond::Unprobed => {}
+            Cond::Unprobed => {
+                // D14. The step that registers this value has not run, so the
+                // condition has no answer yet — and `condition()` worked that
+                // out and this arm used to throw it away, letting plan probe
+                // the step and report a verdict it cannot have. A `service:
+                // {state: restarted}` gated on a unit file that has not been
+                // deployed yet came out as `would change`, which is a claim
+                // about a machine nobody asked.
+                //
+                // `validate` must still walk in: it renders the fields and
+                // parses the action body and runs nothing, and skipping that
+                // would put back the hole d502ed3 closed. `apply` never
+                // reaches here — by then the register holds a real result,
+                // which is what `reads_a_register` checks first.
+                //
+                // Structural steps are exempt. An `import` has no verdict of
+                // its own, and reporting a whole subtree as unprobed would
+                // hide far more than the honesty buys.
+                if self.mode.reports() && !step.is_structural() {
+                    self.bind_register(step, scope, None, &Status::WouldRunUnprobed);
+                    self.record(step, scope, depth, tags, Status::WouldRunUnprobed);
+                    return;
+                }
+            }
+            Cond::True => {}
         }
 
         match step.key {
