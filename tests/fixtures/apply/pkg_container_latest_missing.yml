@@ -1,0 +1,10 @@
+---
+# Container only. `state: latest` on a package that is not installed must
+# install it (fix in 7151a8a) rather than the silent no-op `apt-get install
+# --only-upgrade` would give it on its own.
+- name: Latest on a package not yet installed
+  pkg:
+    name: sl
+    state: latest
+    manager: apt
+    update_cache: true

@@ -1,0 +1,9 @@
+---
+# Container only. `coreutils` is already in ubuntu:24.04's base image, so
+# `update_cache: true` here has nothing to install and must not refresh
+# (spec §6.5: "only when there is something to install").
+- name: Nothing to install, cache still requested
+  pkg:
+    name: coreutils
+    manager: apt
+    update_cache: true

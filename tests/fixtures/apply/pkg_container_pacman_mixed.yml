@@ -1,0 +1,9 @@
+---
+# Container only. `pacman` is part of every archlinux:latest base image;
+# `tree` is not. One query for the pair, one install call for the missing
+# one (spec §6.5).
+- name: A names list with one already there
+  pkg:
+    names: [pacman, tree]
+    manager: pacman
+    update_cache: true

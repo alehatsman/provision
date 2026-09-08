@@ -1,0 +1,6 @@
+Name                    Id                            Version         Source
+------------------------------------------------------------------------------------------
+Google Chrome           Google.Chrome                 120.0.6099.129  winget
+Visual Studio Code      Microsoft.VisualStudioCode    1.85.1          winget
+7-Zip 22.01             7zip.7zip                                     winget
+Café Music Player       Cafe.MusicPlayer              3.2.1           winget

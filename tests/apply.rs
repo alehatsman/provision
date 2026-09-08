@@ -4,6 +4,18 @@
 //! and asserts `changed` then `ok` (spec §11). For `shell` that means the two
 //! gates it can declare — `unless` and `creates` — and for `assert` it means
 //! that running twice changes nothing at all.
+//!
+//! The whole file is unix-only, and gated in one place rather than test by
+//! test. Not an oversight about coverage: every fixture here is POSIX-shaped
+//! — `sudo`, `/etc`, systemd units, `#!/bin/sh` stand-ins on PATH, `0644` —
+//! so gating individually would produce the same zero Windows coverage for
+//! thirty times the diff. What it buys is that
+//! `cargo check --target x86_64-pc-windows-gnu --all-targets` stays clean, so
+//! a Windows build break is caught here instead of on the Windows box. When
+//! that box joins the loop, this file splits: the platform-neutral half
+//! (parsing, tags, exit codes) loses the gate, and the half that needs a
+//! POSIX filesystem keeps it.
+#![cfg(unix)]
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -969,13 +981,15 @@ fn an_unknown_manager_lists_the_ones_that_exist() {
 #[test]
 fn cask_belongs_to_brew_and_nowhere_else() {
     let dir = tempfile::tempdir().unwrap();
-    let (code, out) = pkg_plan(
-        dir.path(),
-        "- name: A cask\n  pkg:\n    name: git\n    manager: apt\n    cask: true\n",
-    );
-    assert_eq!(code, 3, "{out}");
-    assert!(out.contains("`cask` does not apply to `apt`"), "{out}");
-    assert!(out.contains("casks are a brew concept"), "{out}");
+    for manager in ["apt", "pacman"] {
+        let (code, out) = pkg_plan(
+            dir.path(),
+            &format!("- name: A cask\n  pkg:\n    name: git\n    manager: {manager}\n    cask: true\n"),
+        );
+        assert_eq!(code, 3, "{out}");
+        assert!(out.contains(&format!("`cask` does not apply to `{manager}`")), "{out}");
+        assert!(out.contains("casks are a brew concept"), "{out}");
+    }
 }
 
 #[test]
@@ -991,6 +1005,334 @@ fn pkg_wants_exactly_one_of_name_and_names() {
     let (code, out) = pkg_plan(dir.path(), "- name: Neither\n  pkg:\n    manager: apt\n");
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("`pkg` requires `name` or `names`"), "{out}");
+}
+
+#[test]
+fn an_empty_names_list_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) =
+        pkg_plan(dir.path(), "- name: Empty\n  pkg:\n    names: []\n    manager: apt\n");
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("`pkg` names no packages"), "{out}");
+}
+
+#[test]
+fn a_scalar_names_field_is_rejected_not_iterated_by_character() {
+    // DEFECT, reported rather than patched around: `names: git` is not a
+    // list, so the render should hit the `Err(_)` arm of `try_iter` and be
+    // rejected with "`names` is a list of package names". Instead minijinja's
+    // string iteration (the same rule `{% for c in "abc" %}` uses) succeeds
+    // silently, and `pkg` plans to install three packages named `g`, `i`,
+    // `t`. `pkg::parse` never checks that the rendered value is actually a
+    // sequence.
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) =
+        pkg_plan(dir.path(), "- name: A scalar\n  pkg:\n    names: git\n    manager: apt\n");
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("`names` is a list of package names"), "{out}");
+}
+
+#[test]
+fn an_unknown_state_names_the_known_ones() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = pkg_plan(
+        dir.path(),
+        "- name: Bad state\n  pkg:\n    name: git\n    state: purged\n    manager: apt\n",
+    );
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("unknown package state `purged`"), "{out}");
+    assert!(out.contains("one of: present, absent, latest"), "{out}");
+}
+
+#[test]
+fn yay_is_never_chosen_as_the_default_manager() {
+    // Spec §6.5: the AUR is a decision a plan has to write down. A PATH where
+    // `yay` is the only manager present must still fail to resolve a default,
+    // not silently pick it.
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    fake_manager(&bin, "yay", "exit 0\n");
+    let path = dir.path().join("pkg.yml");
+    std::fs::write(&path, "- name: No default here\n  pkg:\n    name: git\n").unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_provision"))
+        .args(["plan", path.to_str().unwrap()])
+        .env("PATH", &bin)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).into_owned()
+        + &String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(3), "{text}");
+    assert!(text.contains("no package manager found"), "yay must not be picked by default:\n{text}");
+}
+
+#[test]
+fn a_names_list_mixing_installed_and_missing_lists_only_the_missing_one() {
+    if !apt_is_local() {
+        eprintln!("skipped: needs apt");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = pkg_plan(
+        dir.path(),
+        "- name: Mixed names list\n  pkg:\n    names: [coreutils, provision-no-such-package]\n    manager: apt\n",
+    );
+    assert_eq!(code, 2, "{out}");
+    assert!(line_for(&out, "Mixed names list").contains("would change"), "{out}");
+    assert!(out.contains("install provision-no-such-package"), "{out}");
+    assert!(!out.contains("install coreutils"), "an installed package was named too:\n{out}");
+}
+
+#[test]
+fn state_absent_on_an_installed_package_would_remove_it() {
+    if !apt_is_local() {
+        eprintln!("skipped: needs apt");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = pkg_plan(
+        dir.path(),
+        "- name: Absent on an installed package\n  pkg:\n    name: coreutils\n    state: absent\n    manager: apt\n",
+    );
+    assert_eq!(code, 2, "{out}");
+    assert!(out.contains("remove coreutils"), "{out}");
+}
+
+#[test]
+fn state_latest_on_a_missing_package_is_knowable_and_would_install() {
+    // Spec §6.5: a missing package is knowable even under plan, unlike an
+    // installed one, where whether a newer version exists needs the network.
+    if !apt_is_local() {
+        eprintln!("skipped: needs apt");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = pkg_plan(
+        dir.path(),
+        "- name: Latest on a missing package\n  pkg:\n    name: provision-no-such-package\n    state: latest\n    manager: apt\n",
+    );
+    assert_eq!(code, 2, "{out}");
+    assert_eq!(verdict(&out, "Latest on a missing package"), "would change", "{out}");
+    assert!(out.contains("install provision-no-such-package"), "{out}");
+}
+
+#[test]
+fn update_cache_never_runs_a_command_under_plan() {
+    // Spec §6.5: "never under plan" — proven here by making the refresh
+    // command itself detectable, not by inference from the verdict.
+    if !apt_is_local() {
+        eprintln!("skipped: needs apt");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let marker = dir.path().join("apt-get.ran");
+    fake_manager(&bin, "apt-get", &format!("touch {}\n", marker.display()));
+
+    let path = dir.path().join("pkg.yml");
+    std::fs::write(
+        &path,
+        "- name: Would install with update_cache\n  pkg:\n    name: provision-no-such-package\n    manager: apt\n    update_cache: true\n",
+    )
+    .unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_provision"))
+        .args(["plan", path.to_str().unwrap()])
+        .env("PATH", format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default()))
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).into_owned()
+        + &String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "{text}");
+    assert!(text.contains("install provision-no-such-package"), "{text}");
+    assert!(!marker.exists(), "apt-get ran under plan:\n{text}");
+}
+
+#[test]
+fn pkg_json_status_matches_the_spec_vocabulary() {
+    if !apt_is_local() {
+        eprintln!("skipped: needs apt");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture("pkg_plan.yml");
+    let out = run_in(dir.path(), &["plan", path.to_str().unwrap(), "--json"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let steps: Vec<serde_json::Value> = stdout
+        .lines()
+        .map(|l| serde_json::from_str(l).expect(l))
+        .filter(|r: &serde_json::Value| r["event"] == "step")
+        .collect();
+    assert_eq!(steps.len(), 2, "{stdout}");
+    // Spec §9.3: the vocabulary is fixed, not "would change" with a space.
+    assert_eq!(steps[0]["status"], "would_change", "{stdout}");
+    assert_eq!(steps[1]["status"], "unknown", "{stdout}");
+}
+
+// ── pkg parsers, from captured manager output ──────────────────────────────
+//
+// Every row's query parser is exercised by putting a stand-in for the
+// manager's binary on PATH ahead of anything real, so it can answer with
+// output captured from a real run without a second machine to run it on.
+// Only the query is stubbed — plan never runs the manager for anything
+// else — and what is under test either way is the real parser in
+// src/actions/pkg.rs, reached through the real `pkg` action.
+
+fn fake_manager(bin_dir: &Path, name: &str, body: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let path = bin_dir.join(name);
+    std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+    let mut perm = std::fs::metadata(&path).unwrap().permissions();
+    perm.set_mode(0o755);
+    std::fs::set_permissions(&path, perm).unwrap();
+}
+
+/// Cats a captured-output fixture back out, whatever the manager was called
+/// with — plan only ever asks it to query.
+fn cat_fixture(name: &str) -> String {
+    let text = std::fs::read_to_string(fixture(&format!("pkg/{name}"))).unwrap();
+    format!("cat <<'PKGFIXTURE'\n{text}PKGFIXTURE\n")
+}
+
+fn pkg_plan_with_path(dir: &Path, body: &str, bin_dir: &Path) -> (i32, String) {
+    let path = dir.join("pkg.yml");
+    std::fs::write(&path, body).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_provision"))
+        .args(["plan", path.to_str().unwrap()])
+        .env("PATH", format!("{}:{}", bin_dir.display(), std::env::var("PATH").unwrap_or_default()))
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned()
+            + &String::from_utf8_lossy(&out.stderr),
+    )
+}
+
+#[test]
+fn parse_dpkg_keeps_only_the_install_ok_installed_stanza() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    fake_manager(&bin, "dpkg-query", &cat_fixture("dpkg_query.txt"));
+
+    let (code, out) = pkg_plan_with_path(
+        dir.path(),
+        "- name: Mixed dpkg stanzas\n  pkg:\n    names: [sl, nano, ghost]\n    manager: apt\n",
+        &bin,
+    );
+    assert_eq!(code, 2, "{out}");
+    // `nano` is config-files-only and `ghost` is a status this table never
+    // emits for real; neither counts as installed, only `sl` does.
+    assert!(out.contains("install nano ghost"), "{out}");
+    assert!(!out.contains("install sl"), "the installed stanza was misread:\n{out}");
+}
+
+#[test]
+fn parse_space_pairs_reads_a_pacman_query() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    fake_manager(&bin, "pacman", &cat_fixture("pacman_q.txt"));
+
+    let (code, out) = pkg_plan_with_path(
+        dir.path(),
+        "- name: A pacman query\n  pkg:\n    names: [bash, coreutils, tree]\n    manager: pacman\n",
+        &bin,
+    );
+    assert_eq!(code, 2, "{out}");
+    assert!(out.contains("install tree"), "{out}");
+    assert!(!out.contains("install bash") && !out.contains("install coreutils"), "{out}");
+}
+
+fn fake_brew(bin_dir: &Path) {
+    let body = format!(
+        "case \"$*\" in\n  *--cask*)\n{}    ;;\n  *)\n{}    ;;\nesac\n",
+        cat_fixture("brew_cask_versions.txt"),
+        cat_fixture("brew_formula_versions.txt"),
+    );
+    fake_manager(bin_dir, "brew", &body);
+}
+
+#[test]
+fn parse_space_pairs_takes_the_first_version_from_a_brew_query() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    fake_brew(&bin);
+
+    let (code, out) = pkg_plan_with_path(
+        dir.path(),
+        "- name: A brew formula query\n  pkg:\n    names: [jq, wget, curl]\n    manager: brew\n",
+        &bin,
+    );
+    assert_eq!(code, 2, "{out}");
+    // `wget` lists two versions on one line; the first is enough to read it
+    // as installed, and only `curl` is genuinely missing.
+    assert!(out.contains("install curl"), "{out}");
+    assert!(!out.contains("install jq") && !out.contains("install wget"), "{out}");
+}
+
+#[test]
+fn brew_reads_the_cask_list_when_cask_is_true() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    fake_brew(&bin);
+
+    let (code, out) = pkg_plan_with_path(
+        dir.path(),
+        "- name: A brew cask query\n  pkg:\n    names: [docker, firefox]\n    manager: brew\n    cask: true\n",
+        &bin,
+    );
+    assert_eq!(code, 2, "{out}");
+    assert!(out.contains("install firefox"), "{out}");
+    assert!(!out.contains("install docker"), "the cask list was not consulted:\n{out}");
+}
+
+#[test]
+fn brew_matches_a_tap_qualified_name_by_its_last_segment() {
+    // 7151a8a: `hashicorp/tap/terraform` never converged, because `brew list
+    // --versions` reports it as plain `terraform`.
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    fake_brew(&bin);
+
+    let (code, out) = pkg_plan_with_path(
+        dir.path(),
+        "- name: Tap-qualified names\n  pkg:\n    names: [hashicorp/tap/terraform, hashicorp/tap/packer, hashicorp/tap/vault]\n    manager: brew\n",
+        &bin,
+    );
+    assert_eq!(code, 2, "{out}");
+    assert!(out.contains("install hashicorp/tap/vault"), "{out}");
+    assert!(!out.contains("terraform"), "a tap-qualified name that is installed was re-offered:\n{out}");
+    assert!(!out.contains("hashicorp/tap/packer"), "{out}");
+}
+
+#[test]
+fn parse_winget_cuts_columns_by_the_headers_offsets() {
+    // The fixture's table has a two-word name, a row with no Version, and a
+    // non-ASCII name — the case that would panic or misalign under a
+    // byte-offset cut instead of the char-based one the row actually uses.
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    fake_manager(&bin, "winget", &cat_fixture("winget_list.txt"));
+
+    let (code, out) = pkg_plan_with_path(
+        dir.path(),
+        "- name: A winget table\n  pkg:\n    names: [Google.Chrome, Microsoft.VisualStudioCode, 7zip.7zip, Cafe.MusicPlayer, Nonexistent.App]\n    manager: winget\n",
+        &bin,
+    );
+    assert_eq!(code, 2, "{out}");
+    assert!(out.contains("install Nonexistent.App"), "{out}");
+    for id in ["Google.Chrome", "Microsoft.VisualStudioCode", "7zip.7zip", "Cafe.MusicPlayer"] {
+        assert!(!out.contains(&format!("install {id}")), "{id} misread as missing:\n{out}");
+    }
 }
 
 // The apt status filter — `dpkg-query -W` alone also lists removed-but-config
@@ -1166,3 +1508,80 @@ fn the_apt_query_ignores_a_package_that_is_only_config_files() {
     assert!(line_for(&out, "only config files").contains("would change"), "{out}");
     assert!(out.contains("install nano"), "{out}");
 }
+
+#[test]
+#[ignore = "needs docker; set PROVISION_CONTAINER_TESTS=1"]
+fn a_pacman_names_list_installs_only_the_missing_one() {
+    if !container_tests_enabled() {
+        return;
+    }
+    let (code, out) =
+        in_container("archlinux:latest", "provision apply /plan/pkg_container_pacman_mixed.yml");
+    assert_eq!(code, 0, "{out}");
+    assert!(line_for(&out, "already there").contains("changed"), "{out}");
+    assert!(out.contains("install tree"), "{out}");
+    assert!(!out.contains("install pacman"), "the preinstalled package was named too:\n{out}");
+}
+
+#[test]
+#[ignore = "needs docker; set PROVISION_CONTAINER_TESTS=1"]
+fn state_latest_installs_a_package_that_was_never_there() {
+    // 7151a8a. Proven inside the one container the apply ran in, since a
+    // fresh `--rm` container remembers nothing between two `in_container`
+    // calls.
+    if !container_tests_enabled() {
+        return;
+    }
+    let (code, out) = in_container(
+        "ubuntu:24.04",
+        "provision apply /plan/pkg_container_latest_missing.yml \
+         && dpkg -s sl >/dev/null 2>&1 && echo REALLY-INSTALLED",
+    );
+    assert_eq!(code, 0, "{out}");
+    assert!(line_for(&out, "not yet installed").contains("changed"), "{out}");
+    assert!(out.contains("REALLY-INSTALLED"), "sl was reported changed but is not there:\n{out}");
+}
+
+#[test]
+#[ignore = "needs docker; set PROVISION_CONTAINER_TESTS=1"]
+fn update_cache_refreshes_only_when_there_is_something_to_install() {
+    // A typed action never surfaces the manager's own chatter (only `shell`
+    // and `cmd` forward raw child output — spec §9), so `apt-get update`
+    // running is not something provision's own text will ever show. The
+    // ubuntu:24.04 image ships with `/var/lib/apt/lists` stripped empty to
+    // save space, so whether it gained real list files is the manager's own
+    // side effect, read directly.
+    if !container_tests_enabled() {
+        return;
+    }
+    let lists = "ls /var/lib/apt/lists | grep -v -E '^(lock|partial|auxfiles)$' | wc -l";
+    let (code, noop) = in_container(
+        "ubuntu:24.04",
+        &format!("provision apply /plan/pkg_container_update_cache_noop.yml && {lists}"),
+    );
+    assert_eq!(code, 0, "{noop}");
+    assert_eq!(noop.trim_end().lines().last(), Some("0"), "refreshed with nothing to do:\n{noop}");
+
+    let (code, installs) = in_container(
+        "ubuntu:24.04",
+        &format!("provision apply /plan/pkg_container_apt.yml && {lists}"),
+    );
+    assert_eq!(code, 0, "{installs}");
+    assert_ne!(
+        installs.trim_end().lines().last(),
+        Some("0"),
+        "did not refresh before installing:\n{installs}"
+    );
+}
+
+// A container test holding a real dpkg lock with the `flock` utility and
+// expecting a real `apt-get install` to block on it was tried and dropped:
+// GNU `flock` takes a BSD `flock(2)` lock, dpkg/apt take a POSIX `fcntl(2)`
+// lock on the same file, and the two are independent locking systems in
+// Linux — one never contends with the other. `apt-get install` ran straight
+// through every time, and the resulting test was pure timing noise (it
+// passed or failed by how long the container took to start, not by whether
+// anything actually blocked). `a_typed_actions_command_is_bound_by_the_steps_timeout`
+// already proves the kill-on-timeout mechanism deterministically, through
+// the real `pkg` action and the real `Ctx::exec`; only the query's binary is
+// a stand-in there, and it is the mechanism under test either way.
