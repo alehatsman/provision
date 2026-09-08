@@ -31,6 +31,11 @@ home = "0.5.12"
 minijinja = { version = "2.24.0", features = ["loader", "json"] }
 saphyr = "0.0.12"
 serde_json = "1.0.151"
+# The one dependency phase 6 added, for `download`'s checksum (spec §6.9).
+# RustCrypto's, rather than a compressor written here: a checksum is a
+# security check, and eight transitive crates is the price of not owning that
+# code. Approved by the owner 2026-09-08.
+sha2 = "0.10"
 similar = "2"
 tempfile = "3"
 which = "8.0.6"

@@ -7,6 +7,7 @@
 //! inspection and get their own modules then.
 
 pub(crate) mod defaults;
+pub(crate) mod download;
 pub(crate) mod file;
 pub(crate) mod git;
 pub(crate) mod pkg;
@@ -37,6 +38,7 @@ pub(crate) enum Action {
         msg: Option<String>,
     },
     Defaults(defaults::Spec),
+    Download(download::Spec),
     File(file::Spec),
     Git(git::Spec),
     Template(template::Spec),
@@ -156,6 +158,7 @@ impl Action {
                 | Action::Pkg(_)
                 | Action::Git(_)
                 | Action::Defaults(_)
+                | Action::Download(_)
         )
     }
 }
@@ -289,6 +292,11 @@ impl Action {
 
             "defaults" => match defaults::parse(step, engine, ctx, raw)? {
                 Some(spec) => Action::Defaults(spec),
+                None => return Ok(None),
+            },
+
+            "download" => match download::parse(step, engine, ctx, raw)? {
+                Some(spec) => Action::Download(spec),
                 None => return Ok(None),
             },
 

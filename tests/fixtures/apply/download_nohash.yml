@@ -1,0 +1,10 @@
+---
+# No `sha256`: §6.9 says a present `dest` is `ok` and is never fetched again,
+# because a URL is not state.
+- vars:
+    scratch: "{{ env.PROVISION_SCRATCH }}"
+
+- name: The artifact
+  download:
+    url: "{{ url }}"
+    dest: "{{ scratch }}/artifact.bin"

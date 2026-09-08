@@ -459,3 +459,15 @@ fn a_defaults_step_that_cannot_mean_what_it_says_is_rejected_at_parse() {
     assert!(text.contains("must not run under `sudo`"), "{text}");
     assert_positioned(&text);
 }
+
+// ── `download` (spec §6.9) ────────────────────────────────────────────────
+
+#[test]
+fn a_sha256_that_is_not_a_digest_is_rejected_at_parse() {
+    // A truncated or mistyped digest would fail every fetch with a mismatch,
+    // which reads as a bad download rather than as a bad plan.
+    let (code, text) = validate("download_bad_sha.yml");
+    assert_eq!(code, EXIT_VALIDATION, "{text}");
+    assert!(text.contains("is not a sha256 digest"), "{text}");
+    assert_positioned(&text);
+}

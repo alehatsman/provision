@@ -344,6 +344,14 @@ impl Runner {
                 },
                 None,
             ),
+            Action::Download(spec) => (
+                if act {
+                    spec.apply(&ctx)
+                } else {
+                    spec.plan(&ctx)
+                },
+                None,
+            ),
             Action::Git(spec) => (
                 if act {
                     spec.apply(&ctx)

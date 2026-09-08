@@ -2921,3 +2921,198 @@ fn a_no_probe_plan_lists_one_line_per_defaults_key() {
     assert_eq!(steps, 3, "{text}");
     assert!(text.contains("3 steps · 3 would run (unprobed)"), "{text}");
 }
+
+// ── `download` (spec §6.9) ────────────────────────────────────────────────
+
+/// The bytes every download test serves, and their published digest. Written
+/// out rather than computed so a wrong digest encoding fails here instead of
+/// looking like a bad download.
+const BODY: &[u8] = b"provision\n";
+const BODY_SHA: &str = "9afbc07eff35a28137e045624516e27201e86b89d3727b6ebecf0e6b49f65b0e";
+/// The digest of something else, for the mismatch case.
+const OTHER_SHA: &str = "a1621be95040239ee14362c16e20510ddc20f527d772d823b2a1679b33f5cd74";
+
+/// A local HTTP listener, so the 404 case is a real non-2xx response rather
+/// than a stand-in. Thirty lines of `std::net` beats a dependency or a
+/// `python3 -m http.server` the suite would then need on every machine.
+///
+/// `GET /file` is the body; anything else is 404. The thread runs until the
+/// test process exits.
+fn http_server() -> String {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind a local listener");
+    let port = listener
+        .local_addr()
+        .expect("the port the OS handed out")
+        .port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut s) = stream else { continue };
+            let mut buf = [0u8; 1024];
+            let n = s.read(&mut buf).unwrap_or(0);
+            let head = String::from_utf8_lossy(buf.get(..n).unwrap_or(&[])).into_owned();
+            let reply: Vec<u8> = if head.starts_with("GET /file ") {
+                let mut v = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    BODY.len()
+                )
+                .into_bytes();
+                v.extend_from_slice(BODY);
+                v
+            } else {
+                b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec()
+            };
+            // A client that hung up mid-reply is the 404 test's own doing:
+            // curl closes as soon as it has what it needs.
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "nothing to do if the client hung up"
+            )]
+            let _ = s.write_all(&reply);
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "nothing to do if the client hung up"
+            )]
+            let _ = s.flush();
+        }
+    });
+    format!("http://127.0.0.1:{port}")
+}
+
+/// A `file://` URL for a source file the test wrote.
+fn file_url(path: &Path) -> String {
+    format!("file://{}", path.display())
+}
+
+fn dl_vars(url: &str, sha: &str) -> Vec<String> {
+    vec![
+        "--var".to_string(),
+        format!("url={url}"),
+        "--var".to_string(),
+        format!("sha={sha}"),
+    ]
+}
+
+fn artifact_in(scratch: &Path) -> PathBuf {
+    scratch.join("deep/nest/artifact.bin")
+}
+
+#[test]
+fn download_verifies_the_hash_then_never_fetches_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source.bin");
+    std::fs::write(&source, BODY).unwrap();
+    let args = dl_vars(&file_url(&source), BODY_SHA);
+    let args = as_args(&args);
+
+    // Plan never fetches (§6.9) but says what it would do.
+    let path = fixture("download.yml");
+    let mut argv = vec!["plan", path.to_str().unwrap()];
+    argv.extend_from_slice(&args);
+    let out = run_in(dir.path(), &argv);
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert!(
+        line_for(&text, "The artifact").contains("would change"),
+        "{text}"
+    );
+    assert!(!artifact_in(dir.path()).exists(), "plan fetched something");
+
+    let (code, first) = apply(dir.path(), "download.yml", &args);
+    assert_eq!(code, 0, "{first}");
+    assert!(
+        line_for(&first, "The artifact").contains("changed"),
+        "{first}"
+    );
+    let got = artifact_in(dir.path());
+    assert_eq!(std::fs::read(&got).unwrap(), BODY, "wrong content");
+    // `mode` and the parents are `file`'s rules (§6.3).
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&got).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "mode was not applied");
+    }
+
+    // §6.9: a matching hash is `ok` with no network. Removing the source
+    // proves the second run never reached for it.
+    std::fs::remove_file(&source).unwrap();
+    let (code, second) = apply(dir.path(), "download.yml", &args);
+    assert_eq!(code, 0, "{second}");
+    assert_eq!(verdict(&second, "The artifact"), "ok", "{second}");
+}
+
+#[test]
+fn a_hash_that_does_not_match_fails_naming_both_and_leaves_dest_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source.bin");
+    std::fs::write(&source, BODY).unwrap();
+
+    // Something is already there, and it must survive a failed fetch.
+    let dest = artifact_in(dir.path());
+    std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+    std::fs::write(&dest, b"the file that was already here\n").unwrap();
+
+    let args = dl_vars(&file_url(&source), OTHER_SHA);
+    let args = as_args(&args);
+    let (code, out) = apply(dir.path(), "download.yml", &args);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("is not the declared file"), "{out}");
+    assert!(
+        out.contains(OTHER_SHA),
+        "the declared hash is not named:\n{out}"
+    );
+    assert!(
+        out.contains(BODY_SHA),
+        "the received hash is not named:\n{out}"
+    );
+    assert_eq!(
+        std::fs::read(&dest).unwrap(),
+        b"the file that was already here\n",
+        "dest was replaced by a file that failed its check"
+    );
+}
+
+#[test]
+fn a_non_2xx_response_fails_and_writes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = http_server();
+
+    let ok = dl_vars(&format!("{base}/file"), BODY_SHA);
+    let ok = as_args(&ok);
+    let (code, served) = apply(dir.path(), "download.yml", &ok);
+    assert_eq!(code, 0, "{served}");
+    assert_eq!(std::fs::read(artifact_in(dir.path())).unwrap(), BODY);
+
+    std::fs::remove_file(artifact_in(dir.path())).unwrap();
+    let missing = dl_vars(&format!("{base}/missing"), BODY_SHA);
+    let missing = as_args(&missing);
+    let (code, out) = apply(dir.path(), "download.yml", &missing);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        !artifact_in(dir.path()).exists(),
+        "a 404 left a file behind"
+    );
+}
+
+#[test]
+fn without_a_sha256_an_existing_dest_is_ok_and_is_never_fetched() {
+    let dir = tempfile::tempdir().unwrap();
+    // A URL that cannot resolve, so any fetch at all fails the step.
+    let args = vec![
+        "--var".to_string(),
+        "url=https://nowhere.invalid/thing".to_string(),
+    ];
+    let args = as_args(&args);
+
+    let (code, out) = apply(dir.path(), "download_nohash.yml", &args);
+    assert_eq!(
+        code, 1,
+        "a missing dest with no hash must still fetch:\n{out}"
+    );
+
+    std::fs::write(dir.path().join("artifact.bin"), b"whatever\n").unwrap();
+    let (code, second) = apply(dir.path(), "download_nohash.yml", &args);
+    assert_eq!(code, 0, "{second}");
+    assert_eq!(verdict(&second, "The artifact"), "ok", "{second}");
+}

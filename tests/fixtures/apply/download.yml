@@ -1,0 +1,14 @@
+---
+# The url and the digest come from the command line, so one fixture covers a
+# file:// source, a local listener, a good hash and a bad one. `dest` is two
+# levels below the scratch root: `download` creates parents the way `file`
+# does, and takes `mode` the same way.
+- vars:
+    scratch: "{{ env.PROVISION_SCRATCH }}"
+
+- name: The artifact
+  download:
+    url: "{{ url }}"
+    dest: "{{ scratch }}/deep/nest/artifact.bin"
+    sha256: "{{ sha }}"
+    mode: "0600"

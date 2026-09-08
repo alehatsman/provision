@@ -1,0 +1,5 @@
+- name: a digest that is not one
+  download:
+    url: https://example.invalid/thing
+    dest: /tmp/thing
+    sha256: "not-a-digest"
