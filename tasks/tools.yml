@@ -46,9 +46,27 @@ steps:
     unless: |
       set -eu
       cd "{{ rq_dir }}" 2>/dev/null || exit 1
+
+      # A tag is immutable, so once it is on disk the answer needs no network.
+      # Short-circuit before the fetch: an offline machine must not fail the
+      # pin step for want of a remote it has nothing to ask.
+      #
+      # `^{commit}` is not optional. An annotated tag's ref resolves to the tag
+      # object, never to the commit HEAD is at, so without it this comparison
+      # is false forever and the short-circuit silently never fires -- which
+      # looks exactly like working, just always fetching.
+      if git rev-parse --verify --quiet "refs/tags/{{ rq_version }}" >/dev/null &&
+         [ "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/{{ rq_version }}^{commit}")" ]
+      then
+        exit 0
+      fi
+
+      # Otherwise the remote is the only source of truth: a branch pin moves
+      # under the checkout when the remote advances, and a tag that is not on
+      # disk yet has to be fetched before it can be checked out. A fetch writes
+      # refs and nothing else, so `plan` may run it -- and has to, or it calls
+      # a checkout converged when it is a commit behind.
       git fetch --quiet --tags origin || exit 1
-      # On the tag it names, or level with the branch it names. Either is
-      # already pinned; anything else runs the step.
       [ "$(git describe --tags --exact-match 2>/dev/null || true)" = "{{ rq_version }}" ] ||
         [ "$(git rev-parse HEAD)" = "$(git rev-parse "origin/{{ rq_version }}" 2>/dev/null || echo none)" ]
 
