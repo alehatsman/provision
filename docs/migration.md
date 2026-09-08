@@ -409,10 +409,10 @@ Expected `plan` diffs on an already-converged machine after migration:
   output to stderr, so the terminal still shows progress while the shell
   keeps the record; there is no `--log` flag and there will not be one.
 
-  **`just` is installed on no machine in this fleet and provisioned by
-  nothing**, so these recipes are documentation until it is. Adding it to a
-  package list is a new fleet dependency, and therefore the owner's call,
-  not something to slip in alongside the recipes.
+  `just` is a fleet dependency these recipes introduced, and the owner
+  ruled on it on 2026-09-08: it goes in all three platform package lists
+  (`just` on apt, pacman and brew alike). Until a machine has been applied
+  since, run the recipe's command by hand — it is one line.
 
 - `mgitci.yml`: replace the `mooncake validate` / `mooncake plan --no-inspect`
   steps with `provision validate` / `provision plan --plan-no-probe`. The CI

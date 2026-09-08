@@ -27,8 +27,6 @@ Open, and all of it the owner's — none of it can close from this machine:
 - Apply to each machine, main_pc WSL first and x1 last (migration.md §7
   steps 2–7). Every gate below that line is a real apply.
 - Build `provision-ci:latest` on main_pc. dotfiles CI is red until it exists.
-- `just` is installed on no machine and provisioned by nothing, so the
-  justfile apply recipes are documentation. Adding it is a fleet dependency.
 - Rulings: D1's windows-gnu amendment, D16, `--explain-var` (spec'd, not
   implemented, nothing asks for it), `--keep-going` (mooncake had it,
   provision does not), the hung-`unless` failure, and whether mooncake gets
@@ -319,9 +317,8 @@ Gate
   **Owner's**, for the same reason.
 - Building `provision-ci:latest` on main_pc. **Owner's** — CI stays red
   until it exists, which is why that switch landed last and alone.
-- `just` is installed on no machine in this fleet and provisioned by
-  nothing, so the apply recipes are documentation until it is. Adding it to
-  a package list is a new fleet dependency and the **owner's** call.
+- `just` was a new fleet dependency and the owner's call. Ruled 2026-09-08:
+  it goes in all three platform package lists. Closed.
 
 ## Order and dependencies
 
