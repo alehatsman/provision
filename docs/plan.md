@@ -25,7 +25,8 @@ Open, and all of it the owner's — none of it can close from this machine:
   implemented, nothing asks for it), `--keep-going` (mooncake had it,
   provision does not), the hung-`unless` failure, and whether mooncake gets
   uninstalled anywhere.
-- The tag, a `main` branch, and any push. The repo has none of the three.
+- The tag, a remote, and any push. `main` exists at `f788571`; the repo
+  has no remote and nothing has been pushed.
 
 Rust, one crate, one binary. Target: **6–9k lines of Rust** including
 tests, all seven actions, three platforms. If it passes 12k, something
