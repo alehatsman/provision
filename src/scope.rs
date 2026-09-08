@@ -38,22 +38,38 @@ pub struct Scope {
     own: Map,
     /// Only inside a component. Reachable as `props.<name>`.
     props: Option<Map>,
+    /// Spec §3.2: the component file's own directory, absolute. A shared
+    /// component that ships scripts has no other way to name them — a path
+    /// inside a shell string is not a path provision resolves.
+    component_dir: Option<String>,
 }
 
 impl Scope {
     pub fn root(globals: Rc<Globals>) -> Scope {
-        Scope { globals, inherited: Map::new(), own: Map::new(), props: None }
+        Scope {
+            globals,
+            inherited: Map::new(),
+            own: Map::new(),
+            props: None,
+            component_dir: None,
+        }
     }
 
-    /// A component's scope: the parent's variables, read-only, plus props.
-    pub fn child_with_props(&self, props: Map) -> Scope {
+    /// A component's scope: the parent's variables, read-only, plus props and
+    /// the component's own directory (§3.2). `dir` is the component file's
+    /// parent, made absolute — a relative one would be read against whatever
+    /// the process cwd happens to be, which under `run` is deliberately not
+    /// the component's directory.
+    pub fn child_with_props(&self, props: Map, dir: &std::path::Path) -> Scope {
         let mut inherited = self.inherited.clone();
         inherited.extend(self.own.clone());
+        let dir = std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf());
         Scope {
             globals: Rc::clone(&self.globals),
             inherited,
             own: Map::new(),
             props: Some(props),
+            component_dir: Some(dir.display().to_string()),
         }
     }
 
@@ -90,6 +106,9 @@ impl Scope {
         if let Some(p) = &self.props {
             m.insert("props".to_string(), Value::from(p.clone()));
         }
+        if let Some(d) = &self.component_dir {
+            m.insert("component_dir".to_string(), Value::from(d.clone()));
+        }
         m
     }
 }
@@ -98,6 +117,7 @@ impl Scope {
 mod tests {
     use super::*;
     use crate::facts::Facts;
+    use std::path::Path;
 
     fn globals(cli: &[(&str, &str)]) -> Rc<Globals> {
         let cli = cli.iter().map(|(k, v)| (k.to_string(), Value::from(*v))).collect();
@@ -129,7 +149,7 @@ mod tests {
         let mut parent = Scope::root(globals(&[]));
         parent.set("shared", Value::from("p"));
 
-        let mut child = parent.child_with_props(Map::new());
+        let mut child = parent.child_with_props(Map::new(), Path::new("/c"));
         assert_eq!(child.get("shared").unwrap().to_string(), "p");
         child.set("shared", Value::from("c"));
         child.set("only_child", Value::from(1));
@@ -139,12 +159,25 @@ mod tests {
         assert!(parent.get("only_child").is_none());
     }
 
+    // Spec §3.2: a shared component that ships scripts reaches them through
+    // this and nothing else, so it has to be absolute and it has to be the
+    // component's own directory, not the caller's.
+    #[test]
+    fn a_component_scope_carries_its_own_directory() {
+        let parent = Scope::root(globals(&[]));
+        let child = parent.child_with_props(Map::new(), Path::new("/tools/rq"));
+        assert_eq!(child.ctx().get_attr("component_dir").unwrap().to_string(), "/tools/rq");
+        // A plan's own scope has none: `import` shares the caller's scope and
+        // is not a component.
+        assert!(parent.ctx().get_attr("component_dir").unwrap().is_undefined());
+    }
+
     #[test]
     fn props_are_their_own_namespace() {
         let parent = Scope::root(globals(&[]));
         let mut props = Map::new();
         props.insert("variant".to_string(), Value::from("dark"));
-        let child = parent.child_with_props(props);
+        let child = parent.child_with_props(props, Path::new("/c"));
         let ctx = child.ctx();
         assert_eq!(ctx.get_attr("props").unwrap().get_attr("variant").unwrap().to_string(), "dark");
         // No collision with a same-named variable.

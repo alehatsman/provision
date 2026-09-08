@@ -107,6 +107,17 @@ Call site:
   Wrong type after template rendering: error. All three at `validate`
   time, not at apply time.
 - Inside the component, props are reachable as `props.<name>`.
+- Inside the component, **`component_dir`** is the absolute directory of the
+  component file. A path in `file`, `template`, `use` or `cwd` resolves
+  against the file that names it, but a path inside a shell string does not,
+  and a shared component that ships scripts has no other way to reach them:
+  `bash "{{ component_dir }}/scripts/gate.sh"`. `import` does not get it —
+  an imported file shares the caller's scope and is not a component.
+  **Provisional, decided by review 2026-09-08, owner to confirm.**
+- A prop's `default` is taken **as written**, not rendered: `default: "{{ home }}"`
+  is the literal seven characters, not a path. Defaults are data in the
+  component file, and the value a call site passes is the one that gets
+  rendered. A default that has to be computed is a `vars` step instead.
 - `description` is optional, a plain string, and only read by
   `provision run <dir>/` when listing. Any other root key is an error.
 - A component is also a **task**: `provision run <component.yml>` runs it as
@@ -119,7 +130,8 @@ Lowest to highest:
 1. Facts (§5).
 2. `vars` / `vars_file` in file order, later wins.
 3. Command line `--var key=value` and `--vars-file path` (repeatable, later wins).
-4. Inside a component, `props.*` (separate namespace, no collision).
+4. Inside a component, `props.*` (separate namespace, no collision), and
+   `component_dir` (§3.2).
 
 `env.*` exposes the process environment read-only.
 
@@ -182,7 +194,7 @@ changed_when: result.rc == 0
 | `timeout` | duration | 10m | Kill the step and fail. `30s`, `5m`, `1h`. |
 | `retry` | `{attempts, delay}` | none | Re-run on failure. `delay` is a duration. Output shows attempt N/M. |
 | `env` | mapping | {} | Extra environment for `shell`, `cmd`, `unless`. Templated. |
-| `cwd` | path | plan file dir | Working directory for `shell`, `cmd`, `unless`. |
+| `cwd` | path | plan file dir, or the invocation directory under `run` | Working directory for `shell`, `cmd`, `unless`. Under `run` the default is the directory provision was invoked from, for every step including one inside a `use`d component: a task is a command in the repo the operator is standing in, and a shared gate checked out elsewhere must not gate its own checkout. An explicit `cwd:` resolves against the step's own file, under `run` as everywhere else. **Provisional, decided by review 2026-09-08, owner to confirm.** |
 | `tags` | list | [] | For `--tags` selection (§8). |
 | `register` | identifier | — | Store the step result as a variable: `{rc, stdout, stderr, changed, skipped}`. |
 | `changed_when` | expr | action-defined | Override the changed verdict. `result` is in scope. |
@@ -625,8 +637,11 @@ provision --version
 
   A trailing `/` lists the directory: one line per `.yml` file, its name and
   its `description`, nothing run.
-  `--step '<yaml>'` takes exactly one step as a YAML mapping, runs it in a
-  scope holding only facts and `--var`/`--vars-file`, and reports it —
+  Every step's default `cwd` under `run` is the directory provision was
+  invoked from, not the step's own file — §4, and the one other place `run`
+  differs from `apply`. `--step '<yaml>'` takes exactly one step as a YAML
+  mapping, runs it in a scope holding only facts and `--var`/`--vars-file`,
+  and reports it —
   the contract a CI runner needs to exec steps one at a time. `--tags` and
   `--skip-tags` apply as for `apply`. There is no plan for `run` and no
   `--plan-no-probe`; a task list has nothing to probe.

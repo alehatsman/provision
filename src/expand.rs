@@ -172,7 +172,8 @@ impl Expander {
                 return Ok(());
             }
         };
-        let mut scope = Scope::root(Rc::clone(&self.globals)).child_with_props(props);
+        let dir = component.path.parent().unwrap_or(Path::new("."));
+        let mut scope = Scope::root(Rc::clone(&self.globals)).child_with_props(props, dir);
         self.walk(&component.steps, &mut scope, 0, &BTreeSet::new());
         Ok(())
     }
@@ -412,7 +413,8 @@ impl Expander {
             Ok(props) => {
                 // `use` runs in a child scope: the parent is visible read-only
                 // and the component's own vars do not leak back (spec §3.1).
-                let mut child = scope.child_with_props(props);
+                let dir = component.path.parent().unwrap_or(Path::new("."));
+                let mut child = scope.child_with_props(props, dir);
                 self.walk(&component.steps, &mut child, depth + 1, tags);
             }
             Err(ds) => {
@@ -739,6 +741,13 @@ impl Expander {
             // `provision apply x1.yml` failed where `./x1.yml` worked. When
             // the plan is a bare filename its directory *is* the process cwd,
             // so inheriting is both simpler and right.
+            // Under `run` the default is the invocation directory instead,
+            // for every step including one inside a `use`d component. A task
+            // is a command in the repo the operator is standing in; a shared
+            // gate checked out under ~/.cache would otherwise `cd` to its own
+            // toplevel and gate itself. `None` is exactly "inherit the
+            // process cwd", so there is nothing to compute.
+            None if matches!(self.mode, Mode::Run) => None,
             None => step
                 .at
                 .file

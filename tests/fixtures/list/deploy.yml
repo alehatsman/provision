@@ -1,0 +1,6 @@
+---
+description: stage a build and stamp it
+steps:
+  - name: Nothing
+    shell: "true"
+    changed_when: "false"

@@ -1,0 +1,5 @@
+---
+steps:
+  - name: A component with no description
+    shell: "true"
+    changed_when: "false"

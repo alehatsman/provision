@@ -1,0 +1,8 @@
+---
+description: a component in its own directory, used from one above it
+steps:
+  - name: Where the component lives
+    shell: echo "dir={{ component_dir }}"
+
+  - name: Where the step runs
+    shell: echo "cwd=$(pwd)"

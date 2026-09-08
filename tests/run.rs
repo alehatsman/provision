@@ -14,6 +14,10 @@ fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/run").join(name)
 }
 
+fn listing_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/list")
+}
+
 fn provision(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_provision"))
         .args(args)
@@ -147,9 +151,12 @@ fn an_ungated_step_is_ok_under_run_and_unknown_under_apply() {
 
 // ── listing ───────────────────────────────────────────────────────────────
 
+// The listing has its own fixture directory rather than sharing `run/`: a
+// snapshot that changes whenever an unrelated fixture is added is a snapshot
+// nobody reads.
 #[test]
 fn a_trailing_slash_lists_the_directory() {
-    let dir = format!("{}/", fixture("").display());
+    let dir = format!("{}/", listing_dir().display());
     let (code, out) = run(&["run", &dir]);
     assert_eq!(code, 0, "{out}");
     insta::assert_snapshot!("listing", out);
@@ -205,4 +212,43 @@ fn a_step_from_a_string_carries_its_own_position() {
     let (code, out) = run(&["run", "--step", "name: x\nshell: y\nbogus: 1"]);
     assert_eq!(code, EXIT_VALIDATION, "{out}");
     assert!(out.contains("<step>:"), "the diagnostic should be located:\n{out}");
+}
+
+// ── component_dir and the run cwd ─────────────────────────────────────────
+
+// Spec §3.2 and §4, the two things a shared quality gate needs. `inner.yml`
+// lives one directory down and is `use`d from above, so the two answers are
+// different directories and a test that confused them would show it.
+#[test]
+fn a_used_component_knows_its_own_directory_and_runs_in_the_invocation_one() {
+    let path = fixture("outer.yml");
+    let (code, out) = run(&["run", path.to_str().unwrap(), "--verbose"]);
+    assert_eq!(code, 0, "{out}");
+
+    let root = env!("CARGO_MANIFEST_DIR");
+    // §3.2: absolute, and the component's own directory — not the caller's.
+    assert!(
+        out.contains(&format!("dir={root}/tests/fixtures/run/nested")),
+        "component_dir should be the component's own directory:\n{out}"
+    );
+    // §4: the invocation directory, even for a step inside a `use`. A shared
+    // gate checked out under ~/.cache must gate the repo you are standing in.
+    assert!(
+        out.contains(&format!("cwd={root}\n")),
+        "a run step should default to the invocation directory:\n{out}"
+    );
+}
+
+// The same file under `apply` keeps the old rule, which is what makes the
+// change safe for every machine plan in the fleet.
+#[test]
+fn apply_still_runs_a_step_in_its_own_files_directory() {
+    let plan = fixture("apply_cwd.yml");
+    let (code, out) = run(&["apply", plan.to_str().unwrap(), "--verbose"]);
+    assert_eq!(code, 0, "{out}");
+    let root = env!("CARGO_MANIFEST_DIR");
+    assert!(
+        out.contains(&format!("cwd={root}/tests/fixtures/run\n")),
+        "apply must still use the step's file directory:\n{out}"
+    );
 }

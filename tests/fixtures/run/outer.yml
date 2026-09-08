@@ -1,0 +1,5 @@
+---
+description: uses a component that lives in another directory
+steps:
+  - name: Use the nested component
+    use: ./nested/inner.yml

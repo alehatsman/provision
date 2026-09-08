@@ -2,6 +2,6 @@
 source: tests/run.rs
 expression: out
 ---
-  not_a_component           (not a component)
-  plain                     nothing but an ungated step
-  task                      a task with one required prop and one defaulted
+  a_plan                    (not a component)
+  deploy                    stage a build and stamp it
+  undescribed               
