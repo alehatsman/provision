@@ -18,6 +18,10 @@ impl Json {
         Json { base }
     }
 
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "a failed write to the terminal has nowhere to be reported: the terminal is where a report would go"
+    )]
     fn emit(&self, v: &serde_json::Value) {
         let mut out = std::io::stdout().lock();
         let _ = writeln!(out, "{v}");

@@ -38,6 +38,10 @@ impl Sudo {
                 .spawn()
                 .and_then(|mut c| {
                     if let Some(mut p) = c.stdin.take() {
+                        #[expect(
+                            clippy::let_underscore_must_use,
+                            reason = "sudo may have a cached credential and never read stdin"
+                        )]
                         let _ = p.write_all(format!("{password}\n").as_bytes());
                     }
                     c.wait()
@@ -108,6 +112,8 @@ fn read_password() -> Result<String, Diag> {
 
     let fail = |m: &str| Diag::file_level("sudo", m.to_string());
     eprint!("  [sudo] password: ");
+    // The prompt is on stderr; a failed flush of stderr has nowhere to go.
+    #[expect(clippy::unused_result_ok, reason = "the prompt is best-effort")]
     std::io::stderr().flush().ok();
 
     let mut term: libc::termios = unsafe { std::mem::zeroed() };

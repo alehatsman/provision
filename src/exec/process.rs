@@ -128,6 +128,10 @@ fn run_raw(s: &Spawn<'_>) -> std::io::Result<Raw> {
     {
         // A child that never reads stdin makes this a broken pipe, which is
         // not an error here — sudo may already have a cached credential.
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "a broken pipe here is the documented case above"
+        )]
         let _ = pipe.write_all(text.as_bytes());
     }
 
@@ -168,12 +172,16 @@ fn wait_for(child: &mut Child, pid: u32, timeout: Duration) -> How {
         }
         if interrupted() {
             kill_group(pid);
+            // Reaping a process we just killed. It is going to exit, and its
+            // status is not the answer -- `How` already is.
+            #[expect(clippy::let_underscore_must_use, reason = "reaping a killed child")]
             let _ = child.wait();
             return How::Interrupted;
         }
         let now = Instant::now();
         if now >= deadline {
             kill_group(pid);
+            #[expect(clippy::let_underscore_must_use, reason = "reaping a killed child")]
             let _ = child.wait();
             return How::TimedOut;
         }
@@ -232,6 +240,11 @@ fn drain(pipe: Option<impl Read + Send + 'static>, stream: bool, is_err: bool) -
                 }
             }
         }
+        // The receiver is gone only when the run is already unwinding.
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "nothing to do if the reader hung up"
+        )]
         let _ = tx.send(buf);
     });
     Reader(Some((h, rx)))
@@ -243,6 +256,10 @@ impl Reader {
     fn join(self) -> Option<Vec<u8>> {
         let (h, rx) = self.0?;
         let text = rx.recv().ok();
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the output is already in hand"
+        )]
         let _ = h.join();
         text
     }

@@ -267,6 +267,10 @@ fn run() -> Result<u8, Diag> {
     let cli = match Cli::try_parse() {
         Ok(c) => c,
         Err(e) => {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "reporting a usage error; if that write fails there is nowhere left to report"
+            )]
             let _ = e.print();
             return Ok(if e.use_stderr() { EXIT_USAGE } else { EXIT_OK });
         }
@@ -509,6 +513,10 @@ fn run() -> Result<u8, Diag> {
 
 fn report(ex: &Expander, base: &Path, plan: Option<&Path>) {
     let mut err = std::io::stderr();
+    #[expect(
+        clippy::unused_result_ok,
+        reason = "writing diagnostics to the stream diagnostics go to"
+    )]
     output::diagnostics(&mut err, &ex.diags, base).ok();
     let n = ex.diags.len();
     match plan {

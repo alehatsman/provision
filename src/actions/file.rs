@@ -761,6 +761,10 @@ impl Spec {
             return Ok(());
         }
         // -sfn without a shell: remove whatever is there, then link.
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "removing what may not exist; the symlink below is the operation"
+        )]
         let _ = std::fs::remove_file(&self.path);
         symlink(target, &self.path).map_err(|e| format!("cannot link {}: {e}", self.path))
     }

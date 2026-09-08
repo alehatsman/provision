@@ -78,6 +78,10 @@ impl Text {
         self
     }
 
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "a failed write to the terminal has nowhere to be reported: the terminal is where a report would go"
+    )]
     fn write(&self, f: std::fmt::Arguments<'_>) {
         match self.target {
             Target::Out => {
@@ -277,6 +281,13 @@ impl Spinner {
         }
     }
 
+    /// The spinner thread only ever loops on an atomic flag, so a join
+    /// error means it panicked -- and the run is already reporting whatever
+    /// caused that.
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "nothing to do if the spinner thread panicked"
+    )]
     fn stop(self) {
         self.stop.store(true, Ordering::Relaxed);
         let _ = self.handle.join();
@@ -286,6 +297,10 @@ impl Spinner {
     }
 }
 
+#[expect(
+    clippy::let_underscore_must_use,
+    reason = "a failed write to the terminal has nowhere to be reported: the terminal is where a report would go"
+)]
 fn emit(target: Target, s: &str) {
     match target {
         Target::Out => {

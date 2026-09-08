@@ -621,6 +621,12 @@ fn keep_going_does_not_carry_the_run_past_ctrl_c() {
         .unwrap();
 
     std::thread::sleep(std::time::Duration::from_millis(600));
+    // The assertions below are about what the child did with the signal, so
+    // whether `kill` itself succeeded is not what this test is measuring.
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the child's own output is the assertion"
+    )]
     let _ = Command::new("kill")
         .args(["-INT", &child.id().to_string()])
         .status();
@@ -650,6 +656,12 @@ fn ctrl_c_kills_the_step_and_exits_130() {
 
     // Long enough for the step to be running, short enough to stay a test.
     std::thread::sleep(std::time::Duration::from_millis(600));
+    // The assertions below are about what the child did with the signal, so
+    // whether `kill` itself succeeded is not what this test is measuring.
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the child's own output is the assertion"
+    )]
     let _ = Command::new("kill")
         .args(["-INT", &child.id().to_string()])
         .status();
@@ -1033,6 +1045,10 @@ fn a_file_that_cannot_be_read_says_sudo_is_how() {
         .unwrap();
         let out = run_in(dir.path(), &["apply", plan.to_str().unwrap()]);
         let text = String::from_utf8_lossy(&out.stdout).into_owned();
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort cleanup of a root-owned fixture"
+        )]
         let _ = Command::new("sudo")
             .args(["-n", "rm", "-f", secret.to_str().unwrap()])
             .status();
@@ -1323,6 +1339,10 @@ impl Unit {
         )
         .ok()?;
         if !systemctl(&["daemon-reload"]) {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "unwinding a unit that was never accepted"
+            )]
             let _ = std::fs::remove_file(&path);
             return None;
         }
@@ -1331,6 +1351,9 @@ impl Unit {
 }
 
 impl Drop for Unit {
+    // Teardown: each step is best-effort, and a failure here must not mask
+    // the test's own result.
+    #[expect(clippy::let_underscore_must_use, reason = "best-effort teardown")]
     fn drop(&mut self) {
         let _ = systemctl(&["stop", &self.name]);
         let _ = std::fs::remove_file(&self.path);
