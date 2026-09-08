@@ -655,7 +655,18 @@ impl Expander {
         // never the process cwd — the same rule every path in a plan follows.
         let cwd = match text(step.mods.cwd) {
             Some(dir) => Some(load::resolve(step.at.file, &expanduser(&dir))),
-            None => step.at.file.parent().map(Path::to_path_buf),
+            // `Path::new("x1.yml").parent()` is `Some("")`, not `None`, and
+            // `current_dir("")` is ENOENT — which surfaced as the baffling
+            // "cannot run `bash`: No such file or directory". So
+            // `provision apply x1.yml` failed where `./x1.yml` worked. When
+            // the plan is a bare filename its directory *is* the process cwd,
+            // so inheriting is both simpler and right.
+            None => step
+                .at
+                .file
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .map(Path::to_path_buf),
         };
 
         Some(Prepared {
