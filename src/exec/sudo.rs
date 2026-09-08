@@ -106,6 +106,10 @@ impl Sudo {
 /// Read a password from the terminal with echo off. `rpassword` in twenty
 /// lines; the crate would be the fourth dependency added for this phase.
 #[cfg(unix)]
+#[expect(
+    unsafe_code,
+    reason = "reading a password without echo needs termios; std has no equivalent"
+)]
 fn read_password() -> Result<String, Diag> {
     use std::io::BufRead;
 
@@ -115,11 +119,19 @@ fn read_password() -> Result<String, Diag> {
     #[expect(clippy::unused_result_ok, reason = "the prompt is best-effort")]
     std::io::stderr().flush().ok();
 
+    // SAFETY: `termios` is a plain C struct of integers and arrays, so an
+    // all-zero value is a valid one; `tcgetattr` overwrites it wholesale
+    // before anything reads it, and its return code says whether it did.
     let mut term: libc::termios = unsafe { std::mem::zeroed() };
+    // SAFETY: `tcgetattr` writes through the pointer to a `termios` we own
+    // and outlives the call. A non-zero return means stdin is not a tty, and
+    // `have_tty` is what everything below keys on.
     let have_tty = unsafe { libc::tcgetattr(libc::STDIN_FILENO, &mut term) } == 0;
     let restore = term;
     if have_tty {
         term.c_lflag &= !libc::ECHO;
+        // SAFETY: reached only when `tcgetattr` succeeded, so stdin is a tty
+        // and `term` is the settings it just handed us with ECHO cleared.
         unsafe { libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &term) };
     }
 
@@ -127,6 +139,9 @@ fn read_password() -> Result<String, Diag> {
     let read = std::io::stdin().lock().read_line(&mut line);
 
     if have_tty {
+        // SAFETY: `restore` is the copy taken before ECHO was cleared, so
+        // this puts the terminal back exactly as it was found. Unconditional
+        // on how the read went: a failed read must not leave echo off.
         unsafe { libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &restore) };
     }
     eprintln!();

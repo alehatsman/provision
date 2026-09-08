@@ -273,7 +273,9 @@ fn domain_root(user: bool) -> String {
 }
 
 #[cfg(unix)]
+#[expect(unsafe_code, reason = "std has no getuid")]
 fn users_uid() -> String {
+    // SAFETY: `getuid` reads a field of the calling process and cannot fail.
     (unsafe { libc::getuid() }).to_string()
 }
 

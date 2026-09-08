@@ -25,7 +25,12 @@ pub(crate) fn interrupted() -> bool {
 }
 
 /// Install the Ctrl-C handler. Idempotent; safe to call from `main` only.
+#[expect(unsafe_code, reason = "libc::signal has no safe equivalent in std")]
 pub(crate) fn catch_interrupts() {
+    // SAFETY: `on_sigint` is an `extern "C"` function that only stores into
+    // an `AtomicBool`, which is async-signal-safe. Installing a handler is
+    // sound as long as the handler itself is, and this one does nothing
+    // else. Called from `main` before any thread is spawned.
     #[cfg(unix)]
     unsafe {
         extern "C" fn on_sigint(_: libc::c_int) {
@@ -283,18 +288,28 @@ fn own_process_group(cmd: &mut Command) {
 /// Kill the child *and everything it started*. TERM first so a package
 /// manager mid-write gets to finish its transaction, then KILL.
 #[cfg(unix)]
+#[expect(
+    unsafe_code,
+    reason = "killing a process *group* is not in std; Command::process_group is"
+)]
 fn kill_group(pid: u32) {
     let pgid = pid as libc::pid_t;
+    // SAFETY: `killpg` takes a pgid and a signal and touches no memory. The
+    // pgid is this process's own child, put in its own group by
+    // `own_process_group` at spawn, so the worst a stale one can do is fail
+    // with ESRCH -- which the loop below reads as "already gone".
     unsafe {
         libc::killpg(pgid, libc::SIGTERM);
     }
     for _ in 0..20 {
         std::thread::sleep(Duration::from_millis(100));
         // ESRCH means the group is gone; anything else means it is still there.
+        // SAFETY: signal 0 is the existence check; it delivers nothing.
         if unsafe { libc::killpg(pgid, 0) } != 0 {
             return;
         }
     }
+    // SAFETY: as above. TERM was given 2s to be polite; this is the end of it.
     unsafe {
         libc::killpg(pgid, libc::SIGKILL);
     }
