@@ -107,12 +107,24 @@ Then `provision apply tasks/ci-fast.yml` before a commit and
 `provision apply tasks/ci.yml` before a push.
 
 The gate itself is [rust-quality](https://github.com/alehatsman/rust-quality),
-pinned at a tag in `tasks/tools.yml` and checked out under
-`~/.cache/provision/tools/`. It ships config and scripts rather than wrappers,
-so `clippy.toml`, `rustfmt.toml`, `deny.toml` and `.cargo/config.toml` in this
-repo are its files, copied verbatim, and the `[workspace.lints]` block in
-`Cargo.toml` is its canonical lint block — cargo has no include mechanism for
-manifests, so `tasks/lints-check.yml` reports drift instead.
+pinned in `tasks/tools.yml` and checked out under `~/.cache/provision/tools/`.
+Its presets are components, so each task here is one `use:` line:
+
+```yaml
+steps:
+  - name: full gate
+    use: ~/.cache/provision/tools/rust-quality/ci.yml
+```
+
+Nothing fetches at gate time. The checkout is a step in `tasks/tools.yml`,
+`creates`-gated like any other, so a version bump is one line there and
+offline works. rust-quality ships config as well as presets:
+`clippy.toml`, `rustfmt.toml`, `deny.toml` and `.cargo/config.toml` in this
+repo are its files, put here by `provision apply tasks/sync-config.yml` and
+re-checkable with it -- it reports `ok` on all four when they already match.
+The `[workspace.lints]` block in `Cargo.toml` is its canonical lint block;
+cargo has no include mechanism for manifests, so `tasks/lints-check.yml`
+reports drift instead of copying.
 
 **There is no CI for this repo yet.** No `mgitci.yml`, no Rust CI image; both
 wait on moongit's runner running a job as `provision apply job.yml --json`.

@@ -361,9 +361,18 @@ plan.md phase 5; migration.md §6.
 
 **First consumer.** provision's own repo, 2026-09-08: the `justfile` is
 gone, `tasks/` holds one component per task, and the quality gate is
-rust-quality's scripts, called by path from a pinned checkout. Dogfooding it found
-the two things the machine plans never would have — a component had no way to
-name its own directory, and a task inherited the wrong working directory.
+rust-quality's own presets, `use`d by file path from a checkout `tasks/tools.yml`
+clones and pins. That is the whole of the distribution story working as
+written: no registry, no fetch at gate time, a version bump is one line, and
+a preset is a component like any other. It took a change on the rust-quality
+side too -- its presets carried `name:` and `version:` root keys, which a
+component may not have, and the tag is the version anyway.
+
+Dogfooding it found four things the machine plans never would have: a
+component had no way to name its own directory, a task inherited the wrong
+working directory, an `apt-get install` that reports success can install
+nothing, and `component_dir` was empty for a component named by a bare
+filename.
 
 **Amended by the owner 2026-09-08, phase 5b: no `run` verb.** Building
 phase 5 and then dogfooding it showed that `run` made the same file mean

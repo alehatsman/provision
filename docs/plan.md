@@ -50,8 +50,10 @@ owner's. The dotfiles justfile stays until `tasks/` replaces it.
 
 This repo is D17's first consumer: its own `justfile` is gone, replaced by
 `tasks/`, and its quality gate is
-[rust-quality](https://github.com/alehatsman/rust-quality) pinned at a tag in
-`tasks/tools.yml`. `provision apply tasks/ci.yml` is what runs before a push.
+[rust-quality](https://github.com/alehatsman/rust-quality), pinned in
+`tasks/tools.yml` and `use`d by file path from that checkout -- each gate task
+is a `description:` and one `use:` line, not a script called by path.
+`provision apply tasks/ci.yml` is what runs before a push.
 That is the dogfood — it found `component_dir` (§3.2), the working-directory
 rule (§4), that an `apt-get install` reporting success can install nothing
 (§6.5), and finally that the `run` verb itself was the wrong shape (phase
