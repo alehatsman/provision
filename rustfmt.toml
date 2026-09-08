@@ -1,0 +1,17 @@
+# rust-quality — shared rustfmt configuration.
+#
+# STABLE OPTIONS ONLY. rustfmt silently ignores unstable keys on the stable
+# channel, so a config full of nightly options formats nothing and everyone
+# believes they are covered.
+#
+# The two everybody reaches for — `imports_granularity` and `group_imports` —
+# are still nightly-gated as of 2026-09 with no stabilization in sight. Do not
+# add them: either the whole fleet moves to a nightly rustfmt, or import
+# grouping stays a review concern. See docs/RUST.md.
+
+edition = "2024"
+style_edition = "2024"
+max_width = 100
+newline_style = "Unix"
+use_field_init_shorthand = true
+use_try_shorthand = true
