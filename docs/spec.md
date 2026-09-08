@@ -22,8 +22,9 @@ and a dry-run a person can trust.
 - Step modifiers: `name`, `when`, `unless`, `creates`, `sudo`, `timeout`,
   `retry`, `env`, `cwd`, `tags`, `register`, `changed_when`, `failed_when`.
 - Facts about the local machine.
-- Four commands: `validate`, `plan`, `apply`, `run`. `run` executes a
-  component as a task (§8, D17).
+- Four commands: `validate`, `plan`, `apply`, `list`. The first three take
+  a plan or a component as the root; a component's props come from `--prop`
+  (§8, D17). `list` names the components in a directory.
 - TTY and non-TTY output, `--json` event stream.
 
 **Out** (see README non-goals and decisions.md)
@@ -113,15 +114,17 @@ Call site:
   and a shared component that ships scripts has no other way to reach them:
   `bash "{{ component_dir }}/scripts/gate.sh"`. `import` does not get it —
   an imported file shares the caller's scope and is not a component.
-  **Provisional, decided by review 2026-09-08, owner to confirm.**
+  Decided by review, confirmed by the owner 2026-09-08.
 - A prop's `default` is taken **as written**, not rendered: `default: "{{ home }}"`
   is the literal seven characters, not a path. Defaults are data in the
   component file, and the value a call site passes is the one that gets
   rendered. A default that has to be computed is a `vars` step instead.
 - `description` is optional, a plain string, and only read by
-  `provision run <dir>/` when listing. Any other root key is an error.
-- A component is also a **task**: `provision run <component.yml>` runs it as
-  the root scope with props supplied by `--prop` (§8).
+  `provision list <dir>/`. Any other root key is an error.
+- A component is also a **task**: `provision apply <component.yml>` runs it
+  as the root scope with props supplied by `--prop`, and `plan` and
+  `validate` take it the same way (§8). A task step whose exit code is its
+  whole contract says `changed_when: false` and reads `ok` (§6.1).
 
 ### 3.3 Variables and precedence
 
@@ -194,7 +197,7 @@ changed_when: result.rc == 0
 | `timeout` | duration | 10m | Kill the step and fail. `30s`, `5m`, `1h`. |
 | `retry` | `{attempts, delay}` | none | Re-run on failure. `delay` is a duration. Output shows attempt N/M. |
 | `env` | mapping | {} | Extra environment for `shell`, `cmd`, `unless`. Templated. |
-| `cwd` | path | plan file dir, or the invocation directory under `run` | Working directory for `shell`, `cmd`, `unless`. Under `run` the default is the directory provision was invoked from, for every step including one inside a `use`d component: a task is a command in the repo the operator is standing in, and a shared gate checked out elsewhere must not gate its own checkout. An explicit `cwd:` resolves against the step's own file, under `run` as everywhere else. **Provisional, decided by review 2026-09-08, owner to confirm.** |
+| `cwd` | path | the invocation directory | Working directory for `shell`, `cmd`, `unless`, under every command and for every step, including one inside a `use`d component. A command runs where the operator is standing; a shared gate checked out elsewhere must not gate its own checkout. An explicit `cwd:` resolves against the step's own file, like every other path a plan names, and `component_dir` (§3.2) names a component's own directory for a path inside a shell string. Phase 5b, 2026-09-08: this used to be the step's file directory under `apply` and the invocation directory under `run`. Measured against the fleet, no step depended on the old default — zero `cwd:` modifiers, zero relative paths in shell strings — and one rule beats two. |
 | `tags` | list | [] | For `--tags` selection (§8). |
 | `register` | identifier | — | Store the step result as a variable: `{rc, stdout, stderr, changed, skipped}`. |
 | `changed_when` | expr | action-defined | Override the changed verdict. `result` is in scope. |
@@ -257,10 +260,12 @@ shell:                         # long form
   it: the step's name is what carries the meaning, and a script's first line
   is usually `set -euo pipefail`.)
   `--plan-no-probe` skips `unless` evaluation (for CI without the target).
-- Under `run` (§8) an ungated step that exits 0 is `ok`, not `unknown`: a
-  task step's contract is its exit code, and there is no state to be unsure
-  about. A gated step, `changed_when` and `failed_when` mean under `run`
-  exactly what they mean under `apply`.
+- A step whose exit code is its whole contract — a test run, a build, a
+  lint — says `changed_when: false` and is `ok` on exit 0. That is the task
+  case (D17), and it is the same declaration a plan makes: there is no
+  command under which an undeclared step reads anything but `unknown`.
+  (Phase 5 had `run` report such a step `ok` by virtue of the verb; phase
+  5b withdrew that. The same file means the same thing under every verb.)
 - Streaming: stdout/stderr captured; shown in full on failure, on
   `--verbose`, or streamed live with `--stream`.
 - `set -euo pipefail` is **not** injected. Explicit > magic.
@@ -565,12 +570,10 @@ assert:
 ## 8. Commands
 
 ```
-provision validate <plan.yml> [--strict]
-provision plan     <plan.yml> [--tags t,u] [--skip-tags t] [--var k=v]... [--vars-file f]... [--plan-no-probe] [--no-diff] [--json] [--hide-skipped] [--color when]
-provision apply    <plan.yml> [same as plan] [--ask-sudo-pass] [--verbose] [--stream] [--keep-going]
-provision run      <component.yml> [--prop k=v]... [same as apply]
-provision run      <dir>/
-provision run      --step '<yaml>' [--var k=v]... [--vars-file f]... [--verbose] [--stream]
+provision validate <file.yml> [--strict] [--prop k=v]...
+provision plan     <file.yml> [--prop k=v]... [--tags t,u] [--skip-tags t] [--var k=v]... [--vars-file f]... [--plan-no-probe] [--no-diff] [--json] [--hide-skipped] [--color when]
+provision apply    <file.yml> [same as plan] [--ask-sudo-pass] [--verbose] [--stream] [--keep-going]
+provision list     <dir>/
 provision facts    [--json]
 provision --version
 ```
@@ -618,10 +621,15 @@ provision --version
   them. It earns its keep on a bare machine, where the point of the first
   run is the list.
 
-- `run` (D17): `apply` with a component (§3.2) as the root scope. The
-  component's props are filled from `--prop k=v`; an unknown prop, a missing
-  required prop or a wrong type is a validation error, the same three
-  `validate` reports at a `use` site.
+- **The root file** (D17, phase 5b): every one of `validate`, `plan` and
+  `apply` takes a plan or a component. A file whose root is a sequence is a
+  plan; one whose root is a mapping is a component — the distinction both
+  parsers already make in their own error messages, so no command needs a
+  flag saying which it got. A component as the root gets its props from
+  `--prop k=v`; an unknown prop, a missing required prop or a wrong type is
+  a validation error, the same three `validate` reports at a `use` site,
+  and `validate` applies them too: a required prop with no value is an
+  error at `validate`, not a placeholder.
 
   A `--prop` value is rendered as a template, then **read as the type its
   declaration gives it**: `string` as written, `int` and `bool` as YAML
@@ -635,40 +643,28 @@ provision --version
   unaffected and stays untyped strings.
   Decided by review and confirmed by the owner 2026-09-08.
 
-  A trailing `/` lists the directory: one line per `.yml` file, its name and
-  its `description`, nothing run.
-  Every step's default `cwd` under `run` is the directory provision was
-  invoked from, not the step's own file — §4, and the one other place `run`
-  differs from `apply`. `--step '<yaml>'` takes exactly one step as a YAML
-  mapping, runs it in a scope holding only facts and `--var`/`--vars-file`,
-  and reports it —
-  the contract a CI runner needs to exec steps one at a time. `--tags` and
-  `--skip-tags` apply as for `apply`. There is no plan for `run` and no
-  `--plan-no-probe`; a task list has nothing to probe.
+  Nothing else changes with the root's shape. The working directory is §4's
+  one rule, the verdicts are §6's, the exit codes are the command's. A
+  component run as the root means exactly what it means when a plan `use`s
+  it. (Phase 5 had a `run` verb that changed three of those by itself —
+  working directory, the ungated verdict, and whether `plan` applied. Phase
+  5b withdrew it: the same file must mean the same thing under every verb.)
 
-  `validate` accepts a component file as well as a plan, so `provision
-  validate tasks/deploy.yml` checks a task without running it. It takes
-  `--prop` too, and applies the same three checks `run` does: a required
-  prop with no value is an error at `validate`, not a placeholder. A file
-  whose root is a mapping is read as a component and one whose root is a
-  sequence as a plan — the distinction both parsers already make in their
-  own error messages, so neither command needs a flag saying which it got.
+- `list <dir>/`: every `*.yml` in the directory, sorted by stem, one line
+  each: the stem, then its `description` or nothing. Nothing below the root
+  keys is parsed and nothing runs, so a directory holding one broken file
+  still lists — a file that will not load, or whose root is not a component,
+  prints `(not a component)` where a description would go rather than being
+  silently dropped. Exit 0, or 3 if the directory is not there. This is the
+  task runner's "what can I run here", and the only thing `list` does.
 
-  `run <dir>/` lists every `*.yml` in the directory, sorted by name, one
-  line each: the file's stem, then its `description` or nothing. Nothing
-  below the root keys is parsed and nothing runs, so a directory holding one
-  broken file still lists — a file that will not load, or whose root is not
-  a component, prints `(not a component)` where a description would go
-  rather than being silently dropped. Exit 0, or 3 if the directory is not
-  there.
-
-  Under `run`, `--json` emits the same stream `apply` does (§9.3): one
-  object per line, the same keys, the same `Status::key` vocabulary.
-
-  Verdicts under `run`: an ungated `shell`/`cmd` that exits 0 is `ok`
-  (§6.1); everything else is as under `apply`. Exit codes: `0` every step
-  ok, changed or skipped · `1` a step failed · `3` usage or validation
-  error. Never `2`.
+- **A CI runner** wanting one result per step does not get a per-step entry
+  point. It writes the job's steps to a file and runs one process,
+  `provision apply job.yml --json`: the stream carries every step's status,
+  exit code, captured output, duration and file:line as each step finishes
+  (§9.3), and provision owns ordering, fail-fast, timeouts and the
+  interrupt. Steps a runner generates from plain command lines carry
+  `changed_when: false` so they read `ok` (§6.1).
 
 Tag selection (Ansible semantics, deliberately):
 
@@ -703,7 +699,7 @@ A malformed command line — an unknown flag, a missing argument, an unknown
 subcommand — is exit `3`, like every other usage error, with the message and
 usage text on stderr. `--help` and `--version` are exit `0` on stdout.
 
-`run` exits like `apply`. `apply` exits 1 on the first failed step, 0 otherwise. It does not exit 2;
+`apply` exits 1 on the first failed step, 0 otherwise. It does not exit 2;
 having done the work, "changes were found" is not news. `plan` also exits 1
 when a step failed — only an `assert` can, and §6.7 says why it keeps walking.
 
@@ -751,7 +747,12 @@ printed the same way. Suitable for CI logs.
 
 One JSON object per line on stdout, human output goes to stderr. `status` is
 one of `ok`, `changed`, `unknown`, `skipped`, `failed`, `would_change`,
-`would_run`, `would_run_unprobed`. `diff` is present only when there is one:
+`would_run`, `would_run_unprobed`. `diff` is present only when there is one.
+A step that ran a command — `shell`, `cmd`, `assert`, or a step whose
+`unless` ran — carries `rc`, `stdout` and `stderr` whatever its status, in
+full, not truncated (phase 5b; before it `rc` and `stderr` came only with a
+failure). That is the whole of what a CI runner reads per step (§8), so it
+is emitted as each step finishes, never batched:
 
 ```json
 {"event":"step","index":3,"name":"Deploy .zshrc","status":"changed","duration_ms":12,"file":"components/zsh/index.yml","line":41,"diff":"..."}

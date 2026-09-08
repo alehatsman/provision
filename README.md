@@ -76,7 +76,7 @@ The job is small and stable. The tool should be too.
 - Not an agent runtime. No MCP, no SDK, no LLM loop.
 - Not transactional. No rollback. Fail-fast and re-run; every step is
   idempotent by construction or by declared gate.
-- Not a task registry. A task is a component file run with `provision run`;
+- Not a task registry. A task is a component file run with `provision apply`;
   shared ones are checked out by the machine plan, never fetched by
   provision.
 - Not a secrets manager. `{{ env.TOKEN }}` and file permissions.
@@ -85,10 +85,11 @@ The job is small and stable. The tool should be too.
 ## Development
 
 provision provisions itself. The tasks live in `tasks/` and are components
-run with `provision run` — the same executor the machine plans use (D17).
+run with `provision apply` — the same executor, the same verb, the same
+rules the machine plans use (D17).
 
 ```
-$ provision run tasks/
+$ provision list tasks/
   build                     build the release binary for this machine
   ci                        full pre-push gate — fmt, clippy, test, rustdoc, deny, machete, lint drift
   ci-fast                   fast pre-commit gate — lockfile drift, fmt, clippy, ai-lint, soft caps
@@ -99,11 +100,11 @@ Once, to check out the quality gate and install the three tools it runs
 (cargo-nextest, cargo-deny, cargo-machete — from source, so it is slow):
 
 ```
-$ provision run tasks/tools.yml
+$ provision apply tasks/tools.yml
 ```
 
-Then `provision run tasks/ci-fast.yml` before a commit and
-`provision run tasks/ci.yml` before a push.
+Then `provision apply tasks/ci-fast.yml` before a commit and
+`provision apply tasks/ci.yml` before a push.
 
 The gate itself is [rust-quality](https://github.com/alehatsman/rust-quality),
 pinned at a tag in `tasks/tools.yml` and checked out under
@@ -114,7 +115,8 @@ repo are its files, copied verbatim, and the `[workspace.lints]` block in
 manifests, so `tasks/lints-check.yml` reports drift instead.
 
 **There is no CI for this repo yet.** No `mgitci.yml`, no Rust CI image; both
-wait on moongit's runner switching to `provision run --step`. Until then the
+wait on moongit's runner running a job as `provision apply job.yml --json`.
+Until then the
 gate is a local one, and running it before a push is the whole of it.
 
 ## Documents
@@ -127,7 +129,7 @@ gate is a local one, and running it before a push is the whole of it.
 | [docs/migration.md](docs/migration.md) | Moving the existing dotfiles off mooncake |
 | [docs/audit.md](docs/audit.md) | The spec §11 gate: every construct in the real configs, mapped |
 | [examples/](examples/) | A machine plan and a component |
-| [tasks/](tasks/) | This repo's own tasks, run with `provision run` |
+| [tasks/](tasks/) | This repo's own tasks, run with `provision apply` |
 
 ## Status
 

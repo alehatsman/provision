@@ -311,7 +311,7 @@ nothing, so a script can pass the same arguments to both.
 
 **Overturned by.** The owner, in one pass over this section.
 
-## D17 — One executor: tasks are components, `run` judges by exit code, distribution is provisioning's job
+## D17 — One executor: tasks are components, distribution is provisioning's job
 
 **Decided by the owner 2026-09-08**, after review showed that provisioning,
 repo tasks and moongit CI steps share everything but three things: how a run
@@ -365,6 +365,24 @@ rust-quality's, `use`d by path from a pinned checkout. Dogfooding it found
 the two things the machine plans never would have — a component had no way to
 name its own directory, and a task inherited the wrong working directory.
 
-**Overturned by.** A second consumer of `run` that needs something a
+**Amended by the owner 2026-09-08, phase 5b: no `run` verb.** Building
+phase 5 and then dogfooding it showed that `run` made the same file mean
+different things depending on the verb — its working directory, its ungated
+verdict, whether `plan` applied to it. The owner's reading: apply and run
+should be one thing. So: `validate`, `plan` and `apply` each take a plan or a
+component as the root, with `--prop` for the component; the working
+directory is one rule for every command (§4, measured safe against the
+fleet); an ungated step is `unknown` under every command, and a task step
+whose exit code is its whole contract says `changed_when: false` — the
+declaration a plan would make, not a verb's side effect; the directory
+listing is its own verb, `list`, which does nothing else; and `--step` is
+gone, because provision already has the per-step event stream a CI runner
+needs — the runner writes the job to a file and runs `provision apply
+job.yml --json`, one process per job, with `rc`, `stdout` and `stderr` on
+every step event. Of the three paragraphs above, the first and third stand
+with `apply` read for `run` and `list` for the listing; the second is
+replaced by this one. "One executor" now also means one meaning per file.
+
+**Overturned by.** A second consumer that needs something a
 component cannot say — task dependencies, positional arguments, a registry.
 Any of those is the road back to mooncake, and the answer is still no.

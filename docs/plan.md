@@ -1,6 +1,6 @@
 # provision — build plan
 
-Status: phases 0–5 code complete · 2026-09-08
+Status: phases 0–5 code complete · phase 5b spec'd, not built · 2026-09-08
 
 ## Where this stands
 
@@ -11,7 +11,8 @@ Status: phases 0–5 code complete · 2026-09-08
 | 2 — typed actions | `file`/`template`/`pkg`/`service`, container tests green | `0cb5e2f` |
 | 3 — tags, polish, Windows | Windows all-targets clean, self-contained `.exe` | `1a5c5f6` |
 | 4 — migration and cut-over | dotfiles applies with provision, main_pc reports no `unknown` | dotfiles `91415fc` |
-| 5 — `run`: tasks and CI steps | moongit CI execs `provision run --step`; moongit's `tasks.yml` runs as `tasks/` | `3d293fa` — code; gate owner's |
+| 5 — `run`: tasks and CI steps | moongit CI execs `provision run --step`; moongit's `tasks.yml` runs as `tasks/` | `3d293fa` — code; superseded by 5b |
+| 5b — one meaning per file | no `run` verb; `apply`/`plan`/`validate` take a component; moongit runs a job as `provision apply job.yml --json` | open |
 
 Windows was exercised natively on main_pc's host on 2026-09-08, from WSL via
 `powershell.exe`, with the cross-compiled `x86_64-pc-windows-gnu` binary run
@@ -377,10 +378,48 @@ Gate
 - go-quality presets carry `description:` and are used by path from a
   checkout the machine plan pins. **Owner's**, in that repo and dotfiles.
 
+### Phase 5b — one meaning per file
+
+D17 as amended 2026-09-08. Phase 5 shipped, was dogfooded on this repo,
+and the owner's verdict on the result was that `run` and `apply` should be
+one thing: the verb had become a switch that changed what a file meant.
+This phase removes the switch. Net code should shrink.
+
+Deliverables
+
+- `validate`, `plan` and `apply` accept a component as the root, with
+  `--prop`, through the code that sits behind `run` today. `plan
+  tasks/ci.yml` previews a task's gates.
+- One working-directory rule (spec §4): the invocation directory, for
+  every command and every step. The `Mode::Run` arm in `prepare` and the
+  `ungated_ok` field in the judge go away. Zero fleet steps depend on the
+  old default (measured); the dotfiles snapshots that render a cwd, if
+  any, change and are listed.
+- `list <dir>/` replaces `run <dir>/`, byte-identical output.
+- `run` and `--step` removed, with their tests. `Mode::Run` removed.
+- Step events carry `rc`, `stdout`, `stderr` for every step that ran a
+  command, not only on failure (spec §9.3). The JSON snapshot changes and
+  is listed.
+- The eight `tasks/` components in this repo: their command steps say
+  `changed_when: false`; `provision apply tasks/ci.yml` reads `ok`, and
+  `validate --strict tasks/*.yml` is clean.
+- README, D17 consequences, migration §6: `run` → `apply`, `list` where the
+  listing is meant.
+
+Gate
+
+- `provision apply tasks/ci.yml` and `provision apply tasks/ci-fast.yml`
+  exit 0 on this box after rust-quality's stage 2. `provision list tasks/`
+  matches the phase 5 listing.
+- moongit runs a dotfiles CI job as `provision apply job.yml --json` in an
+  image without mooncake, reading `rc`/`stdout`/`stderr` off the stream.
+  **Owner's**, in moongit.
+- The phase 5 gate bullets above, read with `apply` for `run`.
+
 ## Order and dependencies
 
 ```
-P0 → P1 → P2 → P3 → P4 → P5
+P0 → P1 → P2 → P3 → P4 → P5 → P5b
 ```
 
 Strictly linear. P2 could start before P1's output polish is done, but

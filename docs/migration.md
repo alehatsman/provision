@@ -26,7 +26,7 @@ against a machine mooncake has already converged.
 | `vars.load: path` | `vars_file: path` | rename |
 | `import: path` | `import: path` | unchanged; `when`/`tags` on it still apply to all imported steps |
 | `use: path` + `props:` | `use: path` + `props:` | unchanged; component files keep `props:` + `steps:` |
-| `tasks.yml` | `tasks/<name>.yml`, one component per task | run with `provision run` once phase 5 lands (D17); until then the justfile. See §6 |
+| `tasks.yml` | `tasks/<name>.yml`, one component per task | `provision apply tasks/<name>.yml --prop k=v` (D17, phase 5b); until then the justfile. See §6 |
 
 ### Modifiers
 
@@ -416,8 +416,8 @@ Expected `plan` diffs on an already-converged machine after migration:
   since, run the recipe's command by hand — it is one line.
 
   **Superseded 2026-09-08 by D17, same day.** Task running is not a
-  non-goal; a task registry is. The justfile stays until phase 5 ships
-  `provision run`; then each recipe becomes `tasks/<name>.yml`, a component
+  non-goal; a task registry is. The justfile stays until phase 5b ships;
+  then each recipe becomes `tasks/<name>.yml`, a component
   whose props are the recipe's arguments, and the `--json` redirect above
   is a `shell` step inside it. The `just` entries in the package lists
   (dotfiles `f68a784`) lose their reason then; keeping or dropping them is
@@ -440,13 +440,16 @@ Expected `plan` diffs on an already-converged machine after migration:
   image is a real apply — §7 step 6, the owner's.
 
 - The nine repos with `tasks.yml` (`dex`, `moongit`, `moongit-*`, `cry-aye`)
-  convert to `tasks/*.yml` components run with `provision run` (D17, phase
-  5), moongit's first as the gate. The `go-quality` presets are already
+  convert to `tasks/*.yml` components run with `provision apply` (D17,
+  phase 5b), moongit's first as the gate. Each command step says
+  `changed_when: false`, so a passing task reads `ok`. The `go-quality` presets are already
   component-shaped: each gains a `description:` and is used by path —
   `use: "{{ tools_dir }}/go-quality/ci.yml"` — from a checkout a dotfiles
   component pins at a tag. No `source:`, no version in the task file. Once
-  moongit's runner execs `provision run --step '<yaml>'` instead of
-  `mooncake step`, the CI image drops mooncake; that is a moongit change.
+  moongit's runner writes a job to a file and runs `provision apply
+  job.yml --json` — one process per job, `rc`/`stdout`/`stderr` on every
+  step event — instead of exec'ing `mooncake step` per step, the CI image
+  drops mooncake; that is a moongit change.
   All of it is outside this repo and keeps working on mooncake until then.
 
 ## 7. Order
