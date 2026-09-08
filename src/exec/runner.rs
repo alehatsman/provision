@@ -102,6 +102,10 @@ pub struct Runner {
     /// read-only command and must still work on a machine with a cold sudo
     /// credential, so a root gate it cannot run is reported unprobed (D11).
     pub root_available: bool,
+    /// Spec §6.1, D17: under `run` an ungated `shell`/`cmd` that exits 0 is
+    /// `ok` rather than `unknown`. Set from `Mode::Run`; false everywhere
+    /// else, so `apply` and `plan` are byte-identical to before.
+    pub ungated_ok: bool,
 }
 
 enum Gate {
@@ -259,6 +263,11 @@ impl Runner {
                 None if p.action.never_changes() => Status::Ok,
                 // The gate said the work was needed, and the work succeeded.
                 None if p.gated() => Status::Changed,
+                // Spec §6.1. Under `apply` nothing here can say what an
+                // ungated step did; under `run` the exit code is the whole
+                // contract, so 0 is `ok` and there is nothing to be unsure
+                // about (D17).
+                None if self.ungated_ok => Status::Ok,
                 None => Status::Unknown,
             },
         };

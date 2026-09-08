@@ -51,6 +51,11 @@ enum Command {
         /// Also reject `shell`/`cmd` steps with no idempotency gate.
         #[arg(long)]
         strict: bool,
+        /// Set a prop, when the file is a component rather than a plan.
+        /// Checked exactly as `run` checks it: a required prop with no value
+        /// is an error here too, and nothing stands in for it.
+        #[arg(long = "prop", value_name = "KEY=VALUE")]
+        prop: Vec<String>,
         #[command(flatten)]
         vars: VarArgs,
     },
@@ -77,6 +82,41 @@ enum Command {
         stream: bool,
         /// Carry on past a failed step, so one run reports everything that
         /// is broken. Ctrl-C still stops.
+        #[arg(long)]
+        keep_going: bool,
+        #[command(flatten)]
+        run: RunArgs,
+    },
+    /// Run a component as a task (D17), or list a directory of them.
+    Run {
+        /// A component file, or a directory (with a trailing `/`) to list.
+        target: Option<PathBuf>,
+        /// Run exactly one step, given as a YAML mapping. The contract a CI
+        /// runner needs to exec steps one at a time.
+        /// `allow_hyphen_values`: a step given as a YAML list starts with
+        /// `- `, which clap would otherwise read as a flag and reject with
+        /// its own exit 2. Letting it through is what puts the "not a list"
+        /// message on the error instead.
+        #[arg(
+            long,
+            value_name = "YAML",
+            allow_hyphen_values = true,
+            conflicts_with_all = ["target", "prop"]
+        )]
+        step: Option<String>,
+        /// Set one of the component's props. Repeatable.
+        #[arg(long = "prop", value_name = "KEY=VALUE")]
+        prop: Vec<String>,
+        /// Read the sudo password once, instead of requiring `sudo -n`.
+        #[arg(long)]
+        ask_sudo_pass: bool,
+        /// Print each step's captured output, not only a failure's.
+        #[arg(long)]
+        verbose: bool,
+        /// Let each step write straight to the terminal as it runs.
+        #[arg(long)]
+        stream: bool,
+        /// Carry on past a failed step. Ctrl-C still stops.
         #[arg(long)]
         keep_going: bool,
         #[command(flatten)]
@@ -226,11 +266,20 @@ fn run() -> Result<u8, Diag> {
             Ok(EXIT_OK)
         }
 
-        Command::Validate { plan, strict, vars } => {
+        Command::Validate { plan, strict, prop, vars } => {
             let plan = check_exists(&plan)?;
+            let props = pairs(&prop, "--prop")?;
             let selection = Selection { tags: Vec::new(), skip_tags: Vec::new() };
             let mut ex = expander(&vars, Mode::Validate { strict }, selection)?;
-            ex.run(&plan)?;
+            // D17: the same file check `run` makes. A mapping is a component
+            // and a sequence is a plan, which is what their own parse errors
+            // already say; asking here means `validate tasks/deploy.yml`
+            // works without a flag saying which it is.
+            if is_component(&plan)? {
+                ex.run_component(&plan, &props)?;
+            } else {
+                ex.run(&plan)?;
+            }
             let base = cwd();
             if ex.diags.is_empty() {
                 println!("  ok  {}", rel(&plan, &base));
@@ -254,6 +303,7 @@ fn run() -> Result<u8, Diag> {
                     sudo: Sudo::none(),
                     stream: false,
                     root_available: sudo::root_is_reachable(),
+                    ungated_ok: false,
                 })
                 .with_sink(run.sink(base.clone(), false, false));
 
@@ -279,6 +329,67 @@ fn run() -> Result<u8, Diag> {
             Ok(if ex.summary.has_changes() { EXIT_CHANGES } else { EXIT_OK })
         }
 
+        Command::Run { target, step, prop, ask_sudo_pass, verbose, stream, keep_going, run } => {
+            run.apply_color();
+            let base = cwd();
+
+            let Some(target) = target else {
+                let Some(src) = step else {
+                    return Err(Diag::file_level(
+                        "run",
+                        "give a component file, a directory with a trailing `/`, or --step",
+                    ));
+                };
+                return run_one_step(&src, &run, verbose, stream, ask_sudo_pass, base);
+            };
+            if step.is_some() {
+                return Err(Diag::file_level("--step", "takes no file argument"));
+            }
+
+            // A trailing separator is how the caller says "list this", so it
+            // has to be read from the argument as typed, before any
+            // normalisation drops it. `PathBuf` keeps it; `is_dir` alone
+            // would list a directory the caller meant to run.
+            if listing_requested(&target) {
+                return list_tasks(&target, &base);
+            }
+
+            let target = check_exists(&target)?;
+            let props = pairs(&prop, "--prop")?;
+
+            // Spec §7: the same walk that finds the sudo steps validates the
+            // whole task before the first one runs.
+            let mut check = expander(&run.vars, Mode::Validate { strict: false }, run.selection())?;
+            check.run_component(&target, &props)?;
+            if !check.diags.is_empty() {
+                report(&check, &base, Some(&target));
+                return Ok(EXIT_USAGE);
+            }
+            let sudo = Sudo::preflight(check.needs_sudo, ask_sudo_pass)?;
+
+            exec::process::catch_interrupts();
+            let mut ex = expander(&run.vars, Mode::Run, run.selection())?
+                .keep_going(keep_going)
+                .with_runner(Runner { sudo, stream, root_available: true, ungated_ok: true })
+                .with_sink(run.sink(base.clone(), verbose, stream));
+
+            let started = Instant::now();
+            ex.run_component(&target, &props)?;
+            ex.summarize(&target, started.elapsed());
+
+            if !ex.diags.is_empty() {
+                eprintln!();
+                report(&ex, &base, None);
+                return Ok(EXIT_USAGE);
+            }
+            if ex.summary.interrupted {
+                return Ok(EXIT_INTERRUPTED);
+            }
+            // Never 2: a task has nothing to plan, so "found changes" is not
+            // an answer `run` can give (D17).
+            Ok(if ex.summary.failed > 0 { EXIT_FAILED } else { EXIT_OK })
+        }
+
         Command::Apply { plan, ask_sudo_pass, verbose, stream, keep_going, run } => {
             run.apply_color();
             let plan = check_exists(&plan)?;
@@ -299,7 +410,7 @@ fn run() -> Result<u8, Diag> {
             exec::process::catch_interrupts();
             let mut ex = expander(&run.vars, Mode::Apply, run.selection())?
                 .keep_going(keep_going)
-                .with_runner(Runner { sudo, stream, root_available: true })
+                .with_runner(Runner { sudo, stream, root_available: true, ungated_ok: false })
                 .with_sink(run.sink(base.clone(), verbose, stream));
 
             let started = Instant::now();
@@ -337,6 +448,128 @@ fn expander(vars: &VarArgs, mode: Mode, selection: Selection) -> Result<Expander
     let facts = facts::Facts::detect();
     let globals = Rc::new(Globals::new(&facts, vars.collect()?));
     Ok(Expander::new(globals, mode, selection))
+}
+
+/// `provision run --step '<yaml>'` — one step from a string, in a scope
+/// holding only facts and `--var`/`--vars-file`. This is the contract a CI
+/// runner execs against, so its stdout, stderr and exit code are the API and
+/// not just output.
+fn run_one_step(
+    src: &str,
+    run: &RunArgs,
+    verbose: bool,
+    stream: bool,
+    ask_sudo_pass: bool,
+    base: PathBuf,
+) -> Result<u8, Diag> {
+    let doc = yaml::Doc::from_str("<step>", src)?;
+    let node = doc.node();
+    // A list is the plan shape, and `--step` takes one step. Saying which it
+    // got beats a mapping error from three layers down.
+    if node.as_seq().is_ok() {
+        return Err(node.err("--step takes one step, not a list").with_note(
+            "run a list of steps by putting them in a component and running the file",
+        ));
+    }
+    let step = config::model::parse_step(node)?;
+    if step.is_structural() {
+        return Err(node
+            .err(format!("`{}` cannot be a --step", step.key))
+            .with_note(
+                "`import`, `use` and `vars_file` resolve paths against the file \
+that names them, and there is no file here; `vars` would set variables \
+nothing later could read",
+            ));
+    }
+    config::model::check_modifiers(&step)?;
+
+    let mut check = expander(&run.vars, Mode::Validate { strict: false }, run.selection())?;
+    check.run_steps(std::slice::from_ref(&step))?;
+    if !check.diags.is_empty() {
+        report(&check, &base, None);
+        return Ok(EXIT_USAGE);
+    }
+    let sudo = Sudo::preflight(check.needs_sudo, ask_sudo_pass)?;
+
+    exec::process::catch_interrupts();
+    let mut ex = expander(&run.vars, Mode::Run, run.selection())?
+        .with_runner(Runner { sudo, stream, root_available: true, ungated_ok: true })
+        .with_sink(run.sink(base.clone(), verbose, stream));
+
+    let started = Instant::now();
+    ex.run_steps(std::slice::from_ref(&step))?;
+    ex.summarize(Path::new("<step>"), started.elapsed());
+
+    if !ex.diags.is_empty() {
+        eprintln!();
+        report(&ex, &base, None);
+        return Ok(EXIT_USAGE);
+    }
+    if ex.summary.interrupted {
+        return Ok(EXIT_INTERRUPTED);
+    }
+    Ok(if ex.summary.failed > 0 { EXIT_FAILED } else { EXIT_OK })
+}
+
+/// `KEY=VALUE` pairs from a repeatable flag. Shared by `--prop` on `run` and
+/// on `validate`, which check the same three things.
+fn pairs(given: &[String], flag: &str) -> Result<Vec<(String, String)>, Diag> {
+    given
+        .iter()
+        .map(|pair| {
+            pair.split_once('=')
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .ok_or_else(|| Diag::file_level(flag, format!("`{pair}` is not KEY=VALUE")))
+        })
+        .collect()
+}
+
+/// D17: a component is a mapping and a plan is a sequence. Reading the root
+/// node is enough to tell, and it is the same distinction both parsers make
+/// in their own error messages.
+fn is_component(path: &Path) -> Result<bool, Diag> {
+    Ok(yaml::Doc::load(path)?.node().as_map().is_ok())
+}
+
+/// A trailing separator is the caller asking for a listing (spec §8), and it
+/// has to be read from the argument as typed: `is_dir` alone would list a
+/// directory somebody meant to run, and `Path::ends_with` compares whole
+/// components rather than characters.
+fn listing_requested(target: &Path) -> bool {
+    target.as_os_str().to_string_lossy().ends_with(std::path::MAIN_SEPARATOR)
+}
+
+/// `provision run <dir>/`. One line per `.yml` file, sorted by name: the
+/// file stem, then its `description` or nothing. Nothing below the root keys
+/// is parsed and nothing is run, so a directory holding one broken file
+/// still lists.
+fn list_tasks(dir: &Path, base: &Path) -> Result<u8, Diag> {
+    if !dir.is_dir() {
+        return Err(Diag::file_level(dir, "no such directory"));
+    }
+    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+        .map_err(|e| Diag::file_level(dir, format!("cannot read: {e}")))?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "yml"))
+        .collect();
+    files.sort();
+
+    if files.is_empty() {
+        println!("  no tasks in {}", rel(dir, base));
+        return Ok(EXIT_OK);
+    }
+    for path in &files {
+        let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+        // A file that will not load, or is not a component, is named rather
+        // than skipped: a listing that silently omits a file is worse than
+        // one that says which file is wrong.
+        let note = match yaml::Doc::load(path).and_then(config::load::parse_component) {
+            Ok(c) => c.description.unwrap_or_default(),
+            Err(_) => "(not a component)".to_string(),
+        };
+        println!("  {stem:<24}  {note}");
+    }
+    Ok(EXIT_OK)
 }
 
 fn check_exists(plan: &Path) -> Result<PathBuf, Diag> {

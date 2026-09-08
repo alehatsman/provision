@@ -619,7 +619,23 @@ provision --version
   `--plan-no-probe`; a task list has nothing to probe.
 
   `validate` accepts a component file as well as a plan, so `provision
-  validate tasks/deploy.yml` checks a task without running it.
+  validate tasks/deploy.yml` checks a task without running it. It takes
+  `--prop` too, and applies the same three checks `run` does: a required
+  prop with no value is an error at `validate`, not a placeholder. A file
+  whose root is a mapping is read as a component and one whose root is a
+  sequence as a plan — the distinction both parsers already make in their
+  own error messages, so neither command needs a flag saying which it got.
+
+  `run <dir>/` lists every `*.yml` in the directory, sorted by name, one
+  line each: the file's stem, then its `description` or nothing. Nothing
+  below the root keys is parsed and nothing runs, so a directory holding one
+  broken file still lists — a file that will not load, or whose root is not
+  a component, prints `(not a component)` where a description would go
+  rather than being silently dropped. Exit 0, or 3 if the directory is not
+  there.
+
+  Under `run`, `--json` emits the same stream `apply` does (§9.3): one
+  object per line, the same keys, the same `Status::key` vocabulary.
 
   Verdicts under `run`: an ungated `shell`/`cmd` that exits 0 is `ok`
   (§6.1); everything else is as under `apply`. Exit codes: `0` every step

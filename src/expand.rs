@@ -37,11 +37,16 @@ pub enum Mode {
     Plan { probe: bool },
     /// Check everything, then do it.
     Apply,
+    /// `apply` with a component as the root (D17). Identical in every
+    /// respect but one: an ungated `shell`/`cmd` that exits 0 is `ok`, not
+    /// `unknown`. In a task the step's contract is its exit code, and there
+    /// is no state for provision to be unsure about.
+    Run,
 }
 
 impl Mode {
     fn executes(&self) -> bool {
-        matches!(self, Mode::Apply)
+        matches!(self, Mode::Apply | Mode::Run)
     }
     fn reports(&self) -> bool {
         !matches!(self, Mode::Validate { .. })
@@ -147,6 +152,36 @@ impl Expander {
             self.diags.push(d);
         }
         self.walk(&steps, &mut scope, 0, &BTreeSet::new());
+        Ok(())
+    }
+
+    /// D17: the root is a component, not a plan. Its props come from the
+    /// command line rather than a `use` site; everything below is the same
+    /// walk. Returns without walking when a prop is wrong — the diagnostics
+    /// are in `self.diags`, and running half a task with a bad argument is
+    /// worse than running none of it.
+    pub fn run_component(&mut self, root: &Path, given: &[(String, String)]) -> Result<()> {
+        let doc = self.loader.load(root)?;
+        let component = load::parse_component(doc)?;
+        let props = match self.cli_props(&component, given) {
+            Ok(p) => p,
+            Err(ds) => {
+                for d in ds {
+                    self.diags.push(d);
+                }
+                return Ok(());
+            }
+        };
+        let mut scope = Scope::root(Rc::clone(&self.globals)).child_with_props(props);
+        self.walk(&component.steps, &mut scope, 0, &BTreeSet::new());
+        Ok(())
+    }
+
+    /// D17 `run --step`: steps that came from somewhere other than a file,
+    /// walked in a scope holding only facts and the command line.
+    pub fn run_steps(&mut self, steps: &[Step<'static>]) -> Result<()> {
+        let mut scope = Scope::root(Rc::clone(&self.globals));
+        self.walk(steps, &mut scope, 0, &BTreeSet::new());
         Ok(())
     }
 
@@ -448,32 +483,73 @@ impl Expander {
             }
         }
 
-        for schema in &component.props {
-            if out.contains_key(&schema.name) {
+        fill_defaults(component, &mut out, &mut errors, &|schema| {
+            step.at.err(format!("missing required prop `{}`", schema.name))
+        });
+
+        if errors.is_empty() { Ok(out) } else { Err(errors) }
+    }
+
+    /// D17: the same three checks as a `use` site, against `--prop k=v`
+    /// instead of a YAML mapping. Values are rendered as templates, so
+    /// `--prop n='{{ 3 }}'` is the int 3 and `--prop n=3` is the string
+    /// "3" — the sole-expression rule of §3.4, reaching the command line.
+    fn cli_props(
+        &mut self,
+        component: &Component,
+        given: &[(String, String)],
+    ) -> std::result::Result<Map, Vec<Diag>> {
+        let mut errors = Vec::new();
+        let mut out = Map::new();
+        let scope = Scope::root(Rc::clone(&self.globals));
+        let ctx = scope.ctx();
+
+        for (name, raw) in given {
+            let Some(schema) = component.prop(name) else {
+                let known: Vec<&str> = component.props.iter().map(|p| p.name.as_str()).collect();
+                errors.push(
+                    Diag::file_level(
+                        "--prop",
+                        format!(
+                            "component {} has no prop `{name}`",
+                            rel_display(&component.path)
+                        ),
+                    )
+                    .with_note(if known.is_empty() {
+                        "it declares no props".to_string()
+                    } else {
+                        format!("it declares: {}", known.join(", "))
+                    }),
+                );
                 continue;
-            }
-            match schema.default {
-                Some(d) => match d.to_value() {
-                    Ok(v) => {
-                        out.insert(schema.name.clone(), v);
+            };
+            match self.engine.render_field(raw, &ctx) {
+                Ok(value) => {
+                    if !schema.ty.accepts(&value) {
+                        errors.push(
+                            Diag::file_level(
+                                "--prop",
+                                format!(
+                                    "prop `{name}` is declared {} but got {}",
+                                    schema.ty.name(),
+                                    describe_value(&value)
+                                ),
+                            )
+                            .with_note(
+                                "a command-line prop is a string unless it is one                                  expression: --prop n='{{ 3 }}'",
+                            ),
+                        );
+                        continue;
                     }
-                    Err(e) => errors.push(e),
-                },
-                None if schema.required => errors.push(
-                    step.at
-                        .err(format!("missing required prop `{}`", schema.name))
-                        .with_note(format!(
-                            "declared at {}:{}",
-                            rel_display(&component.path),
-                            schema.at.line()
-                        )),
-                ),
-                None => {
-                    // Declared, not required, no default: absent is a value.
-                    out.insert(schema.name.clone(), Value::from(()));
+                    out.insert(name.clone(), value);
                 }
+                Err(e) => errors.push(Diag::file_level("--prop", e.to_string())),
             }
         }
+
+        fill_defaults(component, &mut out, &mut errors, &|schema| {
+            Diag::file_level("--prop", format!("missing required prop `{}`", schema.name))
+        });
 
         if errors.is_empty() { Ok(out) } else { Err(errors) }
     }
@@ -959,6 +1035,40 @@ impl Judge for StepJudge<'_> {
 
     fn expr(&self, src: &str) -> Result<bool> {
         self.eval(src, &Value::from(self.base.clone()))
+    }
+}
+
+/// The half of prop binding that does not care where the values came from:
+/// a declared prop with no value takes its default, fails if it is required,
+/// and is null otherwise. `missing_at` places the "missing required" error —
+/// at the `use` step for a plan, at `--prop` for the command line.
+fn fill_defaults(
+    component: &Component,
+    out: &mut Map,
+    errors: &mut Vec<Diag>,
+    missing_at: &dyn Fn(&load::PropSchema) -> Diag,
+) {
+    for schema in &component.props {
+        if out.contains_key(&schema.name) {
+            continue;
+        }
+        match schema.default {
+            Some(d) => match d.to_value() {
+                Ok(v) => {
+                    out.insert(schema.name.clone(), v);
+                }
+                Err(e) => errors.push(e),
+            },
+            None if schema.required => errors.push(missing_at(schema).with_note(format!(
+                "declared at {}:{}",
+                rel_display(&component.path),
+                schema.at.line()
+            ))),
+            None => {
+                // Declared, not required, no default: absent is a value.
+                out.insert(schema.name.clone(), Value::from(()));
+            }
+        }
     }
 }
 

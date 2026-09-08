@@ -120,6 +120,8 @@ pub struct Component {
     pub path: PathBuf,
     pub props: Vec<PropSchema>,
     pub steps: Vec<Step<'static>>,
+    /// D17, spec §3.2: optional, and read only by `run <dir>/`.
+    pub description: Option<String>,
 }
 
 impl Component {
@@ -136,7 +138,9 @@ pub fn parse_component(doc: &'static Doc) -> Result<Component> {
             "a component has `steps:` and optional `props:`; a plan is a bare list and is entered with `import:`",
         )
     })?;
-    root.deny_unknown_keys(&["props", "steps"], "a component")?;
+    // `description` is D17's one format change: read only by
+    // `provision run <dir>/` when listing, ignored everywhere else.
+    root.deny_unknown_keys(&["props", "steps", "description"], "a component")?;
 
     let steps_at = root.require("steps").map_err(|_| {
         root.err("component has no `steps:`")
@@ -173,7 +177,12 @@ pub fn parse_component(doc: &'static Doc) -> Result<Component> {
         }
     }
 
-    Ok(Component { path: doc.path.clone(), props, steps })
+    let description = match root.get("description") {
+        Some(n) => Some(n.as_scalar_string()?),
+        None => None,
+    };
+
+    Ok(Component { path: doc.path.clone(), props, steps, description })
 }
 
 /// A missing file, reported against the node that named it.

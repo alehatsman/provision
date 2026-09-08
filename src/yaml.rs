@@ -21,6 +21,24 @@ pub struct Doc {
 }
 
 impl Doc {
+    /// D17: a document from a string rather than a file, for
+    /// `run --step '<yaml>'`. `name` stands in for the path in every
+    /// diagnostic, so an error reads `<step>:2:5` and points into the
+    /// argument the caller passed.
+    pub fn from_str(name: &str, text: &str) -> Result<&'static Doc> {
+        let path = PathBuf::from(name);
+        let text: &'static str = Box::leak(text.to_string().into_boxed_str());
+        let mut docs = MarkedYaml::load_from_str(text).map_err(|e| {
+            let m = e.marker();
+            Diag::new(&path, m.line(), m.col() + 1, format!("invalid YAML: {e}"))
+        })?;
+        match docs.len() {
+            0 => Err(Diag::file_level(path, "is empty")),
+            1 => Ok(Box::leak(Box::new(Doc { path, root: docs.remove(0) }))),
+            n => Err(Diag::file_level(path, format!("holds {n} documents; give one step"))),
+        }
+    }
+
     pub fn load(path: &Path) -> Result<&'static Doc> {
         let text = std::fs::read_to_string(path)
             .map_err(|e| Diag::file_level(path, format!("cannot read: {e}")))?;

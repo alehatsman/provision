@@ -1,0 +1,5 @@
+---
+description: nothing but an ungated step
+steps:
+  - name: An ungated shell that exits 0
+    shell: "true"
