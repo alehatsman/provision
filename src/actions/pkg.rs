@@ -11,6 +11,7 @@ use crate::config::model::Step;
 use crate::error::Result;
 use crate::template::Engine;
 use minijinja::Value;
+use minijinja::value::ValueKind;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -240,6 +241,13 @@ pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result
         }
         (None, Some(n)) => {
             let Ok(value) = engine.render_node(n, ctx) else { return Ok(None) };
+            // A string answers `try_iter` by yielding its characters — the
+            // same rule `{% for c in "abc" %}` follows — so asking only
+            // whether it iterates would take `names: git` for three packages
+            // called `g`, `i` and `t`. A list has to actually be a list.
+            if value.kind() != ValueKind::Seq {
+                return Err(n.err("`names` is a list of package names"));
+            }
             match value.try_iter() {
                 Ok(it) => it.map(|v| v.to_string()).collect(),
                 Err(_) => return Err(n.err("`names` is a list of package names")),
