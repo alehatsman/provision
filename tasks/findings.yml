@@ -1,0 +1,37 @@
+---
+description: write every gate finding to .gate/findings.jsonl for an agent to read
+
+# Becomes `use: {{ rq_dir }}/findings.yml` once rust-quality drops its `name:`
+# and `version:` root keys. A pure producer: it never re-gates and never
+# aborts, so a red repo still yields a complete file. Enforcement stays with
+# `tasks/ci.yml`.
+
+props:
+  pkg_args:
+    type: string
+    default: "--workspace"
+    description: Package selector for the clippy pass.
+  feature_args:
+    type: string
+    default: "--all-features"
+    description: Feature selector. Set "" for mutually exclusive features.
+  cap_loc:
+    type: string
+    default: "500"
+    description: God-file soft cap in LOC.
+  out:
+    type: string
+    default: ".gate/findings.jsonl"
+    description: Destination JSONL artifact (gitignored).
+
+steps:
+  - name: collect findings
+    shell: |
+      set -euo pipefail
+      rq="$HOME/.cache/provision/tools/rust-quality"
+      [ -d "$rq" ] || { echo "run tasks/tools.yml first — no $rq" >&2; exit 1; }
+      PKG_ARGS="{{ props.pkg_args }}" \
+      FEATURE_ARGS="{{ props.feature_args }}" \
+      CAP_LOC="{{ props.cap_loc }}" \
+        bash "$rq/scripts/findings.sh" "{{ props.out }}"
+    timeout: 20m

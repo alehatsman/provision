@@ -1,0 +1,15 @@
+---
+description: cross-compile the Windows binary with mingw-w64
+
+# D1 amendment: the fleet's Windows hosts have no Rust toolchain, so this is
+# the one target that is cross-compiled, from Linux. `-gnu`, not `-msvc`:
+# msvc needs xwin and raises a question about redistributing Microsoft's SDK
+# headers that nothing here is asking us to answer.
+#
+# Needs the target and the linker:
+#   rustup target add x86_64-pc-windows-gnu, and mingw-w64.
+
+steps:
+  - name: cargo build --release --target x86_64-pc-windows-gnu
+    shell: cargo build --release --target x86_64-pc-windows-gnu
+    timeout: 20m

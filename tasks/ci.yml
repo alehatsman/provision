@@ -1,0 +1,36 @@
+---
+description: full pre-push gate — fmt, clippy, test, rustdoc, deny, machete, lint drift
+
+# Becomes `use: {{ rq_dir }}/ci.yml` once rust-quality drops its `name:` and
+# `version:` root keys. Until then this is rq/ci's one shell step, verbatim,
+# with the same three props and the same defaults.
+#
+# The checkout path is repeated across the four gate tasks rather than shared:
+# each file is meant to collapse to a single `use:` line, and a shared vars
+# file would be dead the day that happens. `tasks/tools.yml` owns the version.
+
+props:
+  pkg_args:
+    type: string
+    default: "--workspace"
+    description: Package selector passed to cargo.
+  feature_args:
+    type: string
+    default: "--all-features"
+    description: Feature selector. Crates with mutually exclusive features set "".
+  cap_loc:
+    type: string
+    default: "500"
+    description: God-file soft cap in LOC (informational).
+
+steps:
+  - name: full gate
+    shell: |
+      set -euo pipefail
+      rq="$HOME/.cache/provision/tools/rust-quality"
+      [ -d "$rq" ] || { echo "run tasks/tools.yml first — no $rq" >&2; exit 1; }
+      PKG_ARGS="{{ props.pkg_args }}" \
+      FEATURE_ARGS="{{ props.feature_args }}" \
+      CAP_LOC="{{ props.cap_loc }}" \
+        bash "$rq/scripts/gate.sh" full
+    timeout: 30m

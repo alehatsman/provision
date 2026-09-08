@@ -1,0 +1,11 @@
+---
+description: build the release binary for this machine
+
+# D1: one static binary per target, built natively on the machine that will
+# run it. The one exception is Windows, which has no toolchain of its own in
+# this fleet and is cross-compiled from Linux (D1 amendment).
+
+steps:
+  - name: cargo build --release
+    shell: cargo build --release
+    timeout: 20m

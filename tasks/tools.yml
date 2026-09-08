@@ -1,0 +1,52 @@
+---
+description: check out rust-quality and install the three tools its gate runs
+
+# rust-quality ships config and scripts, not wrappers, so every task in this
+# directory calls a script by path rather than `use`ing a preset. The presets
+# carry `name:` and `version:` root keys, which provision rejects, and
+# sync-config.yml uses mooncake's `file.copy`. When rust-quality drops those,
+# each of these tasks collapses to one `use:` line -- the comment at the top
+# of each says which preset it becomes.
+
+steps:
+  # The pin lives here and nowhere else in this repo. Bump it in one place.
+  #
+  # `vars`, not a prop default: a prop's default is taken as written, never
+  # rendered (spec §3.2), so `{{ home }}` in one would stay four braces.
+  - vars:
+      rq_version: v0.2.0
+      rq_dir: "{{ home }}/.cache/provision/tools/rust-quality"
+
+  - name: Check out rust-quality
+    shell: |
+      set -euo pipefail
+      mkdir -p "$(dirname "{{ rq_dir }}")"
+      git clone --quiet https://github.com/alehatsman/rust-quality.git "{{ rq_dir }}"
+    creates: "{{ rq_dir }}/.git"
+
+  # A fresh clone lands on the default branch, and bumping the pin above moves
+  # a checkout off its tag. Both end here. `git describe --exact-match` asks
+  # "am I on that tag", which is the only useful question -- a branch name or
+  # a sha would each answer something else.
+  - name: "Pin rust-quality to {{ rq_version }}"
+    shell: |
+      set -euo pipefail
+      cd "{{ rq_dir }}"
+      git fetch --quiet --tags
+      git checkout --quiet "{{ rq_version }}"
+    unless: |
+      cd "{{ rq_dir }}" 2>/dev/null &&
+      [ "$(git describe --tags --exact-match 2>/dev/null)" = "{{ rq_version }}" ]
+
+  # rq/tools. Installs cargo-nextest, cargo-deny and cargo-machete and adds the
+  # clippy and rustfmt rustup components. From source unless cargo-binstall is
+  # present, so the first run is slow and says so. Gated on the last of the
+  # three to land, so an interrupted install is retried rather than skipped.
+  - name: Install the gate's tools
+    shell: bash "{{ rq_dir }}/scripts/tools.sh" install
+    creates: "{{ home }}/.cargo/bin/cargo-machete"
+    timeout: 30m
+
+  - name: Verify the gate's tools
+    shell: bash "{{ rq_dir }}/scripts/tools.sh" check
+    changed_when: "false"
