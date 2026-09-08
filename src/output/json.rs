@@ -75,6 +75,10 @@ impl Sink for Json {
             "skipped": s.skipped,
             "unknown": s.unknown,
             "failed": s.failed,
+            // The step lines have always carried `would_change`; the summary
+            // did not, so a consumer counting from the summary alone read a
+            // plan with pending file changes as having nothing to do.
+            "would_change": s.would_change,
             "would_run": s.would_run,
             "would_run_unprobed": s.unprobed,
             "interrupted": s.interrupted,
