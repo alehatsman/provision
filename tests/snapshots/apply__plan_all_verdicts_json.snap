@@ -1,9 +1,9 @@
 ---
 source: tests/apply.rs
-assertion_line: 369
+assertion_line: 511
 expression: stdout
 ---
-{"duration_ms":0,"event":"step","file":"tests/fixtures/apply/plan_all_verdicts.yml","index":1,"line":8,"name":"An assert that already holds","status":"ok"}
+{"duration_ms":0,"event":"step","file":"tests/fixtures/apply/plan_all_verdicts.yml","index":1,"line":8,"name":"An assert that already holds","rc":0,"status":"ok","stderr":"","stdout":""}
 {"diff":"--- current\n+++ [SCRATCH]/hello.txt\n@@ -0,0 +1,2 @@\n+one\n+two\n","duration_ms":0,"event":"step","file":"tests/fixtures/apply/plan_all_verdicts.yml","index":2,"line":12,"name":"A file that would change","status":"would_change"}
 {"duration_ms":0,"event":"step","file":"tests/fixtures/apply/plan_all_verdicts.yml","index":3,"line":20,"name":"A gated shell not yet done","status":"would_run"}
 {"duration_ms":0,"event":"step","file":"tests/fixtures/apply/plan_all_verdicts.yml","index":4,"line":24,"name":"An ungated shell cannot be judged","status":"unknown"}

@@ -96,6 +96,10 @@ pub(crate) struct Event {
     /// without the runner having to guess in advance which will be wanted.
     pub stdout: String,
     pub stderr: String,
+    /// Spec §9.3: the step's own command's exit code, `Some` exactly when the
+    /// step ran one. `--json` reports `rc`, `stdout` and `stderr` together on
+    /// that condition, so this is what gates all three.
+    pub rc: Option<i32>,
     /// A diff, or a metadata delta like `mode 0644 → 0600`. Printed under the
     /// step's line, and carried in `--json` as `diff`.
     pub detail: Option<String>,

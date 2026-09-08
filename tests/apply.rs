@@ -373,6 +373,55 @@ fn json_emits_one_object_per_step_and_a_summary() {
     snapshot!("json", stdout);
 }
 
+// Spec §9.3, phase 5b. The three keys used to arrive only with a failure,
+// which made the stream useless for the thing it is for: a CI runner reading
+// one result per step. They are the step's *own command's*, so a typed action
+// carries none -- its `rc` is invented so `changed_when` and `register` mean
+// the same thing everywhere, and is not an exit code anyone should read --
+// and a skipped step carries none either, because a gate decides whether the
+// step runs and its result is not the step's.
+#[test]
+fn json_carries_rc_and_output_for_every_step_that_ran_a_command() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture("json_step_output.yml");
+    let out = run_in(
+        dir.path(),
+        &["apply", path.to_str().unwrap(), "--json", "--keep-going"],
+    );
+    let steps: Vec<serde_json::Value> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|l| serde_json::from_str::<serde_json::Value>(l).expect(l))
+        .filter(|r| r["event"] == "step")
+        .collect();
+    assert_eq!(steps.len(), 4, "{steps:?}");
+
+    // Succeeded: all three present, in full, without a failure to prompt them.
+    assert_eq!(steps[0]["status"], "ok");
+    assert_eq!(steps[0]["rc"], 0);
+    assert_eq!(steps[0]["stdout"], "out-ok\n");
+    assert_eq!(steps[0]["stderr"], "err-ok\n");
+
+    // Failed: the same three, with the command's own exit code.
+    assert_eq!(steps[1]["status"], "failed");
+    assert_eq!(steps[1]["rc"], 4);
+    assert_eq!(steps[1]["stdout"], "out-bad\n");
+    assert_eq!(steps[1]["stderr"], "err-bad\n");
+
+    // A typed action and a skipped step ran no command of their own.
+    assert_eq!(steps[2]["status"], "changed");
+    for key in ["rc", "stdout", "stderr"] {
+        assert!(
+            steps[2][key].is_null(),
+            "typed action carried {key}: {steps:?}"
+        );
+        assert!(
+            steps[3][key].is_null(),
+            "skipped step carried {key}: {steps:?}"
+        );
+    }
+    assert_eq!(steps[3]["status"], "skipped");
+}
+
 #[test]
 fn hide_skipped_drops_the_lines_but_not_the_count() {
     let dir = tempfile::tempdir().unwrap();

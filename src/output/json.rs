@@ -48,9 +48,26 @@ impl Sink for Json {
             "line": ev.line,
         });
         let m = o.as_object_mut().expect("built as an object");
+        // Spec §9.3: `rc`, `stdout` and `stderr` are the step's own command's,
+        // present exactly when the step ran one, whatever its status, in full.
+        // That is the whole of what a CI runner reads per step, so it is not
+        // reserved for failures the way it used to be. A typed action ran no
+        // command and a skipped step ran none, so neither carries them, and a
+        // gate's result is never reported: it decides whether the step runs
+        // and is not the step's own result.
+        if let Some(rc) = ev.rc {
+            m.insert("rc".into(), json!(rc));
+            m.insert("stdout".into(), json!(ev.stdout));
+            m.insert("stderr".into(), json!(ev.stderr));
+        }
         if let super::event::Status::Skipped(why) = &ev.status {
             m.insert("reason".into(), json!(why));
         }
+        // A failure's `rc` and `stderr` are written after the pair above, not
+        // instead of them: they are the same values for a command that
+        // exited, and for one that never did — a timeout, an interrupt — the
+        // failure's `rc: null` is the honest answer and the command's is not
+        // there to give. A typed action's failure has only these.
         if let super::event::Status::Failed(f) = &ev.status {
             m.insert("message".into(), json!(f.msg));
             m.insert("rc".into(), json!(f.rc));

@@ -1,0 +1,24 @@
+---
+# Spec §9.3: `rc`, `stdout` and `stderr` belong to the step's own command, and
+# are reported exactly when the step ran one -- whatever its status, in full.
+# One step of each kind that answers the question differently.
+- name: A command that succeeds
+  shell: |
+    echo out-ok
+    echo err-ok >&2
+  changed_when: "false"
+
+- name: A command that fails
+  shell: |
+    echo out-bad
+    echo err-bad >&2
+    exit 4
+
+- name: A typed action runs no command
+  file:
+    path: "{{ env.PROVISION_SCRATCH }}/made"
+    state: dir
+
+- name: A gate says this one is done
+  shell: echo never-runs
+  unless: "true"

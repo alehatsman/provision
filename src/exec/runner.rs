@@ -58,6 +58,13 @@ pub(crate) struct Done {
     pub status: Status,
     /// What `register` binds. `None` when the step never ran.
     pub out: Option<Output>,
+    /// Spec §9.3: the step's own command's exit code, and `Some` exactly when
+    /// the step ran one — `shell`, `cmd`, `assert`. A typed action's `out` is
+    /// synthetic, invented below so `changed_when`, `failed_when` and
+    /// `register` mean the same thing on every step; it never ran a command
+    /// and reports no exit code. Nor does a skipped step: a gate decides
+    /// whether the step runs and its result is not the step's.
+    pub rc: Option<i32>,
     pub attempt: u32,
     pub attempts: u32,
     /// A typed action's diff or metadata delta. Never set by `shell`.
@@ -71,6 +78,7 @@ impl Done {
         Done {
             status,
             out: None,
+            rc: None,
             attempt: 1,
             attempts: 1,
             detail: None,
@@ -290,6 +298,7 @@ impl Runner {
         };
         Ok(Done {
             status,
+            rc: Some(out.rc),
             out: Some(out),
             attempt,
             attempts,
@@ -402,6 +411,9 @@ impl Runner {
         Ok(Done {
             status,
             out: Some(out),
+            // No command ran; the `0`/`1` above is the override substrate and
+            // not an exit code anybody should read (§9.3).
+            rc: None,
             attempt: 1,
             attempts: 1,
             detail,
