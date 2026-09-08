@@ -1,5 +1,5 @@
 # Shared across every machine. Loaded with `vars_file`, which takes the file
 # as data: values are not templated.
-email: aleh.atsman@proton.me
+email: aleh.atsman@gmail.com
 editor: nvim
 dotfiles_dir: ~/dotfiles
