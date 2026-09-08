@@ -37,12 +37,13 @@ fn run(args: &[&str]) -> (i32, String) {
     )
 }
 
-/// `--verbose` throughout: the props are asserted through what the step
-/// echoed, and a captured step prints nothing without it.
+/// A component as `apply`'s root (spec §8, D17). `--verbose` throughout: the
+/// props are asserted through what the step echoed, and a captured step
+/// prints nothing without it.
 fn task(extra: &[&str]) -> (i32, String) {
     let path = fixture("task.yml");
     let mut args = vec![
-        "run",
+        "apply",
         path.to_str().expect("fixture paths are UTF-8"),
         "--verbose",
     ];
@@ -156,6 +157,11 @@ fn a_prop_that_does_not_read_as_its_type_names_what_was_expected() {
     }
 }
 
+// ── the root file is a plan or a component, under every verb ──────────────
+
+// Spec §8: the root's own shape says which it is, so no verb needs a flag.
+// The three that walk a root each get the same component, because "the same
+// file means the same thing under every verb" is the whole of phase 5b.
 #[test]
 fn validate_checks_a_component_and_its_props_without_running_it() {
     let path = fixture("task.yml");
@@ -167,12 +173,55 @@ fn validate_checks_a_component_and_its_props_without_running_it() {
     ]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("  ok  "), "{out}");
+}
 
-    // Same three checks as `run`. No placeholder stands in for a required
-    // prop just because nothing is going to execute.
-    let (code, out) = run(&["validate", path.to_str().unwrap()]);
+// All three prop errors, at validate time. No placeholder stands in for a
+// required prop just because nothing is going to execute.
+#[test]
+fn validate_reports_every_prop_error_a_use_site_would_get() {
+    let path = fixture("task.yml");
+    let p = path.to_str().unwrap();
+
+    let (code, out) = run(&["validate", p]);
     assert_eq!(code, EXIT_VALIDATION, "{out}");
     assert!(out.contains("missing required prop `target`"), "{out}");
+
+    let (code, out) = run(&["validate", p, "--prop", "target=/tmp/x", "--prop", "nope=1"]);
+    assert_eq!(code, EXIT_VALIDATION, "{out}");
+    assert!(out.contains("has no prop `nope`"), "{out}");
+
+    let (code, out) = run(&[
+        "validate", p, "--prop", "target=/tmp/x", "--prop", "count=abc",
+    ]);
+    assert_eq!(code, EXIT_VALIDATION, "{out}");
+    assert!(out.contains("is declared int, and"), "{out}");
+}
+
+// `plan tasks/ci.yml` previews a task's gates. The gated step is probed and
+// reports a plan verdict; the ungated one is `unknown` here exactly as it is
+// under `apply`, which is why the exit code is 2.
+#[test]
+fn plan_previews_a_component_the_same_way_it_previews_a_plan() {
+    let path = fixture("task.yml");
+    let (code, out) = run(&["plan", path.to_str().unwrap(), "--prop", "target=/tmp/x"]);
+    assert_eq!(code, 2, "{out}");
+    assert!(out.contains("Echo the props"), "{out}");
+    assert!(out.contains("A gated step"), "{out}");
+}
+
+// A plan has no props to set, so a `--prop` aimed at one is a usage error
+// rather than a value quietly dropped.
+#[test]
+fn a_prop_on_a_plan_is_a_usage_error() {
+    let path = fixture("not_a_component.yml");
+    for verb in ["validate", "plan", "apply"] {
+        let (code, out) = run(&[verb, path.to_str().unwrap(), "--prop", "target=/tmp/x"]);
+        assert_eq!(code, EXIT_VALIDATION, "{verb}:\n{out}");
+        assert!(
+            out.contains("this file is a plan, not a component"),
+            "{verb}:\n{out}"
+        );
+    }
 }
 
 // ── the one verdict that moves ────────────────────────────────────────────

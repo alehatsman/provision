@@ -55,9 +55,9 @@ enum Command {
         /// Also reject `shell`/`cmd` steps with no idempotency gate.
         #[arg(long)]
         strict: bool,
-        /// Set a prop, when the file is a component rather than a plan.
-        /// Checked exactly as `run` checks it: a required prop with no value
-        /// is an error here too, and nothing stands in for it.
+        /// Set a prop, when the root file is a component rather than a plan.
+        /// Checked exactly as `apply` checks it: a required prop with no
+        /// value is an error here too, and nothing stands in for it.
         #[arg(long = "prop", value_name = "KEY=VALUE")]
         prop: Vec<String>,
         #[command(flatten)]
@@ -69,6 +69,9 @@ enum Command {
         /// Do not probe the machine; report every step as unprobed.
         #[arg(long)]
         plan_no_probe: bool,
+        /// Set a prop, when the root file is a component rather than a plan.
+        #[arg(long = "prop", value_name = "KEY=VALUE")]
+        prop: Vec<String>,
         #[command(flatten)]
         run: RunArgs,
     },
@@ -88,6 +91,9 @@ enum Command {
         /// is broken. Ctrl-C still stops.
         #[arg(long)]
         keep_going: bool,
+        /// Set a prop, when the root file is a component rather than a plan.
+        #[arg(long = "prop", value_name = "KEY=VALUE")]
+        prop: Vec<String>,
         #[command(flatten)]
         run: RunArgs,
     },
@@ -309,15 +315,7 @@ fn run() -> Result<u8, Diag> {
                 skip_tags: Vec::new(),
             };
             let mut ex = expander(&vars, Mode::Validate { strict }, selection)?;
-            // D17: the same file check `run` makes. A mapping is a component
-            // and a sequence is a plan, which is what their own parse errors
-            // already say; asking here means `validate tasks/deploy.yml`
-            // works without a flag saying which it is.
-            if is_component(&plan)? {
-                ex.run_component(&plan, &props)?;
-            } else {
-                ex.run(&plan)?;
-            }
+            walk_root(&mut ex, &plan, &props)?;
             let base = cwd();
             if ex.diags.is_empty() {
                 println!("  ok  {}", rel(&plan, &base));
@@ -330,10 +328,12 @@ fn run() -> Result<u8, Diag> {
         Command::Plan {
             plan,
             plan_no_probe,
+            prop,
             run,
         } => {
             run.apply_color();
             let plan = check_exists(&plan)?;
+            let props = pairs(&prop, "--prop")?;
             let base = cwd();
             let mode = Mode::Plan {
                 probe: !plan_no_probe,
@@ -352,7 +352,7 @@ fn run() -> Result<u8, Diag> {
                 .with_sink(run.sink(base.clone(), false, false));
 
             let started = Instant::now();
-            ex.run(&plan)?;
+            walk_root(&mut ex, &plan, &props)?;
             ex.summarize(&plan, started.elapsed());
 
             if !ex.diags.is_empty() {
@@ -462,17 +462,19 @@ fn run() -> Result<u8, Diag> {
             verbose,
             stream,
             keep_going,
+            prop,
             run,
         } => {
             run.apply_color();
             let plan = check_exists(&plan)?;
+            let props = pairs(&prop, "--prop")?;
             let base = cwd();
 
             // Spec §7: the walk that finds the sudo steps also validates the
             // whole plan, so a typo in the last step fails before the first
             // step runs. It renders everything and touches nothing.
             let mut check = expander(&run.vars, Mode::Validate { strict: false }, run.selection())?;
-            check.run(&plan)?;
+            walk_root(&mut check, &plan, &props)?;
             if !check.diags.is_empty() {
                 report(&check, &base, Some(&plan));
                 return Ok(EXIT_USAGE);
@@ -491,7 +493,7 @@ fn run() -> Result<u8, Diag> {
                 .with_sink(run.sink(base.clone(), verbose, stream));
 
             let started = Instant::now();
-            ex.run(&plan)?;
+            walk_root(&mut ex, &plan, &props)?;
             ex.summarize(&plan, started.elapsed());
 
             if !ex.diags.is_empty() {
@@ -509,6 +511,29 @@ fn run() -> Result<u8, Diag> {
             })
         }
     }
+}
+
+/// Spec §8, D17: the root file is a plan or a component, and its own shape
+/// says which — a sequence is a plan, a mapping is a component. That is the
+/// same distinction both parsers already make in their own error messages,
+/// so no command needs a flag saying what it was handed, and every command
+/// walks the root the same way.
+///
+/// `--prop` on a plan is a usage error rather than a value quietly dropped:
+/// a plan has no props to set, and the caller who typed one believes it took
+/// effect.
+fn walk_root(ex: &mut Expander, root: &Path, props: &[(String, String)]) -> Result<(), Diag> {
+    if is_component(root)? {
+        return ex.run_component(root, props);
+    }
+    if let Some((key, _)) = props.first() {
+        return Err(Diag::file_level(
+            root,
+            format!("`--prop {key}=…` but this file is a plan, not a component"),
+        )
+        .with_note("props are declared at a component's root; a plan takes `--var`"));
+    }
+    ex.run(root)
 }
 
 fn report(ex: &Expander, base: &Path, plan: Option<&Path>) {
