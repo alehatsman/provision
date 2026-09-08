@@ -219,17 +219,36 @@ not the development box and cannot be reached from it. It waits for the owner.
 
 Deliverables
 
-- `--tags`, `--skip-tags`, `always`, applied post-expansion.
-- `--hide-skipped`, `--no-diff`, `--stream`, `--verbose`, `--explain-var`.
-- Windows build: `shell` with PowerShell default, `~` expansion, `sudo`
-  rejected with a clear message.
-- `validate --strict`.
+- **Done** (`df451a8`, `e88c41f`) `--tags`, `--skip-tags`, `always`, applied
+  post-expansion. `expand.rs:59`.
+- **Done** (`df451a8`) `--hide-skipped`, `--no-diff`, `--stream`,
+  `--verbose`, `--color`. All in `main.rs`.
+- **Not implemented** `--explain-var`. Spec'd in §8 and §10, and nothing in
+  the fleet asks for it: `validate`'s undefined-variable diagnostics already
+  carry `file:line:col` and the name. Cutting it is a scope call, so it
+  waits for the owner rather than being struck here.
+- **Done** Windows build: PowerShell is the default interpreter
+  (`actions/mod.rs:48`), `~` expands, `sudo` is rejected at `model.rs:284`,
+  and the process-group and `taskkill` paths exist (`process.rs:247,274`).
+- **Done** (`df451a8`) `validate --strict`.
 
 Gate
 
-- Tag tests for the two mooncake bugs (#191, #196): a positive tag filter
-  excludes untagged steps; plan with a tag does not touch excluded steps.
-- Windows bootstrap plan validates and plans on a Windows box.
+- **Done** (`tests/cli.rs:228,250`) tag tests for the two mooncake bugs
+  (#191, #196): a positive tag filter excludes untagged steps; plan with a
+  tag does not touch excluded steps.
+- **Done** the binary cross-compiles and is self-contained.
+  `cargo check --target x86_64-pc-windows-gnu --all-targets` is clean, and
+  the 2.6 MB `.exe` imports system DLLs only — no `libgcc`, no
+  `libwinpthread`. See the D1 amendment.
+- **Partly.** Windows bootstrap plan validates and plans *on Linux*:
+  `validate --vars-file machines/main_pc/vars.yml platforms/windows/bootstrap.yml`
+  exits 0 for both Windows machines, and `plan --plan-no-probe` reports 18
+  steps, 16 unprobed, 2 skipped, exit 0. Without a vars file it is 10
+  undefined variables and exit 3, which is the file header's own
+  instruction being enforced. Running `validate` and `plan` **on a Windows
+  box** is not something this machine can do, and is not counted green. It
+  waits for the owner, like x1.
 
 ### Phase 4 — migration and cut-over
 

@@ -17,6 +17,20 @@ the next stack and this is a small enough project to be a good first one.
 
 **Overturned by.** Nothing foreseeable.
 
+**Amended 2026-09-08, owner to confirm.** Windows ships as
+`x86_64-pc-windows-gnu`, not `-msvc`, and no cross-compilation happens for
+Linux or macOS at all. Every machine in the fleet builds its own native
+binary; only Windows, which has no toolchain in this fleet, is
+cross-compiled — from Linux, with the mingw-w64 that is already installed.
+`-msvc` needs `xwin` and raises a question about redistributing Microsoft's
+SDK headers that nothing here is asking us to answer. The resulting `.exe`
+is 2.6 MB and imports only system DLLs — `kernel32`, `ntdll`, `msvcrt`,
+`combase`, `shell32`, `userenv`, `bcryptprimitives` — so it is as
+self-contained as the musl target would have been. musl and
+`aarch64-apple-darwin` are dropped until something consumes them: the Linux
+and macOS machines each have a Rust toolchain, and a cross-built artifact
+nobody installs is a build we would maintain for nothing.
+
 ## D2 — No fleet, no daemon, no remote
 
 **Decision.** The tool runs on the machine it converges. Period.
