@@ -1,0 +1,17 @@
+---
+# Plan-only: nothing here has a side effect to gate against. Spec §10 / D14:
+# a `when` reading a `register` cannot be judged before the step that
+# registers it has run, so under `plan` it is `would run (unprobed)`, not
+# `would run` — the same as a `pkg`/`unless` gate plan cannot reach.
+- name: Registers a result the next two gate on
+  shell: "true"
+  changed_when: "true"
+  register: dropin
+
+- name: Gated on that register
+  shell: "true"
+  when: dropin.changed
+
+- name: Same gate, no other modifier
+  shell: "true"
+  when: dropin.changed

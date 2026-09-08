@@ -399,6 +399,40 @@ fn the_json_summary_counts_a_would_change_step() {
     assert_eq!(counted, summary["total"].as_u64().unwrap(), "{stdout}");
 }
 
+#[test]
+fn a_when_reading_a_register_stays_unprobed_under_plan() {
+    // D14 / spec §10: a `when` reading a `register` cannot be judged before
+    // the step that registers it has run, so it is `would run (unprobed)`,
+    // not a real verdict. This was requested as a failing test — by the time
+    // it was written, e5c514f had already landed and fixed it (`condition()`
+    // returned `Cond::Unprobed` correctly, but `step()` matched it together
+    // with `Cond::True` and reported a real verdict anyway; a `service:
+    // {state: restarted}` gated this way came out `would change`, an
+    // invented answer about a machine nobody asked). This is the regression
+    // test for that fix instead.
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture("register_unprobed.yml");
+    let out = run_in(dir.path(), &["plan", path.to_str().unwrap(), "--json", "--color=never"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let rows: Vec<serde_json::Value> = stdout.lines().map(|l| serde_json::from_str(l).expect(l)).collect();
+    let steps: Vec<&serde_json::Value> = rows.iter().filter(|r| r["event"] == "step").collect();
+    assert_eq!(steps.len(), 3, "{stdout}");
+    assert_eq!(steps[0]["status"], "would_run", "{stdout}");
+    assert_eq!(steps[1]["status"], "would_run_unprobed", "{stdout}");
+    assert_eq!(steps[2]["status"], "would_run_unprobed", "{stdout}");
+    let summary = rows.last().unwrap();
+    assert_eq!(summary["would_run_unprobed"], 2, "{stdout}");
+
+    // At apply time the register holds a real result and step 1 did change,
+    // so both gated steps run.
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(dir.path(), "register_unprobed.yml", &[]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(verdict(&out, "Registers a result"), "changed", "{out}");
+    assert!(!line_for(&out, "Gated on that register").contains("skipped"), "{out}");
+    assert!(!line_for(&out, "Same gate, no other modifier").contains("skipped"), "{out}");
+}
+
 // ── context, streaming, and Ctrl-C ────────────────────────────────────────
 
 #[test]
