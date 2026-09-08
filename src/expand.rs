@@ -203,10 +203,11 @@ impl Expander {
 
     fn condition(&mut self, step: &Step<'static>, scope: &Scope) -> Cond {
         let Some(when) = step.mods.when else { return Cond::True };
-        let expr = match when.as_str() {
+        let expr = match when.as_scalar_string() {
             Ok(s) => s,
             Err(d) => return Cond::Error(d),
         };
+        let expr = expr.as_str();
         // A `when` reading a registered result cannot be evaluated before the
         // step that registers it has run. Plan says so instead of guessing.
         if self.reads_a_register(expr) {
@@ -474,9 +475,20 @@ impl Expander {
         // Compile the expression modifiers. `result` is only in scope at apply
         // time, so syntax is all that can be checked here.
         for e in model::expression_fields(step) {
-            if let Ok(src) = e.as_str() {
-                let at = |m: String| e.err(m);
-                if let Err(d) = self.engine.check_syntax(src, &at) {
+            // `as_scalar_string`, not `as_str`: YAML types `changed_when:
+            // false` as a boolean, and `false` is a perfectly good expression
+            // once it is text. Reading it as a string silently dropped it —
+            // and a dropped `changed_when` does not mean "no opinion", it
+            // means the step reports `changed` forever.
+            match e.as_scalar_string() {
+                Ok(src) => {
+                    let at = |m: String| e.err(m);
+                    if let Err(d) = self.engine.check_syntax(&src, &at) {
+                        self.diags.push(d);
+                        renderable = false;
+                    }
+                }
+                Err(d) => {
                     self.diags.push(d);
                     renderable = false;
                 }
@@ -549,8 +561,10 @@ impl Expander {
             let judge = StepJudge {
                 engine: &self.engine,
                 base: scope.ctx_map(),
-                failed_when: step.mods.failed_when.and_then(|n| n.as_str().ok()),
-                changed_when: step.mods.changed_when.and_then(|n| n.as_str().ok()),
+                // Non-scalars already produced a diagnostic above and never
+                // reach here, so this cannot silently discard an opinion.
+                failed_when: step.mods.failed_when.and_then(|n| n.as_scalar_string().ok()),
+                changed_when: step.mods.changed_when.and_then(|n| n.as_scalar_string().ok()),
                 at: step.at,
             };
             let runner = self.runner.as_ref().expect("plan and apply always attach a runner");
@@ -860,8 +874,8 @@ fn result_value(out: Option<&Output>, status: &Status) -> Value {
 struct StepJudge<'a> {
     engine: &'a Engine,
     base: Map,
-    failed_when: Option<&'a str>,
-    changed_when: Option<&'a str>,
+    failed_when: Option<String>,
+    changed_when: Option<String>,
     at: N<'a>,
 }
 
@@ -880,14 +894,14 @@ impl StepJudge<'_> {
 
 impl Judge for StepJudge<'_> {
     fn failed(&self, out: &Output) -> Result<bool> {
-        match self.failed_when {
+        match &self.failed_when {
             Some(src) => self.eval(src, &self.ctx(out)),
             None => Ok(out.rc != 0),
         }
     }
 
     fn changed(&self, out: &Output) -> Result<Option<bool>> {
-        match self.changed_when {
+        match &self.changed_when {
             Some(src) => self.eval(src, &self.ctx(out)).map(Some),
             None => Ok(None),
         }
