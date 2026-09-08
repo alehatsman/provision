@@ -342,8 +342,7 @@ impl Expander {
         let optional = step
             .mods
             .optional
-            .map(|n| n.as_bool().unwrap_or(false))
-            .unwrap_or(false);
+            .is_some_and(|n| n.as_bool().unwrap_or(false));
         let Some(entries) = self.diags.absorb(step.body.as_str_or_seq_nodes()) else {
             return;
         };
@@ -622,11 +621,7 @@ impl Expander {
         // is also the only place that reports render errors: `prepare` below
         // renders the same nodes again and stays quiet, so one bad `{{ … }}`
         // is one diagnostic rather than two.
-        let raw = step
-            .mods
-            .raw
-            .map(|n| n.as_bool().unwrap_or(false))
-            .unwrap_or(false);
+        let raw = step.mods.raw.is_some_and(|n| n.as_bool().unwrap_or(false));
         let mut fields: Vec<N<'static>> = Vec::new();
         if !raw {
             collect_strings(step.body, &mut fields);
@@ -690,12 +685,7 @@ impl Expander {
             self.check_file_source(step, &ctx);
         }
 
-        if step
-            .mods
-            .sudo
-            .map(|n| n.as_bool().unwrap_or(false))
-            .unwrap_or(false)
-        {
+        if step.mods.sudo.is_some_and(|n| n.as_bool().unwrap_or(false)) {
             self.needs_sudo = true;
         }
 
@@ -867,11 +857,7 @@ impl Expander {
             creates: text(step.mods.creates),
             cwd,
             env,
-            sudo: step
-                .mods
-                .sudo
-                .map(|n| n.as_bool().unwrap_or(false))
-                .unwrap_or(false),
+            sudo: step.mods.sudo.is_some_and(|n| n.as_bool().unwrap_or(false)),
             timeout: step
                 .mods
                 .timeout
@@ -979,8 +965,7 @@ impl Expander {
             .body
             .get("state")
             .and_then(|s| s.as_str().ok())
-            .map(|s| s == "link")
-            .unwrap_or(false);
+            .is_some_and(|s| s == "link");
         if is_link {
             return;
         }
@@ -1137,17 +1122,14 @@ enum Cond {
 /// false and the reader is reported unprobed rather than skipped.
 fn result_value(out: Option<&Output>, status: &Status) -> Value {
     let mut m = BTreeMap::new();
-    m.insert(
-        "rc".to_string(),
-        Value::from(out.map(|o| o.rc).unwrap_or(0)),
-    );
+    m.insert("rc".to_string(), Value::from(out.map_or(0, |o| o.rc)));
     m.insert(
         "stdout".to_string(),
-        Value::from(out.map(|o| o.stdout.as_str()).unwrap_or("")),
+        Value::from(out.map_or("", |o| o.stdout.as_str())),
     );
     m.insert(
         "stderr".to_string(),
-        Value::from(out.map(|o| o.stderr.as_str()).unwrap_or("")),
+        Value::from(out.map_or("", |o| o.stderr.as_str())),
     );
     m.insert(
         "changed".to_string(),

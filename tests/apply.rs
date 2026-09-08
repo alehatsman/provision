@@ -329,8 +329,7 @@ fn a_timeout_kills_the_children_not_only_the_shell() {
     let alive = Command::new("kill")
         .args(["-0", &pid.to_string()])
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
+        .is_ok_and(|o| o.status.success());
     assert!(
         !alive,
         "pid {pid} outlived the process group it was killed with"
@@ -861,8 +860,7 @@ fn an_unless_that_hangs_fails_the_step_instead_of_running_it() {
     let alive = Command::new("kill")
         .args(["-0", &pid.to_string()])
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
+        .is_ok_and(|o| o.status.success());
     assert!(!alive, "pid {pid} outlived the gate that timed out");
 }
 
@@ -902,8 +900,7 @@ fn root_is_reachable() -> bool {
     Command::new("sudo")
         .args(["-n", "--", "true"])
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+        .is_ok_and(|o| o.status.success())
 }
 
 // ── file ──────────────────────────────────────────────────────────────────
@@ -1025,8 +1022,7 @@ fn a_file_that_cannot_be_read_says_sudo_is_how() {
             Command::new("sudo")
                 .args(["-n", "chown", "root:root", secret.to_str().unwrap()])
                 .status()
-                .map(|s| s.success())
-                .unwrap_or(false)
+                .is_ok_and(|s| s.success())
         );
 
         let plan = dir.path().join("unreadable.yml");
@@ -1125,8 +1121,7 @@ fn sudo(args: &[&str]) -> bool {
     Command::new("sudo")
         .args(&all)
         .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+        .is_ok_and(|s| s.success())
 }
 
 fn mode_of(p: &Path) -> u32 {
@@ -1367,8 +1362,7 @@ fn systemctl(args: &[&str]) -> bool {
     Command::new("systemctl")
         .args(&all)
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+        .is_ok_and(|o| o.status.success())
 }
 
 fn service_plan(dir: &Path, name: &str, body: &str) -> PathBuf {
@@ -1498,8 +1492,7 @@ fn apt_is_local() -> bool {
         Command::new(bin)
             .arg("--version")
             .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+            .is_ok_and(|o| o.status.success())
     };
     on_path("apt-get") && on_path("dpkg-query")
 }
@@ -2187,8 +2180,7 @@ fn a_typed_actions_command_is_bound_by_the_steps_timeout() {
     let alive = Command::new("kill")
         .args(["-0", &pid])
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
+        .is_ok_and(|o| o.status.success());
     assert!(
         !alive,
         "pid {pid} outlived the process group it was killed with"

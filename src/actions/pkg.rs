@@ -331,11 +331,7 @@ pub(crate) fn parse(
         .get("update_cache")
         .and_then(|n| n.as_bool().ok())
         .unwrap_or(false);
-    let sudo = step
-        .mods
-        .sudo
-        .map(|n| n.as_bool().unwrap_or(false))
-        .unwrap_or(false);
+    let sudo = step.mods.sudo.is_some_and(|n| n.as_bool().unwrap_or(false));
 
     let manager = match body.get("manager") {
         Some(n) => {

@@ -201,7 +201,7 @@ fn signal_code(st: std::process::ExitStatus) -> i32 {
     use std::os::unix::process::ExitStatusExt;
     // The shell's convention, so `failed_when: result.rc == 139` reads the
     // way an operator expects for a segfault.
-    st.signal().map(|s| 128 + s).unwrap_or(-1)
+    st.signal().map_or(-1, |s| 128 + s)
 }
 
 #[cfg(not(unix))]

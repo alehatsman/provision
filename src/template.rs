@@ -165,7 +165,7 @@ impl Engine {
         let Ok(names) = referenced else { return base };
         let mut missing: Vec<String> = names
             .into_iter()
-            .filter(|n| ctx.get_attr(n).map(|v| v.is_undefined()).unwrap_or(true))
+            .filter(|n| ctx.get_attr(n).map_or(true, |v| v.is_undefined()))
             .collect();
         missing.sort();
         match missing.as_slice() {
@@ -224,8 +224,7 @@ pub(crate) fn expanduser(s: &str) -> String {
 fn f_basename(s: &str) -> String {
     Path::new(s)
         .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| s.to_string())
+        .map_or_else(|| s.to_string(), |n| n.to_string_lossy().into_owned())
 }
 
 fn f_dirname(s: &str) -> String {

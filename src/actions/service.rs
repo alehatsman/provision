@@ -117,11 +117,7 @@ pub(crate) fn parse(
     // Spec §6.6: a user-scope unit belongs to the invoking user's manager.
     // `sudo` would talk to root's, which is a different manager entirely, so
     // the two together mean opposite things.
-    let sudo = step
-        .mods
-        .sudo
-        .map(|n| n.as_bool().unwrap_or(false))
-        .unwrap_or(false);
+    let sudo = step.mods.sudo.is_some_and(|n| n.as_bool().unwrap_or(false));
     if user && sudo {
         return Err(step
             .at

@@ -46,8 +46,7 @@ impl Sudo {
                     }
                     c.wait()
                 })
-                .map(|st| st.success())
-                .unwrap_or(false);
+                .is_ok_and(|st| st.success());
             if !ok {
                 return Err(Diag::file_level("sudo", "that password was not accepted"));
             }
@@ -157,6 +156,5 @@ pub(crate) fn root_is_reachable() -> bool {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
-        .map(|st| st.success())
-        .unwrap_or(false)
+        .is_ok_and(|st| st.success())
 }

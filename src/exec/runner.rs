@@ -240,7 +240,7 @@ impl Runner {
             stream: self.stream,
         })
         .map_err(|e| {
-            let prog = argv.first().map(String::as_str).unwrap_or("");
+            let prog = argv.first().map_or("", String::as_str);
             Stop::Fail(Failure {
                 msg: format!("cannot run `{prog}`: {e}"),
                 rc: None,
