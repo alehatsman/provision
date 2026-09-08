@@ -10,7 +10,7 @@ use std::time::Duration;
 /// first-class answer, not a failure: a `shell` step with no gate ran, and
 /// nothing here can honestly say what it did (D3).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Status {
+pub(crate) enum Status {
     Ok,
     Changed,
     Unknown,
@@ -26,7 +26,7 @@ pub enum Status {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Failure {
+pub(crate) struct Failure {
     pub msg: String,
     pub rc: Option<i32>,
     pub stderr: String,
@@ -35,7 +35,7 @@ pub struct Failure {
 }
 
 impl Status {
-    pub fn label(&self) -> String {
+    pub(crate) fn label(&self) -> String {
         match self {
             Status::Ok => "ok".into(),
             Status::Changed => "changed".into(),
@@ -48,7 +48,7 @@ impl Status {
         }
     }
 
-    pub fn glyph(&self) -> &'static str {
+    pub(crate) fn glyph(&self) -> &'static str {
         match self {
             Status::Ok => "✓",
             Status::Changed => "~",
@@ -61,12 +61,12 @@ impl Status {
         }
     }
 
-    pub fn failed(&self) -> bool {
+    pub(crate) fn failed(&self) -> bool {
         matches!(self, Status::Failed(_))
     }
 
     /// The word `--json` uses. Stable; the terminal wording is not.
-    pub fn key(&self) -> &'static str {
+    pub(crate) fn key(&self) -> &'static str {
         match self {
             Status::Ok => "ok",
             Status::Changed => "changed",
@@ -82,7 +82,7 @@ impl Status {
 
 /// One finished step.
 #[derive(Debug, Clone)]
-pub struct Event {
+pub(crate) struct Event {
     pub index: usize,
     pub name: String,
     pub file: PathBuf,
@@ -106,7 +106,7 @@ pub struct Event {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct Summary {
+pub(crate) struct Summary {
     pub total: usize,
     pub ok: usize,
     pub changed: usize,
@@ -121,7 +121,7 @@ pub struct Summary {
 }
 
 impl Summary {
-    pub fn count(&mut self, s: &Status) {
+    pub(crate) fn count(&mut self, s: &Status) {
         self.total += 1;
         match s {
             Status::Ok => self.ok += 1,
@@ -143,13 +143,13 @@ impl Summary {
     /// both provision admitting it does not know, which is not the same as
     /// nothing to do. `--plan-no-probe` is handled a level up: it inspected
     /// nothing, so it claims nothing.
-    pub fn has_changes(&self) -> bool {
+    pub(crate) fn has_changes(&self) -> bool {
         self.total - (self.ok + self.skipped) > 0
     }
 
     /// The counts worth printing, in the order §9.1 shows them. A count of
     /// zero is noise, so it is left out.
-    pub fn parts(&self) -> Vec<String> {
+    pub(crate) fn parts(&self) -> Vec<String> {
         let mut v = Vec::new();
         let mut add = |n: usize, word: &str| {
             if n > 0 {
@@ -170,7 +170,7 @@ impl Summary {
 
 /// `1.7s`, `0.4s`, `12ms`. Durations in output are for a person scanning a
 /// column, not for a benchmark.
-pub fn human(d: Duration) -> String {
+pub(crate) fn human(d: Duration) -> String {
     let ms = d.as_millis();
     if ms < 1000 {
         format!("{ms}ms")
@@ -180,7 +180,7 @@ pub fn human(d: Duration) -> String {
 }
 
 /// The last `n` lines, for the failure block. Spec §9.1 shows 20.
-pub fn tail(text: &str, n: usize) -> Vec<&str> {
+pub(crate) fn tail(text: &str, n: usize) -> Vec<&str> {
     let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
     let start = lines.len().saturating_sub(n);
     lines[start..].to_vec()

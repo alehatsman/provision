@@ -6,10 +6,10 @@ use minijinja::Value;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone)]
-pub struct Facts(BTreeMap<String, Value>);
+pub(crate) struct Facts(BTreeMap<String, Value>);
 
 impl Facts {
-    pub fn detect() -> Facts {
+    pub(crate) fn detect() -> Facts {
         let mut f: BTreeMap<String, Value> = BTreeMap::new();
         let mut set = |k: &str, v: Value| {
             f.insert(k.to_string(), v);
@@ -56,11 +56,11 @@ impl Facts {
 
     /// Only the tests read a single fact by name; the CLI iterates.
     #[cfg(test)]
-    pub fn get(&self, key: &str) -> Option<&Value> {
+    pub(crate) fn get(&self, key: &str) -> Option<&Value> {
         self.0.get(key)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&String, &Value)> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, &Value)> {
         self.0.iter()
     }
 }

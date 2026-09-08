@@ -8,17 +8,17 @@ use minijinja::Value;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-pub type Map = BTreeMap<String, Value>;
+pub(crate) type Map = BTreeMap<String, Value>;
 
 /// Shared across every scope in a run: the layers no plan file can change.
-pub struct Globals {
+pub(crate) struct Globals {
     pub facts: Map,
     pub cli: Map,
     pub env: Value,
 }
 
 impl Globals {
-    pub fn new(facts: &crate::facts::Facts, cli: Map) -> Globals {
+    pub(crate) fn new(facts: &crate::facts::Facts, cli: Map) -> Globals {
         let env: Map = std::env::vars().map(|(k, v)| (k, Value::from(v))).collect();
         Globals {
             facts: facts.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
@@ -29,7 +29,7 @@ impl Globals {
 }
 
 /// One plan file's scope. `import` shares one of these; `use` makes a child.
-pub struct Scope {
+pub(crate) struct Scope {
     globals: Rc<Globals>,
     /// A parent's variables, flattened at the moment the child was made.
     /// Read-only by construction: the child never writes here.
@@ -45,7 +45,7 @@ pub struct Scope {
 }
 
 impl Scope {
-    pub fn root(globals: Rc<Globals>) -> Scope {
+    pub(crate) fn root(globals: Rc<Globals>) -> Scope {
         Scope {
             globals,
             inherited: Map::new(),
@@ -60,7 +60,7 @@ impl Scope {
     /// parent, made absolute — a relative one would be read against whatever
     /// the process cwd happens to be, which under `run` is deliberately not
     /// the component's directory.
-    pub fn child_with_props(&self, props: Map, dir: &std::path::Path) -> Scope {
+    pub(crate) fn child_with_props(&self, props: Map, dir: &std::path::Path) -> Scope {
         let mut inherited = self.inherited.clone();
         inherited.extend(self.own.clone());
         let dir = std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf());
@@ -73,14 +73,14 @@ impl Scope {
         }
     }
 
-    pub fn set(&mut self, key: impl Into<String>, value: Value) {
+    pub(crate) fn set(&mut self, key: impl Into<String>, value: Value) {
         self.own.insert(key.into(), value);
     }
 
     /// Precedence, resolved for one name. Expansion renders through `ctx()`;
     /// this is what the precedence tests assert against.
     #[cfg(test)]
-    pub fn get(&self, key: &str) -> Option<&Value> {
+    pub(crate) fn get(&self, key: &str) -> Option<&Value> {
         self.globals
             .cli
             .get(key)
@@ -91,13 +91,13 @@ impl Scope {
 
     /// The rendering context. Built fresh per render; a plan holds tens of
     /// variables, so merging costs nothing worth optimising.
-    pub fn ctx(&self) -> Value {
+    pub(crate) fn ctx(&self) -> Value {
         Value::from(self.ctx_map())
     }
 
     /// The same context before it is sealed into a `Value`. The runner's
     /// judge needs to add `result` to it, and a `Value` map cannot be extended.
-    pub fn ctx_map(&self) -> Map {
+    pub(crate) fn ctx_map(&self) -> Map {
         let mut m = self.globals.facts.clone();
         m.extend(self.inherited.clone());
         m.extend(self.own.clone());

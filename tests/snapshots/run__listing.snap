@@ -4,4 +4,5 @@ expression: out
 ---
   a_plan                    (not a component)
   deploy                    stage a build and stamp it
+  deploy-fast               the same, without the slow half
   undescribed               

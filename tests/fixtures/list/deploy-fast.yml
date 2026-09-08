@@ -1,0 +1,6 @@
+---
+description: the same, without the slow half
+steps:
+  - name: Nothing
+    shell: "true"
+    changed_when: "false"

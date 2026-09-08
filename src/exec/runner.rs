@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 /// One step, rendered, ready to run.
-pub struct Prepared {
+pub(crate) struct Prepared {
     pub action: Action,
     pub unless: Option<String>,
     pub creates: Option<String>,
@@ -45,7 +45,7 @@ impl Prepared {
 
 /// What the runner needs from the expander's scope. Three questions, so the
 /// runner never has to know about scopes or templates.
-pub trait Judge {
+pub(crate) trait Judge {
     /// `failed_when`, or the default `result.rc != 0`.
     fn failed(&self, out: &Output) -> Result<bool>;
     /// `changed_when`, when the step declares one.
@@ -54,7 +54,7 @@ pub trait Judge {
     fn expr(&self, src: &str) -> Result<bool>;
 }
 
-pub struct Done {
+pub(crate) struct Done {
     pub status: Status,
     /// What `register` binds. `None` when the step never ran.
     pub out: Option<Output>,
@@ -80,7 +80,7 @@ impl Done {
 
     /// Ctrl-C rather than the step's own fault. `--keep-going` reads this:
     /// it carries on past a failure, never past an interrupt.
-    pub fn interrupted(&self) -> bool {
+    pub(crate) fn interrupted(&self) -> bool {
         matches!(&self.status, Status::Failed(f) if f.interrupted)
     }
 }
@@ -101,7 +101,7 @@ impl From<Diag> for Stop {
 
 type R<T> = std::result::Result<T, Stop>;
 
-pub struct Runner {
+pub(crate) struct Runner {
     pub sudo: Sudo,
     pub stream: bool,
     /// Whether `sudo` can actually escalate right now. `apply` proves this in
@@ -123,7 +123,7 @@ enum Gate {
 }
 
 impl Runner {
-    pub fn apply(&self, p: &Prepared, judge: &dyn Judge) -> Result<Done> {
+    pub(crate) fn apply(&self, p: &Prepared, judge: &dyn Judge) -> Result<Done> {
         settle(self.apply_inner(p, judge))
     }
 
@@ -131,7 +131,7 @@ impl Runner {
     /// `creates` is a stat, and an `assert` is evaluated: spec §6.7 says plan
     /// runs asserts, because an assert failing at plan time is the cheapest
     /// way to learn the plan is aimed at the wrong machine.
-    pub fn probe(&self, p: &Prepared, judge: &dyn Judge) -> Result<Done> {
+    pub(crate) fn probe(&self, p: &Prepared, judge: &dyn Judge) -> Result<Done> {
         settle(self.probe_inner(p, judge))
     }
 

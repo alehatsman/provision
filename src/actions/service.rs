@@ -14,13 +14,13 @@ use crate::yaml::N;
 use minijinja::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Backend {
+pub(crate) enum Backend {
     Systemd { user: bool },
     Launchd { user: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Want {
+pub(crate) enum Want {
     Started,
     Stopped,
     Restarted,
@@ -50,7 +50,7 @@ impl Want {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Spec {
+pub(crate) struct Spec {
     pub name: String,
     pub state: Option<Want>,
     pub enabled: Option<bool>,
@@ -59,7 +59,12 @@ pub struct Spec {
 
 // ── parsing ───────────────────────────────────────────────────────────────
 
-pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result<Option<Spec>> {
+pub(crate) fn parse(
+    step: &Step<'_>,
+    engine: &Engine,
+    ctx: &Value,
+    raw: bool,
+) -> Result<Option<Spec>> {
     let body = step.body;
     let render = |src: &str| -> Option<String> {
         if raw {
@@ -291,11 +296,11 @@ fn run(ctx: &Ctx<'_>, argv: &[&str], as_root: bool) -> std::result::Result<(), E
 // ── the verdict, which never asks which backend it is ─────────────────────
 
 impl Spec {
-    pub fn plan(&self, ctx: &Ctx<'_>) -> Effect {
+    pub(crate) fn plan(&self, ctx: &Ctx<'_>) -> Effect {
         self.reach(ctx, false)
     }
 
-    pub fn apply(&self, ctx: &Ctx<'_>) -> Effect {
+    pub(crate) fn apply(&self, ctx: &Ctx<'_>) -> Effect {
         self.reach(ctx, true)
     }
 

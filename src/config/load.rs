@@ -12,16 +12,16 @@ use std::path::{Path, PathBuf};
 /// Caches parsed files so a plan that imports the same component twice parses
 /// it once, and so `Doc`s are leaked once each.
 #[derive(Default)]
-pub struct Loader {
+pub(crate) struct Loader {
     docs: HashMap<PathBuf, &'static Doc>,
 }
 
 impl Loader {
-    pub fn new() -> Loader {
+    pub(crate) fn new() -> Loader {
         Loader::default()
     }
 
-    pub fn load(&mut self, path: &Path) -> Result<&'static Doc> {
+    pub(crate) fn load(&mut self, path: &Path) -> Result<&'static Doc> {
         if let Some(d) = self.docs.get(path) {
             return Ok(d);
         }
@@ -33,7 +33,7 @@ impl Loader {
 
 /// Resolve a path named inside `from`, relative to that file's directory.
 /// `~` expands first, and an absolute path is taken as given.
-pub fn resolve(from: &Path, rel: &str) -> PathBuf {
+pub(crate) fn resolve(from: &Path, rel: &str) -> PathBuf {
     let expanded = expanduser(rel);
     let p = Path::new(&expanded);
     if p.is_absolute() {
@@ -64,7 +64,7 @@ fn normalize(p: &Path) -> PathBuf {
 // ── components ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PropType {
+pub(crate) enum PropType {
     String,
     Bool,
     Int,
@@ -86,7 +86,7 @@ impl PropType {
         })
     }
 
-    pub fn name(&self) -> &'static str {
+    pub(crate) fn name(&self) -> &'static str {
         match self {
             PropType::String => "string",
             PropType::Bool => "bool",
@@ -97,7 +97,7 @@ impl PropType {
 
     /// What a command-line value of this type looks like. Named in the
     /// error when `--prop` cannot read one (§8).
-    pub fn example(&self) -> &'static str {
+    pub(crate) fn example(&self) -> &'static str {
         match self {
             PropType::String => "any text",
             PropType::Bool => "true or false",
@@ -108,7 +108,7 @@ impl PropType {
 
     /// Does a rendered value satisfy this type? Spec §3.2: checked *after*
     /// rendering, because `variant: "{{ v }}"` is a template until then.
-    pub fn accepts(&self, v: &minijinja::Value) -> bool {
+    pub(crate) fn accepts(&self, v: &minijinja::Value) -> bool {
         use minijinja::value::ValueKind as Kind;
         match self {
             PropType::String => matches!(v.kind(), Kind::String),
@@ -119,7 +119,7 @@ impl PropType {
     }
 }
 
-pub struct PropSchema {
+pub(crate) struct PropSchema {
     pub name: String,
     pub ty: PropType,
     pub required: bool,
@@ -127,7 +127,7 @@ pub struct PropSchema {
     pub at: N<'static>,
 }
 
-pub struct Component {
+pub(crate) struct Component {
     pub path: PathBuf,
     pub props: Vec<PropSchema>,
     pub steps: Vec<Step<'static>>,
@@ -136,13 +136,13 @@ pub struct Component {
 }
 
 impl Component {
-    pub fn prop(&self, name: &str) -> Option<&PropSchema> {
+    pub(crate) fn prop(&self, name: &str) -> Option<&PropSchema> {
         self.props.iter().find(|p| p.name == name)
     }
 }
 
 /// Parse a component file: a mapping with `props` and `steps`, not a list.
-pub fn parse_component(doc: &'static Doc) -> Result<Component> {
+pub(crate) fn parse_component(doc: &'static Doc) -> Result<Component> {
     let root = doc.node();
     root.as_map().map_err(|_| {
         root.err(format!("a component is a mapping, found {}", root.kind())).with_note(
@@ -209,7 +209,7 @@ pub fn parse_component(doc: &'static Doc) -> Result<Component> {
 }
 
 /// A missing file, reported against the node that named it.
-pub fn missing(at: N<'_>, path: &Path, what: &str) -> Diag {
+pub(crate) fn missing(at: N<'_>, path: &Path, what: &str) -> Diag {
     at.err(format!("{what} not found: {}", path.display()))
         .with_note("paths are resolved relative to the file that names them, not the cwd")
 }

@@ -9,12 +9,12 @@ use serde_json::json;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-pub struct Json {
+pub(crate) struct Json {
     base: PathBuf,
 }
 
 impl Json {
-    pub fn new(base: PathBuf) -> Json {
+    pub(crate) fn new(base: PathBuf) -> Json {
         Json { base }
     }
 

@@ -10,12 +10,12 @@ use minijinja::{Environment, UndefinedBehavior};
 use std::error::Error as _;
 use std::path::Path;
 
-pub struct Engine {
+pub(crate) struct Engine {
     env: Environment<'static>,
 }
 
 impl Engine {
-    pub fn new() -> Engine {
+    pub(crate) fn new() -> Engine {
         let mut env = Environment::new();
         env.set_undefined_behavior(UndefinedBehavior::Strict);
         env.set_keep_trailing_newline(true);
@@ -30,7 +30,11 @@ impl Engine {
     }
 
     /// Render a string field. Errors are anchored by the caller.
-    pub fn render(&self, src: &str, ctx: &Value) -> std::result::Result<String, minijinja::Error> {
+    pub(crate) fn render(
+        &self,
+        src: &str,
+        ctx: &Value,
+    ) -> std::result::Result<String, minijinja::Error> {
         self.env.render_str(src, ctx)
     }
 
@@ -40,7 +44,7 @@ impl Engine {
     /// `names: "{{ apps }}"` must yield the list `apps` holds, not its textual
     /// rendering. `path: "{{ home }}/.zshrc"` is a string. The rule is exactly
     /// "the field is one `{{ … }}` and nothing else".
-    pub fn render_field(
+    pub(crate) fn render_field(
         &self,
         src: &str,
         ctx: &Value,
@@ -51,13 +55,22 @@ impl Engine {
         }
     }
 
-    pub fn eval(&self, expr: &str, ctx: &Value) -> std::result::Result<Value, minijinja::Error> {
+    pub(crate) fn eval(
+        &self,
+        expr: &str,
+        ctx: &Value,
+    ) -> std::result::Result<Value, minijinja::Error> {
         self.env.compile_expression(expr)?.eval(ctx)
     }
 
     /// Evaluate a condition. Spec §3.5: a non-boolean result is an error, not
     /// truthy — `when: some_string` is a bug, not a green light.
-    pub fn eval_bool(&self, expr: &str, ctx: &Value, at: &dyn Fn(String) -> Diag) -> Result<bool> {
+    pub(crate) fn eval_bool(
+        &self,
+        expr: &str,
+        ctx: &Value,
+        at: &dyn Fn(String) -> Diag,
+    ) -> Result<bool> {
         let v = self.eval(expr, ctx).map_err(|e| at(describe(&e)))?;
         match v.kind() {
             Kind::Bool => Ok(v.is_true()),
@@ -72,7 +85,7 @@ impl Engine {
     /// The variable names an expression reads. Used to tell whether a `when`
     /// depends on a `register` that has not run yet.
     /// Top-level names, so `r.changed` reports `r`.
-    pub fn undeclared(&self, expr: &str) -> Option<std::collections::HashSet<String>> {
+    pub(crate) fn undeclared(&self, expr: &str) -> Option<std::collections::HashSet<String>> {
         self.env
             .compile_expression(expr)
             .ok()
@@ -82,7 +95,7 @@ impl Engine {
     /// Render a spanned node into a value: strings through the field rule of
     /// §3.4, sequences and mappings element by element, everything else as
     /// written. Errors are anchored at the node that failed, not the root.
-    pub fn render_node<'a>(&self, at: N<'a>, ctx: &Value) -> Result<Value> {
+    pub(crate) fn render_node<'a>(&self, at: N<'a>, ctx: &Value) -> Result<Value> {
         match at.as_str() {
             Ok(s) => self
                 .render_field(s, ctx)
@@ -111,7 +124,7 @@ impl Engine {
     }
 
     /// Check template syntax without a context. Used by `validate`.
-    pub fn check_syntax(&self, src: &str, at: &dyn Fn(String) -> Diag) -> Result<()> {
+    pub(crate) fn check_syntax(&self, src: &str, at: &dyn Fn(String) -> Diag) -> Result<()> {
         match sole_expression(src) {
             Some(expr) => self.env.compile_expression(expr).map(|_| ()),
             None => self.env.template_from_str(src).map(|_| ()),
@@ -134,7 +147,7 @@ impl Engine {
     /// Spec §3.4 wants the *name* of the undefined variable, which minijinja's
     /// message omits. Recover it by asking the template what it reads and
     /// checking each name against the context.
-    pub fn describe_with(&self, src: &str, ctx: &Value, e: &minijinja::Error) -> String {
+    pub(crate) fn describe_with(&self, src: &str, ctx: &Value, e: &minijinja::Error) -> String {
         let base = describe(e);
         if e.kind() != minijinja::ErrorKind::UndefinedError {
             return base;
@@ -164,7 +177,7 @@ impl Engine {
 }
 
 /// minijinja nests the useful part in the source of the error; surface both.
-pub fn describe(e: &minijinja::Error) -> String {
+pub(crate) fn describe(e: &minijinja::Error) -> String {
     let mut msg = e.to_string();
     let mut src = e.source();
     while let Some(s) = src {
@@ -195,7 +208,7 @@ fn f_expanduser(s: String) -> String {
 
 /// `~` and `~/…` only. `~other` is left alone: the tool has no business
 /// guessing another account's home (D8 — root or the current user).
-pub fn expanduser(s: &str) -> String {
+pub(crate) fn expanduser(s: &str) -> String {
     let Some(rest) = s.strip_prefix('~') else {
         return s.to_string();
     };

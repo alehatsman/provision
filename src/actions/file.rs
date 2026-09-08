@@ -17,7 +17,7 @@ use minijinja::Value;
 use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum State {
+pub(crate) enum State {
     File,
     Dir,
     Link,
@@ -41,7 +41,7 @@ impl State {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Spec {
+pub(crate) struct Spec {
     pub path: String,
     pub state: State,
     /// The bytes the target must hold, resolved at parse time from `content`
@@ -67,7 +67,7 @@ pub struct Spec {
 /// meaning and the same sudo requirement (spec §6.4), so it parses them here
 /// rather than growing a second set of rules.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Metadata {
+pub(crate) struct Metadata {
     pub mode: Option<u32>,
     pub owner: Option<String>,
     pub group: Option<String>,
@@ -75,7 +75,7 @@ pub struct Metadata {
 
 impl Metadata {
     /// A rendered template is a `file` whose content was computed.
-    pub fn into_file(self, path: String, content: Vec<u8>, label: Option<String>) -> Spec {
+    pub(crate) fn into_file(self, path: String, content: Vec<u8>, label: Option<String>) -> Spec {
         Spec {
             path,
             state: State::File,
@@ -92,7 +92,7 @@ impl Metadata {
 }
 
 /// Parse `mode`, `owner` and `group` from any action body that takes them.
-pub fn parse_metadata(
+pub(crate) fn parse_metadata(
     step: &Step<'_>,
     engine: &Engine,
     ctx: &Value,
@@ -151,7 +151,12 @@ pub fn parse_metadata(
 
 // ── parsing ───────────────────────────────────────────────────────────────
 
-pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result<Option<Spec>> {
+pub(crate) fn parse(
+    step: &Step<'_>,
+    engine: &Engine,
+    ctx: &Value,
+    raw: bool,
+) -> Result<Option<Spec>> {
     let body = step.body;
     let render = |src: &str| -> Option<String> {
         if raw {
@@ -421,11 +426,11 @@ fn kind_of(m: &std::fs::Metadata) -> Kind {
 
 impl Spec {
     /// Probe only. Touches nothing.
-    pub fn plan(&self, ctx: &Ctx<'_>) -> Effect {
+    pub(crate) fn plan(&self, ctx: &Ctx<'_>) -> Effect {
         self.reach(ctx, false)
     }
 
-    pub fn apply(&self, ctx: &Ctx<'_>) -> Effect {
+    pub(crate) fn apply(&self, ctx: &Ctx<'_>) -> Effect {
         self.reach(ctx, true)
     }
 

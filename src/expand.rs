@@ -28,7 +28,7 @@ use std::time::{Duration, Instant};
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(600);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Mode {
+pub(crate) enum Mode {
     /// Check everything; run nothing; produce no step list.
     Validate { strict: bool },
     /// Check everything and report what would run. `probe` runs the read-only
@@ -53,7 +53,7 @@ impl Mode {
     }
 }
 
-pub struct Selection {
+pub(crate) struct Selection {
     pub tags: Vec<String>,
     pub skip_tags: Vec<String>,
 }
@@ -72,7 +72,7 @@ impl Selection {
     }
 }
 
-pub struct Expander {
+pub(crate) struct Expander {
     loader: Loader,
     engine: Engine,
     globals: Rc<Globals>,
@@ -100,7 +100,7 @@ pub struct Expander {
 }
 
 impl Expander {
-    pub fn new(globals: Rc<Globals>, mode: Mode, selection: Selection) -> Expander {
+    pub(crate) fn new(globals: Rc<Globals>, mode: Mode, selection: Selection) -> Expander {
         Expander {
             loader: Loader::new(),
             engine: Engine::new(),
@@ -122,29 +122,29 @@ impl Expander {
 
     /// Spec §8. `apply` only: `plan` and `validate` never stopped at a
     /// failure, so there is nothing for the flag to change there.
-    pub fn keep_going(mut self, yes: bool) -> Expander {
+    pub(crate) fn keep_going(mut self, yes: bool) -> Expander {
         self.keep_going = yes;
         self
     }
 
-    pub fn with_runner(mut self, runner: Runner) -> Expander {
+    pub(crate) fn with_runner(mut self, runner: Runner) -> Expander {
         self.runner = Some(runner);
         self
     }
 
-    pub fn with_sink(mut self, sink: Box<dyn Sink>) -> Expander {
+    pub(crate) fn with_sink(mut self, sink: Box<dyn Sink>) -> Expander {
         self.sink = sink;
         self
     }
 
     /// Emitted once at the end, after the last step's line.
-    pub fn summarize(&mut self, plan: &Path, elapsed: Duration) {
+    pub(crate) fn summarize(&mut self, plan: &Path, elapsed: Duration) {
         self.summary.duration = elapsed;
         let s = self.summary.clone();
         self.sink.summary(plan, &s);
     }
 
-    pub fn run(&mut self, root: &Path) -> Result<()> {
+    pub(crate) fn run(&mut self, root: &Path) -> Result<()> {
         let mut scope = Scope::root(Rc::clone(&self.globals));
         let doc = self.loader.load(root)?;
         let (steps, errors) = model::parse_steps(doc.node())?;
@@ -160,7 +160,7 @@ impl Expander {
     /// walk. Returns without walking when a prop is wrong — the diagnostics
     /// are in `self.diags`, and running half a task with a bad argument is
     /// worse than running none of it.
-    pub fn run_component(&mut self, root: &Path, given: &[(String, String)]) -> Result<()> {
+    pub(crate) fn run_component(&mut self, root: &Path, given: &[(String, String)]) -> Result<()> {
         let doc = self.loader.load(root)?;
         let component = load::parse_component(doc)?;
         let props = match self.cli_props(&component, given) {
@@ -180,7 +180,7 @@ impl Expander {
 
     /// D17 `run --step`: steps that came from somewhere other than a file,
     /// walked in a scope holding only facts and the command line.
-    pub fn run_steps(&mut self, steps: &[Step<'static>]) -> Result<()> {
+    pub(crate) fn run_steps(&mut self, steps: &[Step<'static>]) -> Result<()> {
         let mut scope = Scope::root(Rc::clone(&self.globals));
         self.walk(steps, &mut scope, 0, &BTreeSet::new());
         Ok(())

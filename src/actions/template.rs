@@ -15,7 +15,7 @@ use minijinja::Value;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Spec {
+pub(crate) struct Spec {
     /// One entry per output file, already rendered. Each carries the label
     /// its diff is headed by (§6.4).
     outputs: Vec<file::Spec>,
@@ -24,7 +24,12 @@ pub struct Spec {
     tree: bool,
 }
 
-pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result<Option<Spec>> {
+pub(crate) fn parse(
+    step: &Step<'_>,
+    engine: &Engine,
+    ctx: &Value,
+    raw: bool,
+) -> Result<Option<Spec>> {
     let body = step.body;
     let render = |src: &str| -> Option<String> {
         if raw {
@@ -147,11 +152,11 @@ fn strip_j2(rel: &Path) -> PathBuf {
 // ── probe and apply ───────────────────────────────────────────────────────
 
 impl Spec {
-    pub fn plan(&self, ctx: &Ctx<'_>) -> (Effect, Option<String>) {
+    pub(crate) fn plan(&self, ctx: &Ctx<'_>) -> (Effect, Option<String>) {
         self.reach(ctx, false)
     }
 
-    pub fn apply(&self, ctx: &Ctx<'_>) -> (Effect, Option<String>) {
+    pub(crate) fn apply(&self, ctx: &Ctx<'_>) -> (Effect, Option<String>) {
         self.reach(ctx, true)
     }
 

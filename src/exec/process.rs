@@ -20,12 +20,12 @@ use std::time::{Duration, Instant};
 /// the main thread, which is watching this flag.
 static INTERRUPTED: AtomicBool = AtomicBool::new(false);
 
-pub fn interrupted() -> bool {
+pub(crate) fn interrupted() -> bool {
     INTERRUPTED.load(Ordering::SeqCst)
 }
 
 /// Install the Ctrl-C handler. Idempotent; safe to call from `main` only.
-pub fn catch_interrupts() {
+pub(crate) fn catch_interrupts() {
     #[cfg(unix)]
     unsafe {
         extern "C" fn on_sigint(_: libc::c_int) {
@@ -35,7 +35,7 @@ pub fn catch_interrupts() {
     }
 }
 
-pub struct Spawn<'a> {
+pub(crate) struct Spawn<'a> {
     /// Program and arguments, already sudo-wrapped if the step asked for it.
     pub argv: &'a [String],
     pub cwd: Option<&'a Path>,
@@ -48,7 +48,7 @@ pub struct Spawn<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub struct Output {
+pub(crate) struct Output {
     pub rc: i32,
     pub stdout: String,
     pub stderr: String,
@@ -57,7 +57,7 @@ pub struct Output {
 
 /// Why the child stopped. `Exited` is the only one that makes `rc` meaningful.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum How {
+pub(crate) enum How {
     Exited,
     TimedOut,
     Interrupted,
@@ -66,7 +66,7 @@ pub enum How {
 /// Spawn, capture, and wait — killing the whole group on timeout or Ctrl-C.
 ///
 /// The lossy view, for the runner and for `register`.
-pub fn run(s: Spawn<'_>) -> std::io::Result<Output> {
+pub(crate) fn run(s: Spawn<'_>) -> std::io::Result<Output> {
     let raw = run_raw(s)?;
     Ok(Output {
         rc: raw.rc,
@@ -81,11 +81,11 @@ pub fn run(s: Spawn<'_>) -> std::io::Result<Output> {
 /// `file` compares a target against itself byte for byte, and a lossy String
 /// makes a binary file differ from itself forever. This is the same spawn,
 /// the same process group and the same watchdog — only the last step differs.
-pub fn capture(s: Spawn<'_>) -> std::io::Result<Raw> {
+pub(crate) fn capture(s: Spawn<'_>) -> std::io::Result<Raw> {
     run_raw(s)
 }
 
-pub struct Raw {
+pub(crate) struct Raw {
     pub rc: i32,
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
@@ -94,7 +94,7 @@ pub struct Raw {
 
 impl Raw {
     /// stderr as text, which is all any caller wants of it.
-    pub fn stderr_text(&self) -> String {
+    pub(crate) fn stderr_text(&self) -> String {
         String::from_utf8_lossy(&self.stderr).into_owned()
     }
 }

@@ -9,11 +9,11 @@ use crate::error::Result;
 use crate::yaml::N;
 use std::time::Duration;
 
-pub const ACTION_KEYS: &[&str] = &[
+pub(crate) const ACTION_KEYS: &[&str] = &[
     "shell", "cmd", "file", "template", "pkg", "service", "assert",
 ];
-pub const STRUCTURAL_KEYS: &[&str] = &["vars", "vars_file", "import", "use"];
-pub const MODIFIER_KEYS: &[&str] = &[
+pub(crate) const STRUCTURAL_KEYS: &[&str] = &["vars", "vars_file", "import", "use"];
+pub(crate) const MODIFIER_KEYS: &[&str] = &[
     "name",
     "when",
     "unless",
@@ -33,7 +33,7 @@ pub const MODIFIER_KEYS: &[&str] = &[
 ];
 
 /// Every key a step may carry, for the unknown-key check.
-pub fn all_step_keys() -> Vec<&'static str> {
+pub(crate) fn all_step_keys() -> Vec<&'static str> {
     ACTION_KEYS
         .iter()
         .chain(STRUCTURAL_KEYS)
@@ -44,7 +44,7 @@ pub fn all_step_keys() -> Vec<&'static str> {
 
 /// The fields each action's long form accepts (spec §6). `cmd` is a
 /// sequence, not a map, and so has no entry.
-pub fn action_body_keys(action: &str) -> Option<&'static [&'static str]> {
+pub(crate) fn action_body_keys(action: &str) -> Option<&'static [&'static str]> {
     Some(match action {
         "shell" => &["script", "interpreter", "login"],
         "file" => &[
@@ -59,7 +59,7 @@ pub fn action_body_keys(action: &str) -> Option<&'static [&'static str]> {
 }
 
 #[derive(Clone, Copy)]
-pub struct Step<'a> {
+pub(crate) struct Step<'a> {
     pub at: N<'a>,
     /// The one action or structural key this step carries.
     pub key: &'a str,
@@ -68,12 +68,12 @@ pub struct Step<'a> {
 }
 
 impl<'a> Step<'a> {
-    pub fn is_structural(&self) -> bool {
+    pub(crate) fn is_structural(&self) -> bool {
         STRUCTURAL_KEYS.contains(&self.key)
     }
 
     /// Used when `name` is absent or renders empty (spec §10).
-    pub fn fallback_name(&self) -> String {
+    pub(crate) fn fallback_name(&self) -> String {
         let arg = match self.body.as_str() {
             Ok(s) => s.lines().next().unwrap_or("").trim().to_string(),
             Err(_) => self
@@ -109,7 +109,7 @@ fn truncate(s: &str, max: usize) -> String {
 }
 
 #[derive(Clone, Copy, Default)]
-pub struct Mods<'a> {
+pub(crate) struct Mods<'a> {
     pub name: Option<N<'a>>,
     pub when: Option<N<'a>>,
     pub unless: Option<N<'a>>,
@@ -132,7 +132,7 @@ pub struct Mods<'a> {
 ///
 /// A malformed step does not stop the others: the gate is that *every*
 /// validation error carries a position, which means reporting all of them.
-pub fn parse_steps<'a>(root: N<'a>) -> Result<(Vec<Step<'a>>, Vec<crate::error::Diag>)> {
+pub(crate) fn parse_steps<'a>(root: N<'a>) -> Result<(Vec<Step<'a>>, Vec<crate::error::Diag>)> {
     let items = root.as_seq().map_err(|_| {
         root.err(format!("a plan is a list of steps, found {}", root.kind()))
             .with_note(
@@ -150,7 +150,7 @@ pub fn parse_steps<'a>(root: N<'a>) -> Result<(Vec<Step<'a>>, Vec<crate::error::
     Ok((steps, errors))
 }
 
-pub fn parse_step<'a>(at: N<'a>) -> Result<Step<'a>> {
+pub(crate) fn parse_step<'a>(at: N<'a>) -> Result<Step<'a>> {
     let keys = at
         .as_map()
         .map_err(|_| at.err(format!("a step is a mapping, found {}", at.kind())))
@@ -230,7 +230,7 @@ fn all_subject_keys() -> Vec<&'static str> {
 // ── modifier types ────────────────────────────────────────────────────────
 
 /// `30s`, `5m`, `1h`. Spec §4.
-pub fn parse_duration(at: N<'_>) -> Result<Duration> {
+pub(crate) fn parse_duration(at: N<'_>) -> Result<Duration> {
     let raw = at.as_scalar_string()?;
     let s = raw.trim();
     let bad = || {
@@ -249,12 +249,12 @@ pub fn parse_duration(at: N<'_>) -> Result<Duration> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Retry {
+pub(crate) struct Retry {
     pub attempts: u32,
     pub delay: Duration,
 }
 
-pub fn parse_retry(at: N<'_>) -> Result<Retry> {
+pub(crate) fn parse_retry(at: N<'_>) -> Result<Retry> {
     at.deny_unknown_keys(&["attempts", "delay"], "`retry`")?;
     let attempts_at = at.require("attempts")?;
     let attempts: u32 = attempts_at
@@ -273,7 +273,7 @@ pub fn parse_retry(at: N<'_>) -> Result<Retry> {
 
 /// Check the modifier combinations that are wrong regardless of scope. The
 /// rest wait for expansion, when values are rendered.
-pub fn check_modifiers(step: &Step<'_>) -> Result<()> {
+pub(crate) fn check_modifiers(step: &Step<'_>) -> Result<()> {
     let m = &step.mods;
 
     if let Some(n) = m.timeout {
@@ -342,7 +342,7 @@ fn is_identifier(s: &str) -> bool {
 }
 
 /// The expression fields, which compile as expressions rather than templates.
-pub fn expression_fields<'a>(step: &Step<'a>) -> Vec<N<'a>> {
+pub(crate) fn expression_fields<'a>(step: &Step<'a>) -> Vec<N<'a>> {
     [
         step.mods.when,
         step.mods.changed_when,

@@ -637,7 +637,10 @@ fn list_tasks(dir: &Path, base: &Path) -> Result<u8, Diag> {
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|x| x == "yml"))
         .collect();
-    files.sort();
+    // By stem, not by filename: sorting the whole name puts `ci-fast` above
+    // `ci`, because `-` sorts below `.`. The name a reader is looking for is
+    // the one the listing prints.
+    files.sort_by(|a, b| a.file_stem().cmp(&b.file_stem()));
 
     if files.is_empty() {
         println!("  no tasks in {}", rel(dir, base));

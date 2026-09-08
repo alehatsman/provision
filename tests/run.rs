@@ -199,6 +199,10 @@ fn an_ungated_step_is_ok_under_run_and_unknown_under_apply() {
 // The listing has its own fixture directory rather than sharing `run/`: a
 // snapshot that changes whenever an unrelated fixture is added is a snapshot
 // nobody reads.
+//
+// `deploy` and `deploy-fast` are the pair that pins the sort. Sorting whole
+// filenames puts `deploy-fast.yml` first, because `-` sorts below `.`; the
+// stem is what the listing prints and what a reader scans for.
 #[test]
 fn a_trailing_slash_lists_the_directory() {
     let dir = format!("{}/", listing_dir().display());

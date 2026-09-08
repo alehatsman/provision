@@ -8,7 +8,7 @@
 use crate::error::Diag;
 use std::io::Write;
 
-pub struct Sudo {
+pub(crate) struct Sudo {
     /// `Some` only with `--ask-sudo-pass`. Fed to `sudo -S` for every
     /// escalated step, because sudo's own credential cache is not something
     /// to rely on across a long run.
@@ -17,7 +17,7 @@ pub struct Sudo {
 
 impl Sudo {
     /// `needed` comes from the walk `apply` does before executing anything.
-    pub fn preflight(needed: bool, ask: bool) -> Result<Sudo, Diag> {
+    pub(crate) fn preflight(needed: bool, ask: bool) -> Result<Sudo, Diag> {
         if !needed {
             return Ok(Sudo { password: None });
         }
@@ -64,14 +64,14 @@ impl Sudo {
     }
 
     /// No escalation, for a run that needs none.
-    pub fn none() -> Sudo {
+    pub(crate) fn none() -> Sudo {
         Sudo { password: None }
     }
 
     /// Wrap an argv so it runs as root. `env_keys` are the step's own `env`
     /// keys and nothing else — sudo drops the environment by default, and
     /// widening that is how a step picks up a variable it never declared.
-    pub fn wrap(&self, argv: Vec<String>, env_keys: &[String]) -> Vec<String> {
+    pub(crate) fn wrap(&self, argv: Vec<String>, env_keys: &[String]) -> Vec<String> {
         let mut out = vec!["sudo".to_string()];
         match &self.password {
             // `-k` first, so sudo always reads the password line this run
@@ -95,7 +95,7 @@ impl Sudo {
     }
 
     /// What to feed the wrapped command's stdin, if anything.
-    pub fn stdin(&self) -> Option<String> {
+    pub(crate) fn stdin(&self) -> Option<String> {
         self.password.as_ref().map(|p| format!("{p}\n"))
     }
 }
@@ -144,7 +144,7 @@ fn read_password() -> Result<String, Diag> {
 
 /// Can sudo escalate right now without asking for anything? `apply` turns a
 /// `false` here into a hard stop before the first step; `plan` only records it.
-pub fn root_is_reachable() -> bool {
+pub(crate) fn root_is_reachable() -> bool {
     std::process::Command::new("sudo")
         .args(["-n", "--", "true"])
         .stdin(std::process::Stdio::null())

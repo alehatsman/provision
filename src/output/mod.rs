@@ -1,14 +1,14 @@
 //! Rendering. The output layer knows nothing about actions: it is handed a
 //! name, a status and a duration (spec §9).
 
-pub mod event;
-pub mod json;
-pub mod text;
+pub(crate) mod event;
+pub(crate) mod json;
+pub(crate) mod text;
 
 use event::{Event, Summary};
 use std::path::Path;
 
-pub trait Sink {
+pub(crate) trait Sink {
     /// The step is about to run. Only the TTY renderer does anything with
     /// this — it is where the spinner lives.
     fn start(&mut self, _name: &str, _depth: usize) {}
@@ -18,7 +18,7 @@ pub trait Sink {
 
 /// `validate` produces no step list, so it needs somewhere for the walk to
 /// report into that costs nothing.
-pub struct Silent;
+pub(crate) struct Silent;
 
 impl Sink for Silent {
     fn step(&mut self, _ev: &Event) {}
@@ -27,7 +27,7 @@ impl Sink for Silent {
 
 /// `--json` puts machine output on stdout and human output on stderr (§9.3),
 /// which means two renderers, not one that switches.
-pub struct Both(pub Box<dyn Sink>, pub Box<dyn Sink>);
+pub(crate) struct Both(pub Box<dyn Sink>, pub Box<dyn Sink>);
 
 impl Sink for Both {
     fn start(&mut self, name: &str, depth: usize) {
@@ -46,7 +46,7 @@ impl Sink for Both {
 
 /// Diagnostics are not events: they have no step, and they are the only thing
 /// `validate` prints.
-pub fn diagnostics(
+pub(crate) fn diagnostics(
     out: &mut impl std::io::Write,
     diags: &crate::error::Diags,
     base: &Path,

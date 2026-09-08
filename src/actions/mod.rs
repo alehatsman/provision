@@ -6,10 +6,10 @@
 //! actions (`file`, `template`, `pkg`, `service`) each need real state
 //! inspection and get their own modules then.
 
-pub mod file;
-pub mod pkg;
-pub mod service;
-pub mod template;
+pub(crate) mod file;
+pub(crate) mod pkg;
+pub(crate) mod service;
+pub(crate) mod template;
 
 use crate::config::model::Step;
 use crate::error::Result;
@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Action {
+pub(crate) enum Action {
     Shell {
         script: String,
         interpreter: Interpreter,
@@ -47,7 +47,7 @@ pub enum Action {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Interpreter {
+pub(crate) enum Interpreter {
     Bash,
     Sh,
     Zsh,
@@ -57,7 +57,7 @@ pub enum Interpreter {
 
 impl Interpreter {
     /// Spec §6.1: bash on unix, powershell on Windows.
-    pub fn default_for_host() -> Interpreter {
+    pub(crate) fn default_for_host() -> Interpreter {
         if cfg!(windows) {
             Interpreter::PowerShell
         } else {
@@ -65,7 +65,7 @@ impl Interpreter {
         }
     }
 
-    pub fn parse(name: &str, at: N<'_>) -> Result<Interpreter> {
+    pub(crate) fn parse(name: &str, at: N<'_>) -> Result<Interpreter> {
         Ok(match name {
             "bash" => Interpreter::Bash,
             "sh" => Interpreter::Sh,
@@ -80,7 +80,7 @@ impl Interpreter {
         })
     }
 
-    pub fn argv(self, script: &str, login: bool) -> Vec<String> {
+    pub(crate) fn argv(self, script: &str, login: bool) -> Vec<String> {
         let s = |v: &str| v.to_string();
         match self {
             Interpreter::Bash | Interpreter::Sh | Interpreter::Zsh => {
@@ -120,7 +120,7 @@ impl Interpreter {
 impl Action {
     /// The command to run, if this action runs one. `assert` with an `expr`
     /// and every phase 2 action return `None`.
-    pub fn argv(&self) -> Option<Vec<String>> {
+    pub(crate) fn argv(&self) -> Option<Vec<String>> {
         match self {
             Action::Shell {
                 script,
@@ -137,13 +137,13 @@ impl Action {
 
     /// Spec §6.7: an assert never changes anything, so its success is `ok`
     /// and never `changed`. `shell` and `cmd` are judged by their gate.
-    pub fn never_changes(&self) -> bool {
+    pub(crate) fn never_changes(&self) -> bool {
         matches!(self, Action::Assert { .. })
     }
 
     /// An action that inspects and changes state itself, rather than reporting
     /// through an exit code. It never reaches the runner's argv path.
-    pub fn is_typed(&self) -> bool {
+    pub(crate) fn is_typed(&self) -> bool {
         matches!(
             self,
             Action::File(_) | Action::Template(_) | Action::Service(_) | Action::Pkg(_)
@@ -157,7 +157,7 @@ impl Action {
     /// `Ok(None)` means a field would not render. The expander's own sweep has
     /// already reported that, with a position — reporting it again here would
     /// turn one bad `{{ … }}` into two diagnostics.
-    pub fn parse(
+    pub(crate) fn parse(
         engine: &Engine,
         step: &Step<'_>,
         ctx: &Value,
@@ -307,7 +307,7 @@ impl Action {
 /// Phase 1's three actions report through an exit code, which is why they run
 /// through the runner's argv path. These four do their own work and have to
 /// say what they did in their own words.
-pub enum Effect {
+pub(crate) enum Effect {
     /// Already as declared.
     Ok,
     /// Cannot tell without asking a remote. `pkg` with `state: latest` on a
@@ -331,7 +331,7 @@ pub enum Effect {
 
 /// The part of the run a typed action needs. Two questions and a way to ask
 /// them; nothing about scopes, templates, or the walk.
-pub struct Ctx<'a> {
+pub(crate) struct Ctx<'a> {
     /// The step's own `sudo: true`.
     pub sudo: bool,
     /// Whether escalation works at all. Only `plan` ever sees this false.
@@ -346,7 +346,7 @@ pub struct Ctx<'a> {
 }
 
 impl Ctx<'_> {
-    pub fn as_root(&self, argv: &[&str]) -> std::io::Result<process::Raw> {
+    pub(crate) fn as_root(&self, argv: &[&str]) -> std::io::Result<process::Raw> {
         self.exec(argv, true)
     }
 
@@ -358,7 +358,7 @@ impl Ctx<'_> {
     ///
     /// Probes and mutations take the same path regardless, because a hung
     /// manager hangs `is-active` exactly as it hangs `start`.
-    pub fn exec(&self, argv: &[&str], as_root: bool) -> std::io::Result<process::Raw> {
+    pub(crate) fn exec(&self, argv: &[&str], as_root: bool) -> std::io::Result<process::Raw> {
         let argv: Vec<String> = argv.iter().map(|s| (*s).to_string()).collect();
         let (argv, stdin) = if as_root {
             // The step's own `env` keys, exactly as the shell path passes
@@ -386,7 +386,7 @@ impl Ctx<'_> {
     /// systemd ends with "See `systemctl status ...`", which is a pointer,
     /// not a reason. The whole stderr goes to the detail, so the failure
     /// block shows what happened.
-    pub fn perform(&self, argv: &[&str], as_root: bool) -> Option<Effect> {
+    pub(crate) fn perform(&self, argv: &[&str], as_root: bool) -> Option<Effect> {
         let got = match self.exec(argv, as_root) {
             Ok(g) => g,
             Err(e) => {
@@ -419,7 +419,7 @@ impl Ctx<'_> {
     /// The wording the shell path uses for a command that did not get to
     /// finish, so a `file` step and a `shell` step read the same when the
     /// same thing happened to them.
-    pub fn stopped(&self, got: &process::Raw) -> Option<Effect> {
+    pub(crate) fn stopped(&self, got: &process::Raw) -> Option<Effect> {
         match got.how {
             process::How::Exited => None,
             process::How::TimedOut => Some(Effect::Failed {
@@ -441,14 +441,14 @@ impl Ctx<'_> {
     /// Spec §6.3: with `sudo: true` every probe of the target runs as root,
     /// because a target the step needs root to write is usually one it needs
     /// root to read.
-    pub fn reads_as_root(&self) -> bool {
+    pub(crate) fn reads_as_root(&self) -> bool {
         self.sudo
     }
 }
 
 impl Effect {
     /// A failure with no captured output behind it.
-    pub fn fail(msg: impl Into<String>) -> Effect {
+    pub(crate) fn fail(msg: impl Into<String>) -> Effect {
         Effect::Failed {
             msg: msg.into(),
             detail: String::new(),

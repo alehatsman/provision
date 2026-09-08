@@ -15,7 +15,7 @@ use minijinja::value::ValueKind;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum State {
+pub(crate) enum State {
     Present,
     Absent,
     Latest,
@@ -23,7 +23,7 @@ pub enum State {
 
 /// Everything that differs between managers, and nothing that does not.
 #[derive(Debug)]
-pub struct Manager {
+pub(crate) struct Manager {
     pub name: &'static str,
     /// The binary that must be on PATH.
     pub bin: &'static str,
@@ -50,7 +50,7 @@ pub struct Manager {
 
 /// Spec §6.5. The default order is the order of this table, minus the rows
 /// marked `never_default`.
-pub const MANAGERS: &[Manager] = &[
+pub(crate) const MANAGERS: &[Manager] = &[
     Manager {
         name: "pacman",
         bin: "pacman",
@@ -247,7 +247,7 @@ fn parse_winget(out: &str) -> BTreeMap<String, String> {
 // ── parsing ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Spec {
+pub(crate) struct Spec {
     pub names: Vec<String>,
     pub state: State,
     pub manager: &'static Manager,
@@ -255,7 +255,12 @@ pub struct Spec {
     pub update_cache: bool,
 }
 
-pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result<Option<Spec>> {
+pub(crate) fn parse(
+    step: &Step<'_>,
+    engine: &Engine,
+    ctx: &Value,
+    raw: bool,
+) -> Result<Option<Spec>> {
     let body = step.body;
     let render = |src: &str| -> Option<String> {
         if raw {
@@ -384,11 +389,11 @@ pub fn parse(step: &Step<'_>, engine: &Engine, ctx: &Value, raw: bool) -> Result
 // ── the verdict, which asks the row and never switches on it ─────────────
 
 impl Spec {
-    pub fn plan(&self, ctx: &Ctx<'_>) -> Effect {
+    pub(crate) fn plan(&self, ctx: &Ctx<'_>) -> Effect {
         self.reach(ctx, false)
     }
 
-    pub fn apply(&self, ctx: &Ctx<'_>) -> Effect {
+    pub(crate) fn apply(&self, ctx: &Ctx<'_>) -> Effect {
         self.reach(ctx, true)
     }
 

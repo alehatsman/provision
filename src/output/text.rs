@@ -16,12 +16,12 @@ const TAIL: usize = 20;
 const NAME_WIDTH: usize = 48;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Target {
+pub(crate) enum Target {
     Out,
     Err,
 }
 
-pub struct Text {
+pub(crate) struct Text {
     target: Target,
     /// Animate a live line while a step runs. Off when output is redirected,
     /// and off under `--stream`, where the child is writing to the same
@@ -40,7 +40,7 @@ pub struct Text {
 }
 
 impl Text {
-    pub fn new(target: Target, base: PathBuf) -> Text {
+    pub(crate) fn new(target: Target, base: PathBuf) -> Text {
         let tty = match target {
             Target::Out => std::io::stdout().is_terminal(),
             Target::Err => std::io::stderr().is_terminal(),
@@ -57,23 +57,23 @@ impl Text {
         }
     }
 
-    pub fn verbose(mut self, on: bool) -> Text {
+    pub(crate) fn verbose(mut self, on: bool) -> Text {
         self.verbose = on;
         self
     }
 
-    pub fn hide_skipped(mut self, on: bool) -> Text {
+    pub(crate) fn hide_skipped(mut self, on: bool) -> Text {
         self.hide_skipped = on;
         self
     }
 
-    pub fn no_diff(mut self, on: bool) -> Text {
+    pub(crate) fn no_diff(mut self, on: bool) -> Text {
         self.no_diff = on;
         self
     }
 
     /// `--stream` hands the terminal to the child, so the spinner stands down.
-    pub fn no_spinner(mut self) -> Text {
+    pub(crate) fn no_spinner(mut self) -> Text {
         self.spinner = false;
         self
     }

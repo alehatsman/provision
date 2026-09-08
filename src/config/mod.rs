@@ -1,2 +1,2 @@
-pub mod load;
-pub mod model;
+pub(crate) mod load;
+pub(crate) mod model;
