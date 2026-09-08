@@ -1,5 +1,6 @@
 ---
 source: tests/cli.rs
+assertion_line: 129
 expression: out
 ---
   error: tests/fixtures/three_problems_a.yml:3:3: unknown key `creats` in a step
@@ -9,4 +10,4 @@ expression: out
   error: tests/fixtures/three_problems_b.yml:7:12: `soon` is not a duration
       use a number and a unit: 30s, 5m, 1h
 
-  3 problems in tests/fixtures/three_problems_a.yml
+  3 problems validating tests/fixtures/three_problems_a.yml

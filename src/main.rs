@@ -319,7 +319,11 @@ fn report(ex: &Expander, base: &Path, plan: Option<&Path>) {
     output::diagnostics(&mut err, &ex.diags, base).ok();
     let n = ex.diags.len();
     match plan {
-        Some(p) => eprintln!("\n  {n} problem{} in {}", plural(n), rel(p, base)),
+        // "in <plan>" read as the problems' location, which is wrong the
+        // moment one of them is in an imported file — and each error line
+        // already carries its own `file:line:col`. "validating" names the
+        // entry point without claiming anything about where the faults are.
+        Some(p) => eprintln!("\n  {n} problem{} validating {}", plural(n), rel(p, base)),
         None => eprintln!("\n  {n} problem{}", plural(n)),
     }
 }

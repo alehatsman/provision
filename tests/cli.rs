@@ -117,13 +117,14 @@ fn validate_rejects_what_plan_would_reject() {
 #[test]
 fn snapshot_three_problems_across_two_files() {
     // Spec §8: validate collects every problem in one pass rather than
-    // stopping at the first, across an import too, and the trailer counts
-    // them together under the file that was actually named on the command
-    // line — not the two files they came from.
+    // stopping at the first, across an import too. The trailer counts them
+    // together and names the file given on the command line — and says
+    // "validating" rather than "in", because two of these three problems
+    // are in the imported file, not in the one named.
     let (code, out) = validate("three_problems_a.yml");
     assert_eq!(code, EXIT_VALIDATION, "{out}");
     assert!(out.contains("three_problems_a.yml") && out.contains("three_problems_b.yml"), "{out}");
-    assert!(out.contains("3 problems in"), "{out}");
+    assert!(out.contains("3 problems validating"), "{out}");
     assert_positioned(&out);
     snapshot!("three_problems", out);
 }
