@@ -621,8 +621,10 @@ provision --version
   reads a type off the source text, and a command line has no way to carry
   one — the declaration is the only place it can come from. `--var` is
   unaffected and stays untyped strings.
-  **Provisional, decided by review 2026-09-08, owner to confirm.** A trailing `/` lists the directory:
-  one line per `.yml` file, its name and its `description`, nothing run.
+  Decided by review and confirmed by the owner 2026-09-08.
+
+  A trailing `/` lists the directory: one line per `.yml` file, its name and
+  its `description`, nothing run.
   `--step '<yaml>'` takes exactly one step as a YAML mapping, runs it in a
   scope holding only facts and `--var`/`--vars-file`, and reports it —
   the contract a CI runner needs to exec steps one at a time. `--tags` and
