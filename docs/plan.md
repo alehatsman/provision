@@ -492,8 +492,14 @@ Gate
   shows one line per defaults key. Probed plan on a mac is the owner's.
 - provision's own `tasks/tools.yml` uses `git` and the full gate stays
   green; teleport's follows in its branch.
-- LOC: three actions under 900 lines together, `actions/` gains three
-  files and nothing else grows.
+- LOC: measured on landing, **1181** for the three actions (git 479,
+  download 372, defaults 330) against a 900 written before any line
+  existed; `actions/` gained three files and dispatch grew by 79 lines
+  across mod.rs, model.rs, runner.rs and expand.rs. Accepted by review with
+  the comments intact rather than compressed: each file carries the
+  reasoning the fleet conversion needed (the `^{commit}` peel, the
+  temp-hash-rename order, typed comparison), and the budget was the guess,
+  not the code.
 
 ## Order and dependencies
 

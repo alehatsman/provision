@@ -629,6 +629,12 @@ download:
   was. A non-2xx response fails the same way. Redirects are followed.
 - `mode` as `file` takes it (§6.3), quoted; parents are created like `file`
   does; `sudo: true` writes the way `file` writes, for the apt keyrings.
+- **`sha256` is for immutable bytes at a stable URL**: a versioned release
+  asset. A file that is meant to rotate — a vendor's apt signing key — is
+  not that: pinning its digest fails every machine the day the vendor
+  rotates, and without a digest `download` is the `creates`-gated curl it
+  replaced, in more YAML. The apt keyrings stay in shell; their trust
+  anchor, when one is added, is the key fingerprint, not a file digest.
 - **Single files only.** An archive is downloaded by this action and
   unpacked by a `creates`-gated shell step after it; a `sha256` on the
   archive is what makes that pair sound. Unarchiving is deferred with its
