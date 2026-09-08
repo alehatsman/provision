@@ -82,6 +82,41 @@ The job is small and stable. The tool should be too.
 - Not a secrets manager. `{{ env.TOKEN }}` and file permissions.
 - Not audited. No run log, no state directory.
 
+## For Ansible users
+
+Same words where the idea is the same, a decision number where it is not.
+The decisions are in [docs/decisions.md](docs/decisions.md).
+
+| Ansible | provision | Note |
+|---|---|---|
+| playbook, `hosts:` | one plan file per machine | run where you stand; no inventory, no `delegate_to` (D2) |
+| role, `include_tasks` | `use` a component with declared `props`, `import` a file | props are typed and required by declaration, not by convention (D12) |
+| `vars`, `set_fact`, `vars_files` | `vars` step, `vars_file` | `--var k=v` on the command line is the top layer |
+| `copy`, `template`, `file` | `file`, `template` | `file` takes `content` or `src`, `state: file/dir/link/absent` |
+| `package`, `apt`, `pacman`, `homebrew` | `pkg` with `manager:` | one query for the set, one install for the missing subset |
+| `service`, `systemd` | `service` | `state: started/stopped/restarted/reloaded`, `enabled` |
+| `command`, `shell` | `cmd`, `shell` | `shell` needs `creates`, `unless` or `changed_when` under `validate --strict` (D3) |
+| `assert`, `fail`, `wait_for` | `assert` with `retry` | plan runs asserts once; `retry` belongs to apply |
+| `get_url`, `git` | `download`, `git` | phase 6, spec §6.8–6.9 |
+| `osx_defaults` | `defaults` | phase 6, spec §6.10; four scalar types |
+| `register`, `when`, `changed_when`, `failed_when` | the same | `result.rc`, `result.stdout`, `result.changed`, `result.skipped` |
+| `until`, `retries`, `delay` | `retry: {attempts, delay}` | timeout is per attempt |
+| `ignore_errors: true` | `failed_when: false` | |
+| `creates`, `removes` on `command` | `creates`, `unless` on any command step | `unless` is a command, exit 0 skips |
+| `--check`, `--diff` | `plan` | best effort, says `unknown` when it cannot tell (D11); exit 2 when anything would change |
+| `tags`, `--tags`, `--skip-tags`, `always` | the same | Ansible semantics verbatim (D7) |
+| `become`, `become_user` | `sudo: true` | root or you, nothing between (D8) |
+| `loop`, `with_items` | none | deferred; copy the step (plan.md "Deferred") |
+| `notify`, handlers | `register` + `when: x.changed` on the restart step | no handlers (D5) |
+| `block`, `rescue`, `always` | none | no rollback (D5); apply stops at the first failure, `--keep-going` walks on |
+| `lineinfile`, `blockinfile` | none | own the whole file with `template`; deferred otherwise |
+| `unarchive` | `download` then a `creates`-gated `shell` | deferred |
+| `user`, `group`, `cron`, `sysctl`, `mount` | `shell` with `unless` | server modules, zero use on a workstation fleet (D4) |
+| `debug` | none | `--verbose` shows every command's output; `facts` prints the facts |
+| `ansible-vault` | none | decrypt with age or sops outside the plan and read the result with `vars_file` |
+| `ansible-galaxy`, collections | a git checkout at a pinned tag, `use`d by path | no registry, no lockfile (D17) |
+| `ansible-playbook` output | one line per step, live; `--json` one object per line | exit 0/1/2/3: converged, failed, would change, usage |
+
 ## Development
 
 provision provisions itself. The tasks live in `tasks/` and are components
