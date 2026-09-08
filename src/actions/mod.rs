@@ -6,6 +6,7 @@
 //! actions (`file`, `template`, `pkg`, `service`) each need real state
 //! inspection and get their own modules then.
 
+pub(crate) mod defaults;
 pub(crate) mod file;
 pub(crate) mod git;
 pub(crate) mod pkg;
@@ -35,6 +36,7 @@ pub(crate) enum Action {
         expr: Option<String>,
         msg: Option<String>,
     },
+    Defaults(defaults::Spec),
     File(file::Spec),
     Git(git::Spec),
     Template(template::Spec),
@@ -153,6 +155,7 @@ impl Action {
                 | Action::Service(_)
                 | Action::Pkg(_)
                 | Action::Git(_)
+                | Action::Defaults(_)
         )
     }
 }
@@ -281,6 +284,11 @@ impl Action {
 
             "file" => match file::parse(step, engine, ctx, raw)? {
                 Some(spec) => Action::File(spec),
+                None => return Ok(None),
+            },
+
+            "defaults" => match defaults::parse(step, engine, ctx, raw)? {
+                Some(spec) => Action::Defaults(spec),
                 None => return Ok(None),
             },
 

@@ -886,7 +886,28 @@ impl Expander {
 
     /// The gate for `validate --strict` (D3): a `shell` or `cmd` step with no
     /// declared idempotency is `unknown` forever.
+    ///
+    /// Spec §6.10 adds one more: a `defaults` step with no `when` naming the
+    /// os. The action does not skip itself on Linux -- it fails -- so a plan
+    /// that carries one has to say where it runs. An error rather than a
+    /// warning because strict has one severity, and a second one is a bigger
+    /// idea than this rule pays for.
     fn check_strict_gate(&mut self, step: &Step<'static>) {
+        if step.key == "defaults" {
+            let names_os = step
+                .mods
+                .when
+                .and_then(|n| n.as_str().ok())
+                .is_some_and(|w| w.contains("os"));
+            if !names_os {
+                self.diags.push(
+                    step.at
+                        .err("`defaults` step has no `when` naming the os")
+                        .with_note("`when: os == \"darwin\"` — it fails on every other os"),
+                );
+            }
+            return;
+        }
         if !matches!(step.key, "shell" | "cmd") {
             return;
         }

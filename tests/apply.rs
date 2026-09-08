@@ -2875,3 +2875,49 @@ fn no_ref_takes_the_remotes_default_branch() {
         "{moved}"
     );
 }
+
+// ── `defaults` (spec §6.10) ───────────────────────────────────────────────
+
+#[test]
+fn defaults_off_macos_is_unknown_at_plan_and_a_failure_at_apply() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture("defaults.yml");
+
+    // §6.10: the action does not skip itself. Plan cannot claim the keys are
+    // set and does not pretend they are absent either.
+    let out = run_in(dir.path(), &["plan", path.to_str().unwrap()]);
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    for step in [
+        "Show hidden files",
+        "Screenshots to the desktop",
+        "Corner secondary click",
+    ] {
+        assert!(line_for(&text, step).contains("unknown"), "{text}");
+    }
+
+    // Apply says so instead of reporting a green line that did nothing.
+    let (code, got) = apply(dir.path(), "defaults.yml", &[]);
+    assert_eq!(code, 1, "{got}");
+    assert!(got.contains("macOS only"), "{got}");
+}
+
+#[test]
+fn a_no_probe_plan_lists_one_line_per_defaults_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture("defaults.yml");
+    let out = run_in(
+        dir.path(),
+        &["plan", "--plan-no-probe", path.to_str().unwrap()],
+    );
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    // One line per key, counted on the step lines rather than in the whole
+    // output: the summary carries the same words and would double it.
+    let steps = text
+        .lines()
+        .filter(|l| l.trim_start().starts_with('?'))
+        .count();
+    assert_eq!(steps, 3, "{text}");
+    assert!(text.contains("3 steps · 3 would run (unprobed)"), "{text}");
+}

@@ -10,9 +10,10 @@ steps:
   # `rq_ref` is a ref of any kind. A tag is the steady state and a branch is
   # what a change to rust-quality looks like while it is in flight; the `git`
   # action tells the two apart by asking the repository, so moving between
-  # them is this one line and nothing else.
+  # them is this one line and nothing else. Both paths were driven against
+  # this checkout before the pin came back to the tag.
   - vars:
-      rq_ref: feat/provision-only
+      rq_ref: v0.3.0
       rq_dir: "{{ home }}/.cache/provision/tools/rust-quality"
 
   # This step used to be sixty lines of shell: a `creates`-gated clone, then a

@@ -422,3 +422,40 @@ fn help_and_version_are_not_usage_errors() {
         assert!(out.stderr.is_empty(), "{args:?} should not touch stderr");
     }
 }
+
+// ── `defaults` (spec §6.10) ───────────────────────────────────────────────
+
+#[test]
+fn strict_asks_a_defaults_step_where_it_runs() {
+    let (code, _) = validate("defaults_strict.yml");
+    assert_eq!(code, 0, "plain validate accepts a `defaults` step as it is");
+
+    let out = run(&["validate", "--strict", &fixture_arg("defaults_strict.yml")]);
+    assert_eq!(out.status.code(), Some(EXIT_VALIDATION));
+    let text = String::from_utf8_lossy(&out.stderr);
+    // Exactly one: the guarded step above it says where it runs.
+    assert_eq!(text.matches("naming the os").count(), 1, "{text}");
+    assert!(text.contains("defaults_strict.yml:9:3"), "{text}");
+}
+
+#[test]
+fn a_defaults_step_that_cannot_mean_what_it_says_is_rejected_at_parse() {
+    // `array` and `dict` are deferred, and the error says where they went.
+    let (code, text) = validate("defaults_bad_type.yml");
+    assert_eq!(code, EXIT_VALIDATION, "{text}");
+    assert!(text.contains("unknown defaults type `array`"), "{text}");
+    assert_positioned(&text);
+
+    // The declared `type` decides how the value is read, so a value the type
+    // cannot mean is a mistake now rather than a key that never converges.
+    let (code, text) = validate("defaults_bad_value.yml");
+    assert_eq!(code, EXIT_VALIDATION, "{text}");
+    assert!(text.contains("is not an integer"), "{text}");
+    assert_positioned(&text);
+
+    // §6.10: a root write lands in root's preferences.
+    let (code, text) = validate("defaults_sudo.yml");
+    assert_eq!(code, EXIT_VALIDATION, "{text}");
+    assert!(text.contains("must not run under `sudo`"), "{text}");
+    assert_positioned(&text);
+}

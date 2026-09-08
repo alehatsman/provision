@@ -1,0 +1,6 @@
+- name: an array is deferred
+  defaults:
+    domain: com.apple.systemuiserver
+    key: menuExtras
+    type: array
+    value: "one"

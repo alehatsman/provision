@@ -1,0 +1,25 @@
+---
+# No `when`, on purpose: §6.10 says the action does not skip itself off
+# macOS. It fails at apply and reads `unknown` at plan, and both of those are
+# testable on a machine that has no `defaults` at all.
+- name: Show hidden files
+  defaults:
+    domain: com.apple.finder
+    key: AppleShowAllFiles
+    type: bool
+    value: true
+
+- name: Screenshots to the desktop
+  defaults:
+    domain: com.apple.screencapture
+    key: location
+    type: string
+    value: "{{ home }}/Desktop"
+
+- name: Corner secondary click, per host
+  defaults:
+    domain: NSGlobalDomain
+    key: com.apple.trackpad.trackpadCornerClickBehavior
+    type: int
+    value: 1
+    current_host: true

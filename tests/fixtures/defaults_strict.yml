@@ -1,0 +1,14 @@
+# One `defaults` step that says where it runs and one that does not.
+- name: guarded
+  defaults:
+    domain: com.apple.finder
+    key: AppleShowAllFiles
+    type: bool
+    value: true
+  when: os == "darwin"
+- name: unguarded
+  defaults:
+    domain: com.apple.finder
+    key: ShowHardDrivesOnDesktop
+    type: bool
+    value: true

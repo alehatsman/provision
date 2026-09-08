@@ -1,0 +1,6 @@
+- name: a word is not an integer
+  defaults:
+    domain: com.apple.screensaver
+    key: askForPasswordDelay
+    type: int
+    value: immediately

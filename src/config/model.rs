@@ -10,7 +10,7 @@ use crate::yaml::N;
 use std::time::Duration;
 
 pub(crate) const ACTION_KEYS: &[&str] = &[
-    "shell", "cmd", "file", "template", "pkg", "service", "assert", "git",
+    "shell", "cmd", "file", "template", "pkg", "service", "assert", "git", "defaults",
 ];
 pub(crate) const STRUCTURAL_KEYS: &[&str] = &["vars", "vars_file", "import", "use"];
 pub(crate) const MODIFIER_KEYS: &[&str] = &[
@@ -54,6 +54,7 @@ pub(crate) fn action_body_keys(action: &str) -> Option<&'static [&'static str]> 
         "pkg" => &["name", "names", "state", "manager", "cask", "update_cache"],
         "service" => &["name", "state", "enabled", "scope"],
         "git" => &["repo", "dest", "ref"],
+        "defaults" => &["domain", "key", "type", "value", "current_host"],
         "assert" => &["command", "expr", "msg"],
         _ => return None,
     })
