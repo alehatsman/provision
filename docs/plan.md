@@ -436,13 +436,11 @@ rust-quality's block, windows-gnu all-targets clean.
   content byte-identical, because the harness names a snapshot after the
   test file it lives in.
 - `provision list tasks/` matches the phase 5 listing exactly.
-- `provision apply tasks/ci-fast.yml` exits 0. `provision apply
-  tasks/ci.yml` is green through step 5 -- fmt, clippy, 141 tests, rustdoc,
-  cargo-deny -- and red on step 6. Step 5 was `provision = 0.9.0 is
-  unlicensed`; the owner named MIT on 2026-09-08 and `cargo deny` now reports
-  `advisories ok, bans ok, licenses ok, sources ok`. Step 6, `cargo machete`,
-  reports `serde` unused -- only `serde_json` is used -- which is a dependency
-  change and so **owner's**. Steps 7 and 8 pass:
+- `provision apply tasks/ci-fast.yml` and `provision apply tasks/ci.yml`
+  both exit 0. The full gate was red for two owner's-call reasons and both
+  were answered on 2026-09-08: step 5 wanted a licence, which is MIT, and
+  step 6 wanted the unused `serde` gone. All eight steps pass. The soft caps
+  at step 8 are informational and always did:
   no lint-block drift, and the soft caps are informational (expand.rs 1313,
   actions/file.rs 903, main.rs 688, actions/pkg.rs 610, exec/runner.rs 516).
 
