@@ -11,7 +11,7 @@ pub mod pkg;
 pub mod service;
 pub mod template;
 
-use crate::config::model::{self, Step};
+use crate::config::model::Step;
 use crate::error::Result;
 use crate::exec::process;
 use crate::exec::sudo::Sudo;
@@ -32,7 +32,10 @@ pub enum Action {
     Pkg(pkg::Spec),
     /// Parsed and validated, but with no runner until phase 2. `plan` reports
     /// it unprobed; `apply` refuses rather than pretending it converged.
-    NotYet(&'static str),
+    /// The stand-in a gate's spawn context carries. `unless` runs an argv
+    /// the runner builds itself, so `gate_context` needs an `Action` it will
+    /// never look at — and naming that honestly beats reusing a real variant.
+    Gate,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -241,21 +244,15 @@ impl Action {
                 None => return Ok(None),
             },
 
-            other => Action::NotYet(static_key(other)),
+            // Unreachable in practice: `model` rejects any key that is not
+            // an action, a structural keyword or a modifier before parsing
+            // gets here, and every action key above is handled. An error
+            // rather than `unreachable!` because a provisioning tool that
+            // panics on a plan file is worse than one that explains itself.
+            other => return Err(step.at.err(format!("`{other}` is not an action"))),
         };
         Ok(Some(action))
     }
-}
-
-/// The action key, for an action whose runner arrives in phase 2. Every key is
-/// one of a fixed set, so this borrows nothing that was not already static.
-fn static_key(key: &str) -> &'static str {
-    model::ACTION_KEYS
-        .iter()
-        .chain(model::STRUCTURAL_KEYS)
-        .find(|k| **k == key)
-        .copied()
-        .unwrap_or("action")
 }
 
 // ── typed actions ─────────────────────────────────────────────────────────

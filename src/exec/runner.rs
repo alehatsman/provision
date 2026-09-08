@@ -119,16 +119,6 @@ impl Runner {
     }
 
     fn apply_inner(&self, p: &Prepared, judge: &dyn Judge) -> R<Done> {
-        if let Action::NotYet(key) = p.action {
-            // Reached only because validation lets it through, which it must:
-            // `plan --plan-no-probe` has to keep working on the whole tree.
-            return Err(Stop::Fail(Failure {
-                msg: format!("`{key}` is not implemented yet (phase 2)"),
-                rc: None,
-                stderr: String::new(),
-                interrupted: false,
-            }));
-        }
 
         match self.gate(p)? {
             Gate::Skip(why) => return Ok(Done::one(Status::Skipped(why))),
@@ -174,9 +164,6 @@ impl Runner {
     }
 
     fn probe_inner(&self, p: &Prepared, judge: &dyn Judge) -> R<Done> {
-        if let Action::NotYet(_) = p.action {
-            return Ok(Done::one(Status::WouldRunUnprobed));
-        }
         match self.gate(p)? {
             Gate::Skip(why) => return Ok(Done::one(Status::Skipped(why))),
             // A gate that needs root when there is none is not a verdict.
@@ -373,6 +360,23 @@ impl Runner {
                         interrupted: false,
                     }));
                 }
+                // Same rule one line up, for the other way a gate fails to
+                // give an answer. A hung `unless` told us nothing, and
+                // "the check never finished" is not "the work is not done".
+                // Provisional (2026-09-08 review, owner to confirm): it turns
+                // a silent re-run into a failure.
+                How::TimedOut => {
+                    return Err(Stop::Fail(Failure {
+                        msg: format!(
+                            "`unless` timed out after {}: {}",
+                            crate::output::event::human(p.timeout),
+                            cmd.lines().next().unwrap_or("")
+                        ),
+                        rc: None,
+                        stderr: out.stderr,
+                        interrupted: false,
+                    }));
+                }
                 How::Interrupted => return Err(Stop::Fail(interrupted())),
                 _ => {}
             }
@@ -390,7 +394,7 @@ impl Runner {
 /// nothing else of the step's: never its retry, never its own gates.
 fn gate_context(p: &Prepared) -> Prepared {
     Prepared {
-        action: Action::NotYet("unless"),
+        action: Action::Gate,
         unless: None,
         creates: None,
         cwd: p.cwd.clone(),

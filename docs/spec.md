@@ -168,7 +168,7 @@ changed_when: result.rc == 0
 |---|---|---|---|
 | `name` | string | action key + first arg | Shown in output. Templated. |
 | `when` | expr | true | Skip the step when false. Evaluated before `unless`/`creates`. |
-| `unless` | string | — | A shell command, run through the interpreter `shell` defaults to (bash on unix, powershell on Windows), and with the step's own `sudo`, `env` and `cwd` — a root step's gate has to see root's view. Exit 0 means "already done", step skipped. Non-zero means run, **except** a gate that could not run at all: a spawn failure, or `126`/`127` from the interpreter. That fails the step (§10). |
+| `unless` | string | — | A shell command, run through the interpreter `shell` defaults to (bash on unix, powershell on Windows), and with the step's own `sudo`, `env` and `cwd` — a root step's gate has to see root's view. Exit 0 means "already done", step skipped. Non-zero means run, **except** a gate that could not run at all: a spawn failure, `126`/`127` from the interpreter, or the gate hitting the step's timeout. Those fail the step (§10). |
 | `creates` | path | — | Skip when the path exists. |
 | `sudo` | bool | false | Run the action as root (§7). Windows: error; use `shell` from an elevated prompt. |
 | `timeout` | duration | 10m | Kill the step and fail. `30s`, `5m`, `1h`. |
@@ -658,6 +658,7 @@ one of `ok`, `changed`, `unknown`, `skipped`, `failed`, `would_change`,
 | `import` cycle | Error naming the cycle |
 | Template renders to empty `name` | Falls back to action + first arg |
 | `unless` command not found | Error, not "run the step". `127` (not found) and `126` (not executable) from the interpreter fail the step, naming the gate |
+| `unless` hits the step's timeout | Same rule, other cause: the step fails with `` `unless` timed out after 2.0s: <first line> ``. A gate that never finished told us nothing, and "the check did not answer" is not "the work is not done". **Provisional, decided by review 2026-09-08, owner to confirm** — it turns a silent re-run into a failure |
 | `creates` path contains `~` or template | Expanded, rendered, then checked |
 | `sudo: true` on macOS with `pkg: brew` | Validation error |
 | `retry` on a step that changed on attempt 2 | Reported changed, `attempt 2/3` in output |
