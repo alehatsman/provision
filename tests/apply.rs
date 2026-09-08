@@ -2503,3 +2503,375 @@ fn update_cache_refreshes_only_when_there_is_something_to_install() {
 // already proves the kill-on-timeout mechanism deterministically, through
 // the real `pkg` action and the real `Ctx::exec`; only the query's binary is
 // a stand-in there, and it is the mechanism under test either way.
+
+// ── `git` (spec §6.8) ─────────────────────────────────────────────────────
+
+/// A bare repository with the three ref shapes §6.8 distinguishes: a
+/// lightweight tag, an annotated tag, and a branch that moves.
+///
+/// The annotated tag is not one case among three. Its ref resolves to the tag
+/// object rather than to the commit, so a comparison without `^{commit}`
+/// reports `changed` on every run forever — which reads exactly like working.
+struct Remote {
+    dir: tempfile::TempDir,
+}
+
+impl Remote {
+    fn new() -> Remote {
+        let dir = tempfile::tempdir().expect("a temp dir for the remote");
+        let r = Remote { dir };
+        git_at(
+            r.root(),
+            &["init", "--quiet", "--bare", "-b", "main", &r.url()],
+        );
+        // A working clone to build the history in, thrown away after.
+        let work = r.root().join("work");
+        r.clone_into(&work);
+        commit(&work, "one");
+        git_at(&work, &["tag", "light"]);
+        commit(&work, "two");
+        git_at(&work, &["tag", "-a", "annotated", "-m", "an annotated tag"]);
+        commit(&work, "three");
+        git_at(&work, &["push", "--quiet", "--tags", "origin", "main"]);
+        discard(&work);
+        r
+    }
+
+    fn root(&self) -> &Path {
+        self.dir.path()
+    }
+
+    fn path(&self) -> PathBuf {
+        self.root().join("remote.git")
+    }
+
+    fn url(&self) -> String {
+        self.path().display().to_string()
+    }
+
+    /// One more commit on `main`, pushed. This is how the branch moves under
+    /// a checkout that already exists.
+    fn advance(&self) {
+        let work = self.root().join("advance");
+        self.clone_into(&work);
+        commit(&work, "four");
+        git_at(&work, &["push", "--quiet", "origin", "main"]);
+        discard(&work);
+    }
+
+    /// A tag created after a checkout was made, so the checkout has never
+    /// heard of it. It points at `at` rather than at the tip, so converging
+    /// on it has to move HEAD — a tag on the commit the checkout already sits
+    /// on would read `ok` and prove nothing about the fetch.
+    fn tag_later(&self, name: &str, at: &str) {
+        let work = self.root().join("tagging");
+        self.clone_into(&work);
+        git_at(&work, &["tag", "-a", name, "-m", "later", at]);
+        git_at(&work, &["push", "--quiet", "--tags", "origin"]);
+        discard(&work);
+    }
+
+    fn clone_into(&self, work: &Path) {
+        let into = work.display().to_string();
+        git_at(self.root(), &["clone", "--quiet", &self.url(), &into]);
+    }
+}
+
+/// One commit adding or rewriting the single file the history carries.
+fn commit(work: &Path, text: &str) {
+    std::fs::write(work.join("file.txt"), format!("{text}\n"))
+        .expect("write the file the commits carry");
+    git_at(work, &["add", "file.txt"]);
+    git_at(work, &["commit", "--quiet", "-m", text]);
+}
+
+/// `git` in a directory, with an author and committer the suite supplies: a
+/// machine running the tests may have no identity configured, and `commit`
+/// would fail on it for a reason that has nothing to do with the test.
+fn git_at(cwd: &Path, args: &[&str]) {
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .env("GIT_AUTHOR_NAME", "provision tests")
+        .env("GIT_AUTHOR_EMAIL", "tests@example.invalid")
+        .env("GIT_COMMITTER_NAME", "provision tests")
+        .env("GIT_COMMITTER_EMAIL", "tests@example.invalid")
+        .output()
+        .expect("git failed to start");
+    assert!(
+        out.status.success(),
+        "git {args:?} failed:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+fn discard(work: &Path) {
+    std::fs::remove_dir_all(work).expect("remove the working clone");
+}
+
+/// `git rev-parse` in a checkout the test made, for asserting where HEAD went.
+fn head_of(dir: &Path) -> String {
+    let at = dir.display().to_string();
+    let out = Command::new("git")
+        .args(["-C", &at, "rev-parse", "HEAD"])
+        .output()
+        .expect("git failed to start");
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+fn checkout_in(scratch: &Path) -> PathBuf {
+    scratch.join("deep/nest/checkout")
+}
+
+/// The two `--var`s the fixture reads. `None` leaves `reference` unset, which
+/// is how the default-branch fixture is driven.
+fn git_vars(remote: &Remote, reference: Option<&str>) -> Vec<String> {
+    let mut v = vec!["--var".to_string(), format!("repo={}", remote.url())];
+    if let Some(r) = reference {
+        v.push("--var".to_string());
+        v.push(format!("reference={r}"));
+    }
+    v
+}
+
+fn as_args(v: &[String]) -> Vec<&str> {
+    v.iter().map(String::as_str).collect()
+}
+
+#[test]
+fn git_clones_at_a_lightweight_tag_then_reads_ok() {
+    let remote = Remote::new();
+    let dir = tempfile::tempdir().unwrap();
+    let args = git_vars(&remote, Some("light"));
+    let args = as_args(&args);
+
+    let (code, first) = apply(dir.path(), "git.yml", &args);
+    assert_eq!(code, 0, "{first}");
+    assert!(
+        line_for(&first, "The checkout").contains("changed"),
+        "{first}"
+    );
+    // The parents were two levels deep and did not exist.
+    assert!(checkout_in(dir.path()).join(".git").is_dir(), "no checkout");
+
+    let (code, second) = apply(dir.path(), "git.yml", &args);
+    assert_eq!(code, 0, "{second}");
+    assert_eq!(verdict(&second, "The checkout"), "ok", "{second}");
+}
+
+#[test]
+fn an_annotated_tag_is_compared_by_the_commit_it_peels_to() {
+    let remote = Remote::new();
+    let dir = tempfile::tempdir().unwrap();
+    let args = git_vars(&remote, Some("annotated"));
+    let args = as_args(&args);
+
+    let (code, first) = apply(dir.path(), "git.yml", &args);
+    assert_eq!(code, 0, "{first}");
+    assert!(
+        line_for(&first, "The checkout").contains("changed"),
+        "{first}"
+    );
+
+    // Without the `^{commit}` peel the tag's ref is the tag object's sha,
+    // HEAD is the commit's, and this second run reports `changed` forever.
+    let (code, second) = apply(dir.path(), "git.yml", &args);
+    assert_eq!(code, 0, "{second}");
+    assert_eq!(verdict(&second, "The checkout"), "ok", "{second}");
+}
+
+#[test]
+fn a_pinned_ref_converges_with_no_remote_to_ask() {
+    let remote = Remote::new();
+    let dir = tempfile::tempdir().unwrap();
+    let args = git_vars(&remote, Some("annotated"));
+    let args = as_args(&args);
+    let (code, _) = apply(dir.path(), "git.yml", &args);
+    assert_eq!(code, 0);
+
+    // §6.8: a tag is immutable, so once it is on disk the answer needs no
+    // network. Deleting the remote outright is a harder test than pulling a
+    // cable: every git call that reaches for it fails immediately.
+    std::fs::remove_dir_all(remote.path()).unwrap();
+    let (code, offline) = apply(dir.path(), "git.yml", &args);
+    assert_eq!(code, 0, "{offline}");
+    assert_eq!(verdict(&offline, "The checkout"), "ok", "{offline}");
+}
+
+#[test]
+fn a_branch_fast_forwards_when_the_remote_moves() {
+    let remote = Remote::new();
+    let dir = tempfile::tempdir().unwrap();
+    let args = git_vars(&remote, Some("main"));
+    let args = as_args(&args);
+
+    let (code, first) = apply(dir.path(), "git.yml", &args);
+    assert_eq!(code, 0, "{first}");
+    assert!(
+        line_for(&first, "The checkout").contains("changed"),
+        "{first}"
+    );
+    let at_clone = head_of(&checkout_in(dir.path()));
+
+    let (code, second) = apply(dir.path(), "git.yml", &args);
+    assert_eq!(code, 0, "{second}");
+    assert_eq!(verdict(&second, "The checkout"), "ok", "{second}");
+
+    remote.advance();
+    let (code, moved) = apply(dir.path(), "git.yml", &args);
+    assert_eq!(code, 0, "{moved}");
+    assert!(
+        line_for(&moved, "The checkout").contains("changed"),
+        "{moved}"
+    );
+    assert_ne!(head_of(&checkout_in(dir.path())), at_clone, "did not move");
+
+    let (code, settled) = apply(dir.path(), "git.yml", &args);
+    assert_eq!(code, 0, "{settled}");
+    assert_eq!(verdict(&settled, "The checkout"), "ok", "{settled}");
+}
+
+#[test]
+fn a_branch_is_unknown_under_plan_and_a_missing_tag_with_it() {
+    let remote = Remote::new();
+    let dir = tempfile::tempdir().unwrap();
+    let branch = git_vars(&remote, Some("main"));
+    let branch = as_args(&branch);
+    let (code, _) = apply(dir.path(), "git.yml", &branch);
+    assert_eq!(code, 0);
+
+    // §6.8: whether the remote moved is not a question the local clone
+    // answers, and plan does not go to the network to ask.
+    let path = fixture("git.yml");
+    let mut argv = vec!["plan", path.to_str().unwrap()];
+    argv.extend_from_slice(&branch);
+    let out = run_in(dir.path(), &argv);
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert!(
+        line_for(&text, "The checkout").contains("unknown"),
+        "{text}"
+    );
+
+    // A tag the checkout has never heard of is the same answer for the same
+    // reason: resolving it is a network call.
+    remote.tag_later("v9", "light");
+    let later = git_vars(&remote, Some("v9"));
+    let mut argv = vec!["plan", path.to_str().unwrap()];
+    argv.extend(as_args(&later));
+    let out = run_in(dir.path(), &argv);
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert!(
+        line_for(&text, "The checkout").contains("unknown"),
+        "{text}"
+    );
+
+    // Apply fetches and then converges on it, which means moving HEAD back
+    // to the commit the new tag names.
+    let before = head_of(&checkout_in(dir.path()));
+    let later = as_args(&later);
+    let (code, got) = apply(dir.path(), "git.yml", &later);
+    assert_eq!(code, 0, "{got}");
+    assert!(line_for(&got, "The checkout").contains("changed"), "{got}");
+    assert_ne!(
+        head_of(&checkout_in(dir.path())),
+        before,
+        "HEAD did not move"
+    );
+
+    let (code, again) = apply(dir.path(), "git.yml", &later);
+    assert_eq!(code, 0, "{again}");
+    assert_eq!(verdict(&again, "The checkout"), "ok", "{again}");
+}
+
+#[test]
+fn a_dirty_checkout_fails_and_is_not_reset() {
+    let remote = Remote::new();
+    let dir = tempfile::tempdir().unwrap();
+    let light = git_vars(&remote, Some("light"));
+    let light = as_args(&light);
+    let (code, _) = apply(dir.path(), "git.yml", &light);
+    assert_eq!(code, 0);
+
+    let tracked = checkout_in(dir.path()).join("file.txt");
+    std::fs::write(&tracked, "edited by hand\n").unwrap();
+    let untracked = checkout_in(dir.path()).join("notes.txt");
+    std::fs::write(&untracked, "mine\n").unwrap();
+
+    let (code, out) = apply(dir.path(), "git.yml", &light);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("uncommitted changes"), "{out}");
+    assert_eq!(
+        std::fs::read_to_string(&tracked).unwrap(),
+        "edited by hand\n",
+        "the edit was discarded"
+    );
+
+    // §6.8 as amended: untracked files are not work a checkout can destroy,
+    // so on their own they do not fail the step.
+    std::fs::write(&tracked, "one\n").unwrap();
+    let (code, clean) = apply(dir.path(), "git.yml", &light);
+    assert_eq!(code, 0, "{clean}");
+    assert!(untracked.is_file(), "the untracked file was removed");
+}
+
+#[test]
+fn a_dest_whose_origin_is_another_repository_fails() {
+    let remote = Remote::new();
+    let other = Remote::new();
+    let dir = tempfile::tempdir().unwrap();
+    let mine = git_vars(&remote, Some("light"));
+    let mine = as_args(&mine);
+    let (code, _) = apply(dir.path(), "git.yml", &mine);
+    assert_eq!(code, 0);
+
+    let theirs = git_vars(&other, Some("light"));
+    let theirs = as_args(&theirs);
+    let (code, out) = apply(dir.path(), "git.yml", &theirs);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("origin"), "{out}");
+}
+
+#[test]
+fn a_dest_that_is_not_a_repository_fails_rather_than_being_replaced() {
+    let remote = Remote::new();
+    let dir = tempfile::tempdir().unwrap();
+    let target = checkout_in(dir.path());
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::write(target.join("keep.txt"), "not mine to delete\n").unwrap();
+
+    let args = git_vars(&remote, Some("light"));
+    let args = as_args(&args);
+    let (code, out) = apply(dir.path(), "git.yml", &args);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("not a git repository"), "{out}");
+    assert!(target.join("keep.txt").is_file(), "the directory was taken");
+}
+
+#[test]
+fn no_ref_takes_the_remotes_default_branch() {
+    let remote = Remote::new();
+    let dir = tempfile::tempdir().unwrap();
+    let args = git_vars(&remote, None);
+    let args = as_args(&args);
+
+    let (code, first) = apply(dir.path(), "git_default_branch.yml", &args);
+    assert_eq!(code, 0, "{first}");
+    assert!(
+        line_for(&first, "The checkout").contains("changed"),
+        "{first}"
+    );
+
+    let (code, second) = apply(dir.path(), "git_default_branch.yml", &args);
+    assert_eq!(code, 0, "{second}");
+    assert_eq!(verdict(&second, "The checkout"), "ok", "{second}");
+
+    remote.advance();
+    let (code, moved) = apply(dir.path(), "git_default_branch.yml", &args);
+    assert_eq!(code, 0, "{moved}");
+    assert!(
+        line_for(&moved, "The checkout").contains("changed"),
+        "{moved}"
+    );
+}

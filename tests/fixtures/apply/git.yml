@@ -1,0 +1,12 @@
+---
+# The repo and the ref come from the command line, so one fixture covers a
+# lightweight tag, an annotated tag, a branch and a sha. `dest` is two levels
+# below the scratch root on purpose: `git` creates the parents, like `file`.
+- vars:
+    scratch: "{{ env.PROVISION_SCRATCH }}"
+
+- name: The checkout
+  git:
+    repo: "{{ repo }}"
+    dest: "{{ scratch }}/deep/nest/checkout"
+    ref: "{{ reference }}"

@@ -1,0 +1,9 @@
+---
+# No `ref`: the remote's default branch, which §6.8 treats as a branch.
+- vars:
+    scratch: "{{ env.PROVISION_SCRATCH }}"
+
+- name: The checkout
+  git:
+    repo: "{{ repo }}"
+    dest: "{{ scratch }}/checkout"

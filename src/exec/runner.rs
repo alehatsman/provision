@@ -336,6 +336,14 @@ impl Runner {
                 },
                 None,
             ),
+            Action::Git(spec) => (
+                if act {
+                    spec.apply(&ctx)
+                } else {
+                    spec.plan(&ctx)
+                },
+                None,
+            ),
             Action::Pkg(spec) => (
                 if act {
                     spec.apply(&ctx)

@@ -7,6 +7,7 @@
 //! inspection and get their own modules then.
 
 pub(crate) mod file;
+pub(crate) mod git;
 pub(crate) mod pkg;
 pub(crate) mod service;
 pub(crate) mod template;
@@ -35,6 +36,7 @@ pub(crate) enum Action {
         msg: Option<String>,
     },
     File(file::Spec),
+    Git(git::Spec),
     Template(template::Spec),
     Service(service::Spec),
     Pkg(pkg::Spec),
@@ -146,7 +148,11 @@ impl Action {
     pub(crate) fn is_typed(&self) -> bool {
         matches!(
             self,
-            Action::File(_) | Action::Template(_) | Action::Service(_) | Action::Pkg(_)
+            Action::File(_)
+                | Action::Template(_)
+                | Action::Service(_)
+                | Action::Pkg(_)
+                | Action::Git(_)
         )
     }
 }
@@ -275,6 +281,11 @@ impl Action {
 
             "file" => match file::parse(step, engine, ctx, raw)? {
                 Some(spec) => Action::File(spec),
+                None => return Ok(None),
+            },
+
+            "git" => match git::parse(step, engine, ctx, raw)? {
+                Some(spec) => Action::Git(spec),
                 None => return Ok(None),
             },
 
