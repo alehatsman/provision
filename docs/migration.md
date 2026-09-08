@@ -451,7 +451,11 @@ Expected `plan` diffs on an already-converged machine after migration:
 5. mac and work_mac.
 6. x1 last. It is the only always-with-me machine and the usual controller;
    breaking it strands the fleet. Everything else has proved the tool first.
-7. Delete mooncake from every machine. Merge the branch.
+7. Merge the branch. **mooncake stays installed** — ruled 2026-09-08: it is
+   a tool, not a dependency. It is the MCP server, `components/fleet-peer`
+   runs its agentd, and `provision-ci:latest` is built FROM `mooncake-ci`
+   because moongitd execs every CI step as `mooncake step '<yaml>'`. What
+   ends here is using it to provision, not using it.
 
 ## 8. What the rewrite found
 

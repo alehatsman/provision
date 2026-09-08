@@ -668,7 +668,7 @@ one of `ok`, `changed`, `unknown`, `skipped`, `failed`, `would_change`,
 | `import` cycle | Error naming the cycle |
 | Template renders to empty `name` | Falls back to action + first arg |
 | `unless` command not found | Error, not "run the step". `127` (not found) and `126` (not executable) from the interpreter fail the step, naming the gate |
-| `unless` hits the step's timeout | Same rule, other cause: the step fails with `` `unless` timed out after 2.0s: <first line> ``. A gate that never finished told us nothing, and "the check did not answer" is not "the work is not done". **Provisional, decided by review 2026-09-08, owner to confirm** — it turns a silent re-run into a failure |
+| `unless` hits the step's timeout | Same rule, other cause: the step fails with `` `unless` timed out after 2.0s: <first line> ``. A gate that never finished told us nothing, and "the check did not answer" is not "the work is not done". Confirmed by the owner 2026-09-08: it turns a silent re-run into a failure, and that is the point |
 | `creates` path contains `~` or template | Expanded, rendered, then checked |
 | `sudo: true` on macOS with `pkg: brew` | Validation error |
 | `retry` on a step that changed on attempt 2 | Reported changed, `attempt 2/3` in output |
@@ -679,7 +679,7 @@ one of `ok`, `changed`, `unknown`, `skipped`, `failed`, `would_change`,
 | A step is skipped by `when` or by tags | Its `register`, if it declares one, still binds — with `skipped: true`. That field exists precisely so a later `when` can read it rather than fail on an undefined name |
 | Ctrl-C mid-step | Current step killed, summary printed with `interrupted`, exit 130 |
 | Windows path in `dest` | Accepted; `~` expands to `%USERPROFILE%` |
-| Two `vars_file` set the same key | Later wins, `--explain-var k` shows the chain |
+| Two `vars_file` set the same key | Later wins. `--explain-var k` would show the chain — **spec'd, not built**: nothing in the fleet has needed it, and the owner ruled 2026-09-08 to leave it written down rather than build it or cut it |
 | `timeout` and `retry` on one step | The timeout applies per attempt, not to the step |
 | `retry` and `register` on one step | The register holds the last attempt, and its `rc` is that attempt's |
 | `--stream` and `register` on one step | Output is teed: streamed live *and* captured |

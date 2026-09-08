@@ -17,7 +17,7 @@ the next stack and this is a small enough project to be a good first one.
 
 **Overturned by.** Nothing foreseeable.
 
-**Amended 2026-09-08, owner to confirm.** Windows ships as
+**Amended and confirmed by the owner 2026-09-08.** Windows ships as
 `x86_64-pc-windows-gnu`, not `-msvc`, and no cross-compilation happens for
 Linux or macOS at all. Every machine in the fleet builds its own native
 binary; only Windows, which has no toolchain in this fleet, is
@@ -246,10 +246,10 @@ the plan, not a quieter exit code.
 
 ## D16 — the phase 2 action semantics
 
-**Decided by review 2026-09-08, owner to confirm.** Everything under this
-heading is provisional: it was settled by the reviewing session while the
-owner was away, and it is gathered here rather than scattered so he can
-overturn any of it in one place. Three of the original decisions were amended
+**Decided by review 2026-09-08, confirmed by the owner the same day.**
+Everything under this heading was settled by the reviewing session while the
+owner was away; it is gathered here rather than scattered so the whole block
+could be ruled on in one place, which it was. It stands. Three of the original decisions were amended
 before any code was written, each because a measurement said so; those are
 marked where they appear.
 

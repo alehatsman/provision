@@ -27,10 +27,11 @@ Open, and all of it the owner's — none of it can close from this machine:
 - Apply to each machine, main_pc WSL first and x1 last (migration.md §7
   steps 2–7). Every gate below that line is a real apply.
 - Build `provision-ci:latest` on main_pc. dotfiles CI is red until it exists.
-- Rulings: D1's windows-gnu amendment, D16, `--explain-var` (spec'd, not
-  implemented, nothing asks for it), `--keep-going` (mooncake had it,
-  provision does not), the hung-`unless` failure, and whether mooncake gets
-  uninstalled anywhere.
+- ~~Rulings~~ — all six settled 2026-09-08. D1's windows-gnu amendment and
+  D16 confirmed as written. The hung-`unless` failure confirmed.
+  `--explain-var` stays spec'd and unbuilt, marked as such in §10.
+  mooncake stays installed everywhere: a tool, not a dependency.
+  `--keep-going` is to be built.
 - The tag, a remote, and any push. `main` exists at `f788571`; the repo
   has no remote and nothing has been pushed.
 
@@ -210,8 +211,8 @@ Deliverables
   install call per step, `latest`.
 - `service`: systemd system/user, launchd.
 
-Semantics are settled in spec §6.3–§6.6 and gathered in D16, which is
-provisional pending the owner's review.
+Semantics are settled in spec §6.3–§6.6 and gathered in D16, confirmed by
+the owner 2026-09-08.
 
 Gate
 
@@ -255,10 +256,10 @@ Deliverables
   post-expansion. `expand.rs:59`.
 - **Done** (`df451a8`) `--hide-skipped`, `--no-diff`, `--stream`,
   `--verbose`, `--color`. All in `main.rs`.
-- **Not implemented** `--explain-var`. Spec'd in §8 and §10, and nothing in
-  the fleet asks for it: `validate`'s undefined-variable diagnostics already
-  carry `file:line:col` and the name. Cutting it is a scope call, so it
-  waits for the owner rather than being struck here.
+- **Not implemented, deliberately** `--explain-var`. Nothing in the fleet
+  asks for it: `validate`'s undefined-variable diagnostics already carry
+  `file:line:col` and the name. Ruled 2026-09-08 — it stays written down in
+  §10, marked there as spec'd but unbuilt, rather than being built or cut.
 - **Done** Windows build: PowerShell is the default interpreter
   (`actions/mod.rs:48`), `~` expands, `sudo` is rejected at `model.rs:284`,
   and the process-group and `taskkill` paths exist (`process.rs:247,274`).
@@ -286,7 +287,8 @@ Gate
 
 Deliverables
 
-- **Rewritten 2026-09-08 by review, owner to confirm.** This section used to
+- **Rewritten 2026-09-08 by review, confirmed by the owner the same day:
+  mooncake is a tool, not a dependency, and stays installed.** This used to
   say "mooncake removed from every machine's plan and from
   `shared/bootstrap.yml`" and "`mooncake` binary uninstalled from all five
   machines". Both are dead as written, and migration.md §5 says why:
