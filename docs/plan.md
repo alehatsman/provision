@@ -48,13 +48,13 @@ Nothing is open and the builder's. Phase 5's code landed 2026-09-08
 (`2c4d4ed`, `3d293fa`); its gate is a real moongit run and therefore the
 owner's. The dotfiles justfile stays until `tasks/` replaces it.
 
-This repo is `run`'s first consumer: its own `justfile` is gone, replaced by
+This repo is D17's first consumer: its own `justfile` is gone, replaced by
 `tasks/`, and its quality gate is
 [rust-quality](https://github.com/alehatsman/rust-quality) pinned at a tag in
-`tasks/tools.yml`. `provision run tasks/ci.yml` is what runs before a push.
-That is the dogfood — the two spec gaps it found (`component_dir`, and a
-task's cwd being the invocation directory) are §3.2 and §4, and neither would
-have surfaced from the machine plans.
+`tasks/tools.yml`. `provision apply tasks/ci.yml` is what runs before a push.
+That is the dogfood — it found `component_dir` (§3.2), the working-directory
+rule (§4), and finally that the `run` verb itself was the wrong shape (phase
+5b), and none of that would have surfaced from the machine plans.
 
 Rust, one crate, one binary. Target: **6–9k lines of Rust** including
 tests, all seven actions, three platforms. If it passes 12k, something

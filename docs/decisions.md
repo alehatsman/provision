@@ -361,7 +361,7 @@ plan.md phase 5; migration.md §6.
 
 **First consumer.** provision's own repo, 2026-09-08: the `justfile` is
 gone, `tasks/` holds one component per task, and the quality gate is
-rust-quality's, `use`d by path from a pinned checkout. Dogfooding it found
+rust-quality's scripts, called by path from a pinned checkout. Dogfooding it found
 the two things the machine plans never would have — a component had no way to
 name its own directory, and a task inherited the wrong working directory.
 
