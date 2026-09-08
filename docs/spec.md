@@ -554,9 +554,9 @@ clone-and-pin block before this existed.
 
 ```yaml
 git:
-  repo: https://github.com/zplug/zplug.git
-  dest: ~/.zplug
-  ref: v2.4.2                  # tag, sha, or branch; default: the remote's default branch
+  repo: https://github.com/tmux-plugins/tpm
+  dest: ~/.config/tmux/plugins/tpm
+  ref: v3.1.0                  # tag, sha, or branch; default: the remote's default branch
 ```
 
 - **State is "HEAD of `dest` is `ref`."** `dest` missing: clone, check out
@@ -598,6 +598,10 @@ git:
   better error.
 - Parents of `dest` are created the way `file` creates them (§6.3); `dest`
   itself must be absent or a checkout of the same `repo`.
+- A repository that **rewrites its own tracked files** at runtime (zplug
+  turns its tracked `init.zsh` into a symlink on first run) reads as dirty
+  forever, and the guard cannot tell that from an edit. Such a checkout
+  stays a `shell` clone with `creates`; the guard is not loosened for it.
 
 ### 6.9 `download`
 
