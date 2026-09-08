@@ -1,0 +1,10 @@
+---
+# Ctrl-C lands on the first step. The second exists to prove `--keep-going`
+# does not carry the run past an interrupt: it must never be reached.
+- name: Sleeps until something stops it
+  shell: sleep 30
+  changed_when: "false"
+
+- name: Must not run after an interrupt
+  shell: "true"
+  changed_when: "false"

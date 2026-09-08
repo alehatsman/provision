@@ -89,6 +89,9 @@ pub struct Expander {
     /// Spec §2: apply stops at the first failure. Nothing after it is run,
     /// reported, or rendered.
     stopped: bool,
+    /// Spec §8 `--keep-going`: carry on past a failed step, so one run
+    /// reports everything broken instead of the first thing.
+    keep_going: bool,
 }
 
 impl Expander {
@@ -108,7 +111,15 @@ impl Expander {
             sink: Box::new(crate::output::Silent),
             index: 0,
             stopped: false,
+            keep_going: false,
         }
+    }
+
+    /// Spec §8. `apply` only: `plan` and `validate` never stopped at a
+    /// failure, so there is nothing for the flag to change there.
+    pub fn keep_going(mut self, yes: bool) -> Expander {
+        self.keep_going = yes;
+        self
     }
 
     pub fn with_runner(mut self, runner: Runner) -> Expander {
@@ -614,7 +625,11 @@ impl Expander {
         // Spec §8: apply stops at the first failure; plan never does. A plan
         // walk has not done the work, so an assert about work not yet done is
         // information, not a reason to hide every step after it.
-        if done.status.failed() && self.mode.executes() {
+        //
+        // `--keep-going` carries on past a failed step, but never past an
+        // interrupt: Ctrl-C is the operator saying stop, not a step saying it
+        // could not do its work.
+        if done.status.failed() && self.mode.executes() && (!self.keep_going || done.interrupted()) {
             self.stopped = true;
         }
         self.emit(step, scope, depth, &tags, done, elapsed);

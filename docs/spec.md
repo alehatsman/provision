@@ -543,7 +543,7 @@ assert:
 ```
 provision validate <plan.yml> [--strict]
 provision plan     <plan.yml> [--tags t,u] [--skip-tags t] [--var k=v]... [--vars-file f]... [--plan-no-probe] [--no-diff] [--json] [--hide-skipped] [--color when]
-provision apply    <plan.yml> [same as plan] [--ask-sudo-pass] [--verbose] [--stream]
+provision apply    <plan.yml> [same as plan] [--ask-sudo-pass] [--verbose] [--stream] [--keep-going]
 provision facts    [--json]
 provision --version
 ```
@@ -574,7 +574,22 @@ provision --version
   probe `unless`/`creates`/`pkg`/`service`/`file` state, print what would
   change. Runs nothing that mutates. Exit 0 if nothing would change, 2 if
   something would.
-- `apply`: plan, then execute. Stops at first failed step. Exit 1 on failure.
+- `apply`: plan, then execute. Stops at the first failed step. Exit 1 on
+  failure.
+- `--keep-going` (`apply` only): carry on past a failed step instead of
+  stopping, so one run reports everything that is broken rather than the
+  first thing. Every later step still runs, is reported, and counts in the
+  summary; the exit code is 1 all the same. It does **not** apply to an
+  interrupt — Ctrl-C is the operator saying stop, not a step saying it could
+  not do its work — and it does not apply to the validation pass that runs
+  before any step: a plan that will not render is not a plan to keep going
+  with.
+
+  It is off by default because a failed step usually invalidates what
+  follows: a package that did not install makes every step configuring it
+  fail too, and six failures are harder to read than the one that caused
+  them. It earns its keep on a bare machine, where the point of the first
+  run is the list.
 
 Tag selection (Ansible semantics, deliberately):
 
@@ -684,6 +699,9 @@ one of `ok`, `changed`, `unknown`, `skipped`, `failed`, `would_change`,
 | `retry` and `register` on one step | The register holds the last attempt, and its `rc` is that attempt's |
 | `--stream` and `register` on one step | Output is teed: streamed live *and* captured |
 | `assert` fails | `rc: 1` in `register`; the run stops like any other failure |
+| `--keep-going` and a step whose `register` a later step reads | The register holds the failed step's own result — `rc`, output, and `failed: true` — so a `when` reading it sees what happened. Nothing is invented to stand in for work that did not happen |
+| `--keep-going` and Ctrl-C | The run stops anyway, exit 130. The flag is about a step failing, not about the operator stopping |
+| `--keep-going` on `plan` or `validate` | Not accepted: neither ever stopped at a failure to begin with |
 | A step's `env` names a key `sudo` must preserve | `sudo --preserve-env` is given exactly the step's own `env` keys, nothing more |
 | `--ask-sudo-pass` and a step that reads stdin | The wrapped command is `sudo -k -S`, so the timestamp is invalidated and sudo consumes the password line before the child is started. The child sees EOF, never the password |
 | A `sudo: true` step's `unless` under `plan`, with no sudo | The gate is not run and the step is `would run (unprobed)`. Under `apply` this cannot arise: the preflight already failed |

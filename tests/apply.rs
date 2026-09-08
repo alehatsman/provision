@@ -182,6 +182,43 @@ fn a_failure_stops_the_run_and_shows_the_stderr_tail() {
     assert!(!out.contains("Never reached"), "the run must stop at the failure:\n{out}");
 }
 
+// Spec §8 `--keep-going`. The point of the flag is the list: on a bare
+// machine the first run should say everything that is broken, not the first
+// thing. `failure.yml`'s third step is named "Never reached" for the default
+// behaviour; with the flag it is reached.
+#[test]
+fn keep_going_carries_on_past_a_failed_step() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(dir.path(), "failure.yml", &["--keep-going"]);
+    assert_eq!(code, 1, "a kept-going run still fails:\n{out}");
+    assert!(out.contains("Never reached"), "the run stopped anyway:\n{out}");
+    assert!(out.contains("sed: can't read /etc/pacman.conf"), "{out}");
+}
+
+#[test]
+fn keep_going_reports_every_failure_and_the_register_of_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(dir.path(), "keep_going.yml", &["--keep-going"]);
+    assert_eq!(code, 1, "{out}");
+    assert_eq!(out.matches("FAILED").count(), 2, "both failures should show:\n{out}");
+    // The register holds the failed step's own result, so a later `when`
+    // reading it sees what happened rather than a placeholder.
+    assert_eq!(verdict(&out, "Reads the failed step's register"), "ok", "{out}");
+    assert_eq!(verdict(&out, "Last step still runs"), "ok", "{out}");
+    assert!(out.contains("2 failed"), "the summary should count both:\n{out}");
+}
+
+// Without the flag the same plan stops at the first of the two, which is what
+// makes the test above mean something.
+#[test]
+fn without_keep_going_the_same_plan_stops_at_the_first_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(dir.path(), "keep_going.yml", &[]);
+    assert_eq!(code, 1, "{out}");
+    assert_eq!(out.matches("FAILED").count(), 1, "{out}");
+    assert!(!out.contains("Last step still runs"), "{out}");
+}
+
 // `an_unimplemented_action_says_which_phase_brings_it` lived here through
 // phase 2, repointed each time an action landed: file, then pkg. All seven
 // actions now exist, so `NotYet` is unreachable from a plan and the test has
@@ -452,6 +489,31 @@ fn stream_writes_the_child_output_through_once() {
     // Streamed *and* captured (spec §10), but only rendered once: the capture
     // is for `register`, not for a second copy on screen.
     assert_eq!(out.matches("STREAMED-MARKER").count(), 1, "{out}");
+}
+
+// Spec §8: `--keep-going` is about a step failing, not about the operator
+// stopping. Ctrl-C ends the run whatever the flag says.
+#[test]
+fn keep_going_does_not_carry_the_run_past_ctrl_c() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture("interrupt_then_more.yml");
+    let child = Command::new(env!("CARGO_BIN_EXE_provision"))
+        .args(["apply", path.to_str().unwrap(), "--keep-going"])
+        .env("PROVISION_SCRATCH", dir.path())
+        .env("NO_COLOR", "1")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    let _ = Command::new("kill").args(["-INT", &child.id().to_string()]).status();
+
+    let out = child.wait_with_output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).into_owned()
+        + &String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(130), "{text}");
+    assert!(!text.contains("Must not run after an interrupt"), "kept going past Ctrl-C:\n{text}");
 }
 
 #[test]

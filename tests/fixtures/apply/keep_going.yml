@@ -1,0 +1,22 @@
+---
+# Two failures and a reader of the first one's register. Under `--keep-going`
+# every line here is reported; without it the run stops at the first.
+- name: First failure
+  shell: |
+    echo "first one broke" >&2
+    exit 4
+  register: first
+  changed_when: "false"
+
+- name: Second failure
+  shell: exit 5
+  changed_when: "false"
+
+- name: Reads the failed step's register
+  shell: "true"
+  when: first.rc == 4
+  changed_when: "false"
+
+- name: Last step still runs
+  shell: "true"
+  changed_when: "false"

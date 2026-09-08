@@ -70,6 +70,12 @@ impl Done {
     fn one(status: Status) -> Done {
         Done { status, out: None, attempt: 1, attempts: 1, detail: None, note: None }
     }
+
+    /// Ctrl-C rather than the step's own fault. `--keep-going` reads this:
+    /// it carries on past a failure, never past an interrupt.
+    pub fn interrupted(&self) -> bool {
+        matches!(&self.status, Status::Failed(f) if f.interrupted)
+    }
 }
 
 /// Two ways a step can stop early. A `Diag` is provision's own fault — a bad

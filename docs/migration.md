@@ -386,10 +386,11 @@ Expected `plan` diffs on an already-converged machine after migration:
   config only on the host that could run it. provision validates all five
   machine plans from any one box, so `just ci` is a complete gate
   everywhere.
-- **No `--keep-going`.** mooncake's flag finished every step it could and
-  listed failures at the end, which is what made a first apply on a bare
-  machine survivable. provision has no equivalent yet; the spec should
-  settle one before §7 step 2.
+- **`--keep-going` was mooncake's, and it is provision's now.** Its flag
+  finished every step it could and listed the failures at the end, which is
+  what made a first apply on a bare machine survivable. Ruled 2026-09-08:
+  build it. Off by default — a failed step usually invalidates what follows
+  — and it never overrides Ctrl-C. Spec §8.
 
 ## 6. Things that move out of dotfiles entirely
 

@@ -63,7 +63,7 @@ enum Command {
         #[command(flatten)]
         run: RunArgs,
     },
-    /// Do the work. Stops at the first failed step.
+    /// Do the work. Stops at the first failed step, unless `--keep-going`.
     Apply {
         plan: PathBuf,
         /// Read the sudo password once, instead of requiring `sudo -n`.
@@ -75,6 +75,10 @@ enum Command {
         /// Let each step write straight to the terminal as it runs.
         #[arg(long)]
         stream: bool,
+        /// Carry on past a failed step, so one run reports everything that
+        /// is broken. Ctrl-C still stops.
+        #[arg(long)]
+        keep_going: bool,
         #[command(flatten)]
         run: RunArgs,
     },
@@ -275,7 +279,7 @@ fn run() -> Result<u8, Diag> {
             Ok(if ex.summary.has_changes() { EXIT_CHANGES } else { EXIT_OK })
         }
 
-        Command::Apply { plan, ask_sudo_pass, verbose, stream, run } => {
+        Command::Apply { plan, ask_sudo_pass, verbose, stream, keep_going, run } => {
             run.apply_color();
             let plan = check_exists(&plan)?;
             let base = cwd();
@@ -294,6 +298,7 @@ fn run() -> Result<u8, Diag> {
 
             exec::process::catch_interrupts();
             let mut ex = expander(&run.vars, Mode::Apply, run.selection())?
+                .keep_going(keep_going)
                 .with_runner(Runner { sudo, stream, root_available: true })
                 .with_sink(run.sink(base.clone(), verbose, stream));
 

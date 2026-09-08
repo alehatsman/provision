@@ -31,7 +31,7 @@ Open, and all of it the owner's — none of it can close from this machine:
   D16 confirmed as written. The hung-`unless` failure confirmed.
   `--explain-var` stays spec'd and unbuilt, marked as such in §10.
   mooncake stays installed everywhere: a tool, not a dependency.
-  `--keep-going` is to be built.
+  `--keep-going` built — spec §8, `main.rs` and `expand.rs`.
 - The tag, a remote, and any push. `main` exists at `f788571`; the repo
   has no remote and nothing has been pushed.
 
