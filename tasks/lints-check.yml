@@ -1,18 +1,10 @@
 ---
 description: assert Cargo.toml carries rust-quality's canonical lint block
 
-# Becomes `use: {{ rq_dir }}/lints-check.yml` once rust-quality drops its
-# `name:` and `version:` root keys. Cargo has no include mechanism for
-# manifests, so the lint block is the one piece of shared config that cannot
-# be a file copy; this reports drift against rust-quality's lints.toml and
-# never mutates. `tasks/ci.yml` runs it as step 7 of the full gate — this
-# task exists to run it alone.
-
+# rq/lints-check. Cargo has no include mechanism for manifests, so the lint
+# block is the one piece of shared config that cannot be a file copy: this
+# reports drift against rust-quality's lints.toml and never mutates.
+# `tasks/ci.yml` runs it as step 7 of the full gate — this task runs it alone.
 steps:
   - name: lint block drift
-    shell: |
-      set -euo pipefail
-      rq="$HOME/.cache/provision/tools/rust-quality"
-      [ -d "$rq" ] || { echo "run tasks/tools.yml first — no $rq" >&2; exit 1; }
-      bash "$rq/scripts/lints-check.sh"
-    changed_when: "false"
+    use: ~/.cache/provision/tools/rust-quality/lints-check.yml

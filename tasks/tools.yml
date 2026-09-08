@@ -1,20 +1,17 @@
 ---
 description: check out rust-quality and install the three tools its gate runs
 
-# rust-quality ships config and scripts, not wrappers, so every task in this
-# directory calls a script by path rather than `use`ing a preset. The presets
-# carry `name:` and `version:` root keys, which provision rejects, and
-# sync-config.yml uses mooncake's `file.copy`. When rust-quality drops those,
-# each of these tasks collapses to one `use:` line -- the comment at the top
-# of each says which preset it becomes.
-
 steps:
   # The pin lives here and nowhere else in this repo. Bump it in one place.
   #
   # `vars`, not a prop default: a prop's default is taken as written, never
   # rendered (spec §3.2), so `{{ home }}` in one would stay four braces.
+  #
+  # `rq_version` is a ref, not only a tag. A tag is the steady state and a
+  # branch is what a change to rust-quality looks like while it is in flight;
+  # bumping back to a tag is this one line and nothing else.
   - vars:
-      rq_version: v0.2.0
+      rq_version: feat/provision-presets
       rq_dir: "{{ home }}/.cache/provision/tools/rust-quality"
 
   - name: Check out rust-quality
@@ -24,24 +21,46 @@ steps:
       git clone --quiet https://github.com/alehatsman/rust-quality.git "{{ rq_dir }}"
     creates: "{{ rq_dir }}/.git"
 
-  # A fresh clone lands on the default branch, and bumping the pin above moves
-  # a checkout off its tag. Both end here. `git describe --exact-match` asks
-  # "am I on that tag", which is the only useful question -- a branch name or
-  # a sha would each answer something else.
+  # A fresh clone lands on the default branch, a bumped pin moves a checkout
+  # off its ref, and a branch pin moves under the checkout when the remote
+  # advances. All three end here.
+  #
+  # The gate fetches because it has to: "am I on this ref" cannot be answered
+  # about a branch without asking the remote first, and a stale
+  # remote-tracking ref would answer yes forever. A fetch writes nothing but
+  # refs, so `plan` may run it -- and `plan` has to, or it reports a checkout
+  # as converged when it is a commit behind.
   - name: "Pin rust-quality to {{ rq_version }}"
     shell: |
       set -euo pipefail
       cd "{{ rq_dir }}"
-      git fetch --quiet --tags
-      git checkout --quiet "{{ rq_version }}"
+      git fetch --quiet --tags origin
+      # A tag is checked out detached; a branch has to end up on the branch so
+      # the next fetch has something to be behind. `rev-parse refs/tags/` is
+      # what tells them apart -- the ref name alone does not.
+      if git rev-parse --verify --quiet "refs/tags/{{ rq_version }}" >/dev/null; then
+        git checkout --quiet "{{ rq_version }}"
+      else
+        git checkout --quiet -B "{{ rq_version }}" "origin/{{ rq_version }}"
+      fi
     unless: |
-      cd "{{ rq_dir }}" 2>/dev/null &&
-      [ "$(git describe --tags --exact-match 2>/dev/null)" = "{{ rq_version }}" ]
+      set -eu
+      cd "{{ rq_dir }}" 2>/dev/null || exit 1
+      git fetch --quiet --tags origin || exit 1
+      # On the tag it names, or level with the branch it names. Either is
+      # already pinned; anything else runs the step.
+      [ "$(git describe --tags --exact-match 2>/dev/null || true)" = "{{ rq_version }}" ] ||
+        [ "$(git rev-parse HEAD)" = "$(git rev-parse "origin/{{ rq_version }}" 2>/dev/null || echo none)" ]
 
   # rq/tools. Installs cargo-nextest, cargo-deny and cargo-machete and adds the
-  # clippy and rustfmt rustup components. From source unless cargo-binstall is
-  # present, so the first run is slow and says so. Gated on the last of the
-  # three to land, so an interrupted install is retried rather than skipped.
+  # clippy and rustfmt rustup components, then verifies. From source unless
+  # cargo-binstall is present, so the first run is slow and says so.
+  #
+  # Not a `use:` of the preset: the preset's install step is ungated by design
+  # -- it changes real state and cannot say in advance whether it will -- and
+  # the `creates` gate below is this repo's own answer to "an interrupted
+  # install should be retried, not skipped". A `use` site cannot reach inside
+  # to add it, so the two steps stay here and the preset stays honest.
   - name: Install the gate's tools
     shell: bash "{{ rq_dir }}/scripts/tools.sh" install
     creates: "{{ home }}/.cargo/bin/cargo-machete"
