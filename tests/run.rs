@@ -16,10 +16,6 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
-fn listing_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/list")
-}
-
 fn provision(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_provision"))
         .args(args)
@@ -191,7 +187,12 @@ fn validate_reports_every_prop_error_a_use_site_would_get() {
     assert!(out.contains("has no prop `nope`"), "{out}");
 
     let (code, out) = run(&[
-        "validate", p, "--prop", "target=/tmp/x", "--prop", "count=abc",
+        "validate",
+        p,
+        "--prop",
+        "target=/tmp/x",
+        "--prop",
+        "count=abc",
     ]);
     assert_eq!(code, EXIT_VALIDATION, "{out}");
     assert!(out.contains("is declared int, and"), "{out}");
@@ -247,29 +248,13 @@ fn an_ungated_step_is_ok_under_run_and_unknown_under_apply() {
     assert!(out.contains("unknown"), "apply must be unchanged:\n{out}");
 }
 
-// ── listing ───────────────────────────────────────────────────────────────
-
-// The listing has its own fixture directory rather than sharing `run/`: a
-// snapshot that changes whenever an unrelated fixture is added is a snapshot
-// nobody reads.
-//
-// `deploy` and `deploy-fast` are the pair that pins the sort. Sorting whole
-// filenames puts `deploy-fast.yml` first, because `-` sorts below `.`; the
-// stem is what the listing prints and what a reader scans for.
+// The listing is its own verb now, and its own test file: `tests/list.rs`.
 #[test]
-fn a_trailing_slash_lists_the_directory() {
-    let dir = format!("{}/", listing_dir().display());
-    let (code, out) = run(&["run", &dir]);
-    assert_eq!(code, 0, "{out}");
-    insta::assert_snapshot!("listing", out);
-}
-
-#[test]
-fn listing_a_directory_that_is_not_there_is_a_usage_error() {
-    let dir = format!("{}/", fixture("nosuch").display());
+fn a_directory_is_not_something_to_run() {
+    let dir = format!("{}/", fixture("nested").display());
     let (code, out) = run(&["run", &dir]);
     assert_eq!(code, EXIT_VALIDATION, "{out}");
-    assert!(out.contains("no such directory"), "{out}");
+    assert!(out.contains("provision list <dir>/"), "{out}");
 }
 
 // ── --step: the CI runner's contract ──────────────────────────────────────

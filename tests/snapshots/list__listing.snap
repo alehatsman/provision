@@ -1,5 +1,5 @@
 ---
-source: tests/run.rs
+source: tests/list.rs
 expression: out
 ---
   a_plan                    (not a component)

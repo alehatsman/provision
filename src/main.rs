@@ -132,6 +132,12 @@ enum Command {
         #[command(flatten)]
         run: RunArgs,
     },
+    /// Name the components in a directory, with their descriptions.
+    List {
+        /// A directory of component files. A trailing separator is optional:
+        /// the verb already says what the argument is.
+        dir: PathBuf,
+    },
     /// Print the facts this machine reports.
     Facts {
         #[arg(long)]
@@ -282,6 +288,8 @@ fn run() -> Result<u8, Diag> {
         }
     };
     match cli.command {
+        Command::List { dir } => list_tasks(&dir, &cwd()),
+
         Command::Facts { json } => {
             let f = facts::Facts::detect();
             if json {
@@ -403,12 +411,10 @@ fn run() -> Result<u8, Diag> {
                 return Err(Diag::file_level("--step", "takes no file argument"));
             }
 
-            // A trailing separator is how the caller says "list this", so it
-            // has to be read from the argument as typed, before any
-            // normalisation drops it. `PathBuf` keeps it; `is_dir` alone
-            // would list a directory the caller meant to run.
-            if listing_requested(&target) {
-                return list_tasks(&target, &base);
+            // The listing is `provision list <dir>/` now, and nothing else.
+            if target.is_dir() {
+                return Err(Diag::file_level(&target, "is a directory")
+                    .with_note("`provision list <dir>/` names the components in one"));
             }
 
             let target = check_exists(&target)?;
@@ -650,21 +656,11 @@ fn is_component(path: &Path) -> Result<bool, Diag> {
     Ok(yaml::Doc::load(path)?.node().as_map().is_ok())
 }
 
-/// A trailing separator is the caller asking for a listing (spec §8), and it
-/// has to be read from the argument as typed: `is_dir` alone would list a
-/// directory somebody meant to run, and `Path::ends_with` compares whole
-/// components rather than characters.
-fn listing_requested(target: &Path) -> bool {
-    target
-        .as_os_str()
-        .to_string_lossy()
-        .ends_with(std::path::MAIN_SEPARATOR)
-}
-
-/// `provision run <dir>/`. One line per `.yml` file, sorted by name: the
+/// `provision list <dir>/`. One line per `.yml` file, sorted by stem: the
 /// file stem, then its `description` or nothing. Nothing below the root keys
 /// is parsed and nothing is run, so a directory holding one broken file
-/// still lists.
+/// still lists. This is the task runner's "what can I run here", and the
+/// only thing `list` does (spec §8).
 fn list_tasks(dir: &Path, base: &Path) -> Result<u8, Diag> {
     if !dir.is_dir() {
         return Err(Diag::file_level(dir, "no such directory"));
