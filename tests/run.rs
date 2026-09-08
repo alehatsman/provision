@@ -47,11 +47,11 @@ fn task(extra: &[&str]) -> (i32, String) {
 fn a_prop_takes_its_default_and_an_override_wins() {
     let (code, out) = task(&["--prop", "target=/tmp/x"]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains("/tmp/x dev 1"), "defaults did not reach the step:\n{out}");
+    assert!(out.contains("/tmp/x dev 1 False 0"), "defaults did not reach the step:\n{out}");
 
     let (code, out) = task(&["--prop", "target=/tmp/x", "--prop", "label=prod"]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains("/tmp/x prod 1"), "the override did not win:\n{out}");
+    assert!(out.contains("/tmp/x prod 1 False 0"), "the override did not win:\n{out}");
 }
 
 #[test]
@@ -68,21 +68,47 @@ fn an_unknown_prop_names_the_ones_that_exist() {
     let (code, out) = task(&["--prop", "target=/tmp/x", "--prop", "nope=1"]);
     assert_eq!(code, EXIT_VALIDATION, "{out}");
     assert!(out.contains("has no prop `nope`"), "{out}");
-    assert!(out.contains("it declares: target, label, count"), "{out}");
+    assert!(out.contains("it declares: target, label, count, flag, items"), "{out}");
+}
+
+// Spec §8: a `--prop` value is rendered, then read as the prop's *declared*
+// type. A shell cannot type a value, so the declaration is the only place a
+// type can come from — which is why this is not §3.4's sole-expression rule.
+#[test]
+fn a_prop_is_read_as_the_type_its_declaration_gives_it() {
+    // `True` rather than `true`: minijinja renders booleans Python-style,
+    // the same quirk `provision facts` works around.
+    let (code, out) =
+        task(&["--prop", "target=/tmp/x", "--prop", "count=3", "--prop", "flag=true", "--prop", "items=[a, b]"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("/tmp/x dev 3 True 2"), "{out}");
+
+    // A `string` prop given something that looks like a number stays text.
+    let (code, out) = task(&["--prop", "target=3"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("3 dev 1 False 0"), "a string prop should stay a string:\n{out}");
+
+    // The template runs first, so a var can carry the value in.
+    let (code, out) = task(&["--prop", "target=/tmp/x", "--prop", "count={{ n }}", "--var", "n=7"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("/tmp/x dev 7"), "{out}");
 }
 
 #[test]
-fn a_prop_of_the_wrong_type_says_how_to_pass_the_right_one() {
-    // Spec §3.4 reaches the command line: a bare value is a string, and one
-    // expression keeps its type. `count` is declared `int`.
-    let (code, out) = task(&["--prop", "target=/tmp/x", "--prop", "count=3"]);
-    assert_eq!(code, EXIT_VALIDATION, "{out}");
-    assert!(out.contains("prop `count` is declared int but got"), "{out}");
-    assert!(out.contains("--prop n='{{ 3 }}'"), "the note should show the fix:\n{out}");
-
-    let (code, out) = task(&["--prop", "target=/tmp/x", "--prop", "count={{ 3 }}"]);
-    assert_eq!(code, 0, "one expression should keep its type:\n{out}");
-    assert!(out.contains("/tmp/x dev 3"), "{out}");
+fn a_prop_that_does_not_read_as_its_type_names_what_was_expected() {
+    for (arg, ty, takes) in [
+        ("count=abc", "int", "a whole number, like 3"),
+        ("flag=maybe", "bool", "true or false"),
+        ("items=a, b", "list", "a flow sequence, like [a, b]"),
+    ] {
+        let (code, out) = task(&["--prop", "target=/tmp/x", "--prop", arg]);
+        assert_eq!(code, EXIT_VALIDATION, "{arg}:\n{out}");
+        assert!(out.contains(&format!("is declared {ty}, and")), "{arg}:\n{out}");
+        assert!(out.contains(takes), "the note should say what it takes:\n{out}");
+        // The note is one line; a wrapped literal used to smear it across
+        // thirty spaces of indentation.
+        assert!(!out.contains("  takes"), "the note wrapped:\n{out}");
+    }
 }
 
 #[test]

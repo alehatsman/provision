@@ -340,3 +340,44 @@ fn facts_reports_yaml_booleans() {
     assert!(text.contains("os "), "{text}");
     assert!(!text.contains("True") && !text.contains("False"), "{text}");
 }
+
+// ── usage errors ──────────────────────────────────────────────────────────
+
+// Spec §8 has said `3` is the usage code since phase 0. clap's default is
+// `2`, which is the code that means "plan found changes" — so a script
+// asking `provision plan --bogus x.yml` was told the plan had work to do.
+#[test]
+fn a_bad_command_line_exits_3_for_every_command() {
+    for args in [
+        vec!["plan", "--bogus", "x.yml"],
+        vec!["apply"],
+        vec!["validate"],
+        vec!["facts", "--bogus"],
+        vec!["run", "--step"],
+        vec!["nonsense"],
+    ] {
+        let out = run(&args);
+        assert_eq!(
+            out.status.code(),
+            Some(EXIT_VALIDATION),
+            "{args:?} should be a usage error:\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            !out.stderr.is_empty(),
+            "{args:?} should still say what was wrong, in clap's own words"
+        );
+    }
+}
+
+// `--help` and `--version` reach the same code path as an error, and must
+// not be turned into one: exit 0, and on stdout.
+#[test]
+fn help_and_version_are_not_usage_errors() {
+    for args in [vec!["--help"], vec!["--version"], vec!["apply", "--help"]] {
+        let out = run(&args);
+        assert_eq!(out.status.code(), Some(0), "{args:?}");
+        assert!(!out.stdout.is_empty(), "{args:?} should print to stdout");
+        assert!(out.stderr.is_empty(), "{args:?} should not touch stderr");
+    }
+}

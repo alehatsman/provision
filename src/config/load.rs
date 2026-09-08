@@ -95,6 +95,17 @@ impl PropType {
         }
     }
 
+    /// What a command-line value of this type looks like. Named in the
+    /// error when `--prop` cannot read one (§8).
+    pub fn example(&self) -> &'static str {
+        match self {
+            PropType::String => "any text",
+            PropType::Bool => "true or false",
+            PropType::Int => "a whole number, like 3",
+            PropType::List => "a flow sequence, like [a, b]",
+        }
+    }
+
     /// Does a rendered value satisfy this type? Spec §3.2: checked *after*
     /// rendering, because `variant: "{{ v }}"` is a template until then.
     pub fn accepts(&self, v: &minijinja::Value) -> bool {

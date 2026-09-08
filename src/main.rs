@@ -244,7 +244,18 @@ fn cwd() -> PathBuf {
 }
 
 fn run() -> Result<u8, Diag> {
-    let cli = Cli::parse();
+    // Spec §8 has said `3` is the usage code since phase 0, and clap's own
+    // default is `2` — which to a script reading the code means "plan found
+    // changes". `provision plan --bogus x.yml` was answering the wrong
+    // question. `--help` and `--version` arrive here as errors too; those
+    // are exit 0 and go to stdout, which `print` already knows.
+    let cli = match Cli::try_parse() {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = e.print();
+            return Ok(if e.use_stderr() { EXIT_USAGE } else { EXIT_OK });
+        }
+    };
     match cli.command {
         Command::Facts { json } => {
             let f = facts::Facts::detect();

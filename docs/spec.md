@@ -607,10 +607,21 @@ provision --version
   run is the list.
 
 - `run` (D17): `apply` with a component (§3.2) as the root scope. The
-  component's props are filled from `--prop k=v`, each value rendered as a
-  template and checked against the prop's type; an unknown prop, a missing
+  component's props are filled from `--prop k=v`; an unknown prop, a missing
   required prop or a wrong type is a validation error, the same three
-  `validate` reports at a `use` site. A trailing `/` lists the directory:
+  `validate` reports at a `use` site.
+
+  A `--prop` value is rendered as a template, then **read as the type its
+  declaration gives it**: `string` as written, `int` and `bool` as YAML
+  scalars, `list` as a YAML flow sequence. So `--prop count=3` is the int 3
+  when `count` is declared `int`, and `--prop name=3` is the string `"3"`
+  when `name` is declared `string`. "Wrong type" means the rendered text
+  does not read as the declared one, and the error says what that type
+  takes. This is deliberately **not** §3.4's sole-expression rule: that rule
+  reads a type off the source text, and a command line has no way to carry
+  one — the declaration is the only place it can come from. `--var` is
+  unaffected and stays untyped strings.
+  **Provisional, decided by review 2026-09-08, owner to confirm.** A trailing `/` lists the directory:
   one line per `.yml` file, its name and its `description`, nothing run.
   `--step '<yaml>'` takes exactly one step as a YAML mapping, runs it in a
   scope holding only facts and `--var`/`--vars-file`, and reports it —
@@ -670,6 +681,10 @@ not know, which is not the same as nothing to do; a step provision cannot judge
 is not a step it may call converged, and driving that count to zero is
 precisely what `--strict` is for. `--plan-no-probe` is the one exception: it
 inspects nothing, so it claims nothing, and exits 0 unless validation failed.
+
+A malformed command line — an unknown flag, a missing argument, an unknown
+subcommand — is exit `3`, like every other usage error, with the message and
+usage text on stderr. `--help` and `--version` are exit `0` on stdout.
 
 `run` exits like `apply`. `apply` exits 1 on the first failed step, 0 otherwise. It does not exit 2;
 having done the work, "changes were found" is not news. `plan` also exits 1

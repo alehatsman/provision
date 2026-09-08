@@ -335,7 +335,9 @@ Gate
 
 D17. Provisioning, repo tasks and CI steps share one executor; this phase
 adds the entry point and the verdict rule that let the other two use it,
-and nothing else. Budget: under 300 lines including tests.
+and nothing else. Budget was "under 300 lines including tests"; it landed
+at 295 lines of src and 164 of tests, accepted by review because each of the
+four entry points is near-minimal and nothing in it is padding.
 
 Deliverables
 

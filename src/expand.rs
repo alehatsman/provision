@@ -523,26 +523,13 @@ impl Expander {
                 );
                 continue;
             };
-            match self.engine.render_field(raw, &ctx) {
-                Ok(value) => {
-                    if !schema.ty.accepts(&value) {
-                        errors.push(
-                            Diag::file_level(
-                                "--prop",
-                                format!(
-                                    "prop `{name}` is declared {} but got {}",
-                                    schema.ty.name(),
-                                    describe_value(&value)
-                                ),
-                            )
-                            .with_note(
-                                "a command-line prop is a string unless it is one                                  expression: --prop n='{{ 3 }}'",
-                            ),
-                        );
-                        continue;
+            match self.engine.render(raw, &ctx) {
+                Ok(text) => match typed_prop(schema, &text) {
+                    Ok(value) => {
+                        out.insert(name.clone(), value);
                     }
-                    out.insert(name.clone(), value);
-                }
+                    Err(d) => errors.push(d),
+                },
                 Err(e) => errors.push(Diag::file_level("--prop", e.to_string())),
             }
         }
@@ -1036,6 +1023,34 @@ impl Judge for StepJudge<'_> {
     fn expr(&self, src: &str) -> Result<bool> {
         self.eval(src, &Value::from(self.base.clone()))
     }
+}
+
+/// A `--prop` value: rendered as a template, then read as the prop's
+/// **declared** type (spec §8). A shell has no way to type a value, so the
+/// declaration is the only place a type can come from — `--prop count=3` is
+/// the int 3 because `count` is declared `int`, and `--prop name=3` is the
+/// string "3" because `name` is declared `string`. Deliberately not the
+/// sole-expression rule of §3.4: that rule reads the type off the source
+/// text, which a command line cannot carry.
+fn typed_prop(schema: &load::PropSchema, text: &str) -> std::result::Result<Value, Diag> {
+    if schema.ty == load::PropType::String {
+        return Ok(Value::from(text));
+    }
+    let bad = || {
+        let msg = format!(
+            "prop `{}` is declared {}, and `{text}` does not read as one",
+            schema.name,
+            schema.ty.name()
+        );
+        Diag::file_level("--prop", msg)
+            .with_note(format!("{} takes {}", schema.ty.name(), schema.ty.example()))
+    };
+    // Read through the same YAML the rest of the crate reads, so `3`, `true`
+    // and `[a, b]` mean here exactly what they mean in a plan file.
+    let value = crate::yaml::Doc::from_str("--prop", text)
+        .and_then(|d| d.node().to_value())
+        .map_err(|_| bad())?;
+    if schema.ty.accepts(&value) { Ok(value) } else { Err(bad()) }
 }
 
 /// The half of prop binding that does not care where the values came from:

@@ -10,9 +10,17 @@ props:
   count:
     type: int
     default: 1
+  flag:
+    type: bool
+    default: false
+  items:
+    type: list
+    default: []
 steps:
   - name: Echo the props
-    shell: echo "{{ props.target }} {{ props.label }} {{ props.count }}"
+    shell: >
+      echo "{{ props.target }} {{ props.label }} {{ props.count }}
+      {{ props.flag }} {{ props.items | length }}"
 
   - name: A gated step
     shell: echo gated
