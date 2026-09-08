@@ -21,12 +21,20 @@ economy.
 
 ```
 $ provision apply x1.yml
-  ✓ Install zsh                                    ok       0.4s
-  ~ Deploy .zshrc                                  changed  0.0s
-  - Generate SSH identity                          skipped  creates: ~/.ssh/id_ed25519 exists
+  x1.yml
+  ✓ Install zsh                                      ok  101ms
+  ~ Deploy .zshrc                                    changed  0ms
+    │ --- current
+    │ +++ /home/aleh/.zshrc
+    │ @@ -0,0 +1 @@
+    │ +export EDITOR=nvim
+  - Generate SSH identity                            skipped   creates exists  0ms
 
-  3 steps · 1 changed · 1 ok · 1 skipped · 0 failed · 0.5s
+  x1.yml · 3 steps · 1 changed · 1 ok · 1 skipped · 134ms
 ```
+
+A changed `file` or `template` step prints its diff under the line;
+`--no-diff` drops them. Zero counts are left out of the summary.
 
 ## Why this exists
 
@@ -85,11 +93,15 @@ The job is small and stable. The tool should be too.
 
 ## Status
 
-Phase 1 code complete. `validate`, `plan`, `apply` and `facts` all work.
-`shell`, `cmd` and `assert` run for real, with `unless`, `creates`, `timeout`,
-`retry`, `env`, `cwd`, `register`, `changed_when`, `failed_when`, sudo, Ctrl-C
-and `--json`. `file`, `template`, `pkg` and `service` parse and plan today and
-fail loudly under `apply`; they arrive in phase 2.
+Phases 0 through 4 are code complete. `validate`, `plan`, `apply` and `facts`
+all work, and all seven actions — `shell`, `cmd`, `assert`, `file`,
+`template`, `pkg`, `service` — run for real, with `unless`, `creates`,
+`timeout`, `retry`, `env`, `cwd`, `register`, `changed_when`, `failed_when`,
+tags, sudo, Ctrl-C and `--json`. Windows cross-compiles to a self-contained
+2.6 MB `.exe`.
+
+What is left is the owner's: applying to each machine, a Windows box to
+validate on, and the release itself.
 
 The spec §11 gate is closed — all 371 steps in the real configs walk against
 the spec with zero unmapped constructs ([docs/audit.md](docs/audit.md)) — and
@@ -97,13 +109,19 @@ so is the phase 0 gate: all five `~/dotfiles` machine plans validate and
 render (migration.md §7 step 1).
 
 ```
-$ provision plan machines/main_pc/index.yml
+$ provision plan main_pc.yml
   ...
-  ✓   Verify the agentd is listening                 ok  102ms
+  -     Install and start the mooncake agentd        skipped   unless  101ms
+  ✓     Verify the agentd is listening               ok  100ms
 
-  machines/main_pc/index.yml · 157 steps · 6 would run · 70 would run (unprobed)
-                             · 20 ok · 53 skipped · 8 unknown · 6.1s
+  main_pc.yml · 160 steps · 6 would change · 7 would run · 6 would run (unprobed)
+              · 82 ok · 59 skipped · 12.2s
 ```
+
+No `unknown` in that line, and that is the point of `validate --strict`:
+every step on this machine can say what it did. The six unprobed ones are
+gated on a register whose step has not run, which plan reports rather than
+guesses (D14).
 
 `plan` exits 0 when there is nothing to do, 2 when there is, and 1 when a step
 failed. Anything that is not `ok` or `skipped` counts as something to do,

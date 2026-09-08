@@ -94,8 +94,8 @@ struct RunArgs {
     /// Drop skipped steps from the output. The summary still counts them.
     #[arg(long)]
     hide_skipped: bool,
-    /// Do not print diffs. Accepted by `apply`, which has none to print, so
-    /// a script can pass both commands the same arguments.
+    /// Do not print diffs. `apply` prints them too — a `file` or `template`
+    /// step shows what it changed — so this is not a plan-only flag.
     #[arg(long)]
     no_diff: bool,
     /// One JSON object per line on stdout; human output moves to stderr.
