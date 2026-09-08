@@ -565,6 +565,53 @@ fn a_gate_that_cannot_run_fails_the_step() {
 }
 
 #[test]
+fn an_unless_that_hangs_fails_the_step_instead_of_running_it() {
+    // Regression test for 238e95f: a gate that hits the step's own timeout
+    // used to fall through to running the step anyway, after waiting out the
+    // timeout first. Spec §10 (provisional): "the check did not answer" is
+    // not "the work is not done", same rule as a gate that cannot run at
+    // all (`a_gate_that_cannot_run_fails_the_step`, above).
+    let dir = tempfile::tempdir().unwrap();
+    let began = std::time::Instant::now();
+    let (code, out) = apply(dir.path(), "hung_unless.yml", &[]);
+    let elapsed = began.elapsed();
+    assert_eq!(code, 1, "{out}");
+    assert!(line_for(&out, "unless gate hangs").contains("FAILED"), "{out}");
+    assert!(out.contains("`unless` timed out after 2"), "{out}");
+    assert!(elapsed < std::time::Duration::from_secs(60), "the gate was never killed: {elapsed:?}");
+    // The part that matters: the step's own script never ran.
+    assert!(!dir.path().join("ran").exists(), "the step ran despite its gate timing out");
+
+    // And the gate's own child died with the process group, the same
+    // guarantee `a_typed_actions_command_is_bound_by_the_steps_timeout` and
+    // `a_timeout_kills_the_children_not_only_the_shell` prove for a step's
+    // own command.
+    let pid: i32 = std::fs::read_to_string(dir.path().join("gate.pid"))
+        .expect("the gate never ran")
+        .trim()
+        .parse()
+        .unwrap();
+    let alive = Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    assert!(!alive, "pid {pid} outlived the gate that timed out");
+}
+
+#[test]
+fn plan_reports_a_hung_unless_as_failed_and_keeps_walking() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture("hung_unless.yml");
+    let out = run_in(dir.path(), &["plan", path.to_str().unwrap()]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(1), "{text}");
+    assert!(line_for(&text, "unless gate hangs").contains("FAILED"), "{text}");
+    assert!(text.contains("`unless` timed out after 2"), "{text}");
+    assert!(text.contains("1 step"), "the summary is still printed:\n{text}");
+}
+
+#[test]
 fn sudo_passes_the_steps_env_and_nothing_else() {
     if !root_is_reachable() {
         eprintln!("skipped: needs a warm `sudo -n`");

@@ -1,0 +1,10 @@
+---
+# Host-safe: `unless` itself is the thing that hangs, so nothing here needs a
+# container. Spec §10 (provisional, 238e95f): a gate that hits the step's own
+# timeout fails the step — "the check did not answer" is not "the work is not
+# done" — rather than falling through and running it after the wait.
+- name: A step whose unless gate hangs
+  shell: touch "{{ env.PROVISION_SCRATCH }}/ran"
+  unless: 'sleep 300 & echo $! > "{{ env.PROVISION_SCRATCH }}/gate.pid"; wait'
+  timeout: 2s
+  changed_when: "true"
