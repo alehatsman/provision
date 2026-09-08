@@ -17,7 +17,8 @@ and a dry-run a person can trust.
 
 - Parse and validate a plan. Render templates. Evaluate conditions.
 - Execute steps sequentially on the local machine. Stop at the first failure.
-- Seven actions: `shell`, `cmd`, `file`, `template`, `pkg`, `service`, `assert`.
+- Ten actions: `shell`, `cmd`, `file`, `template`, `pkg`, `service`, `assert`,
+  `git`, `download`, `defaults` (the last three from phase 6, D4 as amended).
 - Four structural keywords: `vars`, `vars_file`, `import`, `use`.
 - Step modifiers: `name`, `when`, `unless`, `creates`, `sudo`, `timeout`,
   `retry`, `env`, `cwd`, `tags`, `register`, `changed_when`, `failed_when`.
@@ -544,6 +545,126 @@ assert:
 - **`retry` belongs to `apply`. `plan` evaluates an assert exactly once.**
   That same 60-second wait would otherwise be spent, on every plan, waiting
   for work plan has not done and is not about to do.
+
+### 6.8 `git`
+
+Ensure a checkout of a repository at a ref. Phase 6, D4 as amended
+2026-09-08: the fleet had four shell clones and two copies of a sixty-line
+clone-and-pin block before this existed.
+
+```yaml
+git:
+  repo: https://github.com/zplug/zplug.git
+  dest: ~/.zplug
+  ref: v2.4.2                  # tag, sha, or branch; default: the remote's default branch
+```
+
+- **State is "HEAD of `dest` is `ref`."** `dest` missing: clone, check out
+  `ref`, `changed`. `dest` present: compare and converge.
+- A **tag or sha** is immutable, so once it is on disk the answer needs no
+  network: HEAD equals `ref^{commit}` reads `ok` without a fetch, and an
+  offline machine converges. A tag that is not on disk yet is fetched first.
+- A **branch** is mutable, so `apply` fetches and fast-forwards to
+  `origin/<ref>`: behind is `changed`, level is `ok`. Under `plan` a branch
+  ref on an existing checkout is **`unknown`**, for the reason `pkg`'s
+  `latest` is (§6.5): whether the remote moved is not a question the local
+  clone answers, and plan does not go to the network to ask. No `ref` means
+  the remote's default branch and is treated as a branch.
+- Compared by `git rev-parse`, never by branch name: the ref name alone
+  cannot tell a tag from a branch, and an annotated tag's ref resolves to the
+  tag object, not the commit HEAD sits on. Tags are told apart with
+  `rev-parse --verify refs/tags/<ref>`.
+- **Fails**, never resets: a `dest` that is not a git repository, one whose
+  `origin` is a different URL, or one with a dirty working tree. Provision
+  does not throw away work it did not do. Detached HEAD at the right commit
+  is fine and is what a tag checkout leaves behind.
+- Full clones, no `depth`: a shallow clone breaks `describe` and tag
+  comparison, and the fleet's repositories are small. A plan that needs
+  shallow says so in shell.
+- Plan: `clone <repo> at <ref>` when missing; `<sha> → <sha>` when a tag or
+  sha differs; `unknown` for a branch as above.
+- Runs `git` from PATH and fails with a clear message when it is absent.
+  `sudo` is not implied and rarely wanted: the checkout belongs to the user
+  running the plan.
+- `retry` (§4) applies to the clone and fetch calls: the network is the one
+  thing here that fails and then works.
+
+### 6.9 `download`
+
+Ensure a file fetched from a URL is at `dest`, and that it is the right
+file. Phase 6, D4 as amended 2026-09-08: the fleet had twelve `curl -o`
+steps, each hand-gated with `creates`, none of which would notice a wrong or
+truncated download.
+
+```yaml
+download:
+  url: https://github.com/tree-sitter/tree-sitter/releases/download/v0.26.8/tree-sitter-linux-x64.gz
+  dest: ~/.cache/provision/downloads/tree-sitter-linux-x64.gz
+  sha256: 9f2c…                # optional, strongly recommended
+  mode: "0644"
+```
+
+- **State is "`dest` exists and matches `sha256`."** With `sha256`: `dest`
+  missing or its hash differing is `changed`; matching is `ok`, with no
+  network. Without `sha256`: `dest` present is `ok` and is never fetched
+  again, because a URL is not state and provision will not re-download on
+  every apply to find out. `sha256` is how a plan says the content matters.
+- The fetch goes to a temporary file beside `dest`, is hashed, and is moved
+  into place only when the hash matches; a mismatch **fails** the step
+  naming both hashes, removes the temporary file and leaves `dest` as it
+  was. A non-2xx response fails the same way. Redirects are followed.
+- `mode` as `file` takes it (§6.3), quoted; parents are created like `file`
+  does; `sudo: true` writes the way `file` writes, for the apt keyrings.
+- **Single files only.** An archive is downloaded by this action and
+  unpacked by a `creates`-gated shell step after it; a `sha256` on the
+  archive is what makes that pair sound. Unarchiving is deferred with its
+  own reopen condition (plan.md).
+- Plan: never fetches. `would change` when `dest` is missing or the hash
+  differs; nothing else is knowable without the network and nothing else is
+  claimed.
+- **Transport is `curl`**, executed from PATH, with `-fsSL --retry 0`; the
+  step's own `retry` (§4) repeats the whole fetch-and-hash. Every fleet OS
+  ships curl (Windows since 1803) and a static binary that carries its own
+  TLS stack and certificate handling is the wrong trade for a fetch the
+  shell already does well. What the action adds is the hash and the
+  verdict, not the transport. Absent curl fails with a clear message.
+  Decided by review, owner to confirm.
+- The step's `timeout` bounds the fetch.
+
+### 6.10 `defaults`
+
+Ensure a macOS preference key holds a value. Phase 6, D4 as amended
+2026-09-08: the mac plans carried twenty `defaults write` lines in one
+ungated shell step, which reported `unknown` on every apply and could not
+say which key it had changed.
+
+```yaml
+defaults:
+  domain: com.apple.finder     # or NSGlobalDomain
+  key: AppleShowAllFiles
+  type: bool                   # bool | int | float | string
+  value: true
+  current_host: false          # `defaults -currentHost`
+```
+
+- **State is "`defaults read domain key` parses as `value` under `type`."**
+  bool reads as `1`/`0`, int and float as numbers compared numerically,
+  string byte-for-byte. Key missing or differing is `changed` and writes
+  with `defaults write domain key -<type> value`; equal is `ok`.
+- `type` is required: `defaults` stores and prints values by type, and a
+  `true` written as a string is a different key from one written as a bool.
+- **Only these four types.** `array` and `dict` are deferred with a reopen
+  condition (plan.md); the one array in the fleet stays in shell.
+- Not macOS: **fails** at apply, `unknown` at plan, and `validate --strict`
+  warns when a `defaults` step has no `when` naming the os. The action does
+  not skip itself; a plan says where it runs.
+- The write takes effect for the running user. An app that caches its
+  preferences (Finder, Dock, SystemUIServer) needs a restart, which is a
+  shell step gated on the register of the `defaults` steps before it, not
+  something this action does behind the plan's back.
+- Plan: reads only, reports `<old> → <new>` per key.
+- `sudo` is not implied and is wrong here: a root write lands in root's
+  preferences.
 
 ## 7. Privilege escalation
 

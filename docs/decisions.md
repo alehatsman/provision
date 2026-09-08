@@ -72,6 +72,30 @@ five lines. See plan.md "Deferred" for the reopen conditions.
 
 **Overturned by.** The reopen conditions, individually.
 
+**Amended by the owner 2026-09-08, phase 6: ten, not seven.** Three reopen
+conditions fired or were judged fired on the migrated fleet, and the owner
+named the three actions he wanted back from mooncake's catalogue after
+review held every family against the rule above:
+
+- `git`: four shell clones in dotfiles plus the sixty-line clone-and-pin
+  block copied into two `tasks/tools.yml` files (provision, teleport) — six
+  against a threshold of three. The state is "HEAD is this ref", and the
+  tag/branch/annotated-tag distinctions that block got wrong twice in one
+  afternoon belong in one place.
+- `download`: twelve `curl -o` steps, every one gated by `creates` and none
+  by content. The shell reads "the file exists" well and "the file is the
+  right one" never; a checksum is state inspection.
+- `defaults`: twenty `defaults write` lines in one ungated shell step on the
+  mac plans, `unknown` on every apply. Reading the current value back is the
+  whole verdict.
+
+The rule stands unchanged: state inspection the shell does badly. Every
+other mooncake family was held against it with the same fleet counts and
+stays out: the `os_*` server actions (zero to one use), text replacement
+(five `sed -i`, under threshold), containers (`docker image inspect` is a
+one-line `unless`), the observe/wait family (D2), the data actions (a
+`register` and a one-liner). Spec §6.8–6.10.
+
 ## D5 — No transactions, no rollback, no handlers
 
 **Decision.** Fail-fast. Re-run. That is the recovery model.

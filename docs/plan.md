@@ -1,6 +1,6 @@
 # provision — build plan
 
-Status: phases 0–5b code complete · 2026-09-08
+Status: phases 0–5b code complete · phase 6 spec'd, not built · 2026-09-08
 
 ## Where this stands
 
@@ -13,6 +13,7 @@ Status: phases 0–5b code complete · 2026-09-08
 | 4 — migration and cut-over | dotfiles applies with provision, main_pc reports no `unknown` | dotfiles `91415fc` |
 | 5 — `run`: tasks and CI steps | moongit CI execs `provision run --step`; moongit's `tasks.yml` runs as `tasks/` | `3d293fa` — code; superseded by 5b |
 | 5b — one meaning per file | no `run` verb; `apply`/`plan`/`validate` take a component; moongit runs a job as `provision apply job.yml --json` | `e00862a` — review verified; moongit `apply job.yml --json` in moongit is the owner's |
+| 6 — `git`, `download`, `defaults` | the six fleet clones, twelve fetches and twenty mac defaults are typed; mac plan `unknown` count drops to zero for that step; main_pc numbers unchanged | open |
 
 Windows was exercised natively on main_pc's host on 2026-09-08, from WSL via
 `powershell.exe`, with the cross-compiled `x86_64-pc-windows-gnu` binary run
@@ -61,7 +62,7 @@ rule (§4), that an `apt-get install` reporting success can install nothing
 tool the way the README tells a reader to run it is what found all four.
 
 Rust, one crate, one binary. Target: **6–9k lines of Rust** including
-tests, all seven actions, three platforms. If it passes 12k, something
+tests, all ten actions, three platforms. If it passes 12k, something
 from the non-goals crept in. Stop and cut.
 
 ## Ground rules
@@ -446,10 +447,58 @@ rust-quality's block, windows-gnu all-targets clean.
   no lint-block drift, and the soft caps are informational (expand.rs 1313,
   actions/file.rs 903, main.rs 688, actions/pkg.rs 610, exec/runner.rs 516).
 
+### Phase 6 — `git`, `download`, `defaults`
+
+D4 as amended 2026-09-08. The owner named the three mooncake actions he
+wanted back; review held the whole catalogue against D4's rule and these are
+the three the fleet counts support. Spec §6.8, §6.9, §6.10 are the contract;
+nothing is built that the spec does not say.
+
+Deliverables
+
+- `git` (§6.8): `repo`, `dest`, `ref`. Tag and sha converge offline; branch
+  fetches and fast-forwards under apply, `unknown` under plan. Fails on a
+  foreign or dirty `dest`, never resets. Compared by `rev-parse` with the
+  `^{commit}` peel; a test with an annotated tag is mandatory, that is the
+  bug tools.yml nearly shipped.
+- `download` (§6.9): `url`, `dest`, `sha256`, `mode`. Temp file, hash,
+  rename; mismatch fails and leaves `dest` alone. Transport is `curl`
+  (owner to confirm). Honours `retry`.
+- `defaults` (§6.10): `domain`, `key`, `type`, `value`, `current_host`.
+  Read, compare typed, write. Four types. Non-macOS fails at apply.
+- Tests: fixtures under tests/fixtures/apply for each; `git` against a local
+  bare repository with a lightweight tag, an annotated tag and a moving
+  branch; `download` against a file URL or a local listener, with a good
+  hash, a bad hash and a 404; `defaults` cannot run here — its parser and
+  compare are unit-tested on captured `defaults read` output and the action
+  is exercised on a mac by the owner.
+- Fleet conversion, in the dotfiles worktree, branch off main: zplug, tpm and
+  both `tasks/tools.yml` clone-and-pin blocks (provision, teleport) become
+  `git`; the tree-sitter, zk, win32yank and keyring fetches become
+  `download` plus, where an archive follows, a `creates`-gated shell step;
+  the macos defaults block becomes one `defaults` step per key, with the
+  `menuExtras` array left in shell. Every converted `creates`/`unless` goes
+  away with the shell it guarded.
+- README: seven → ten where it counts them; the sample regenerated if a
+  converted step is in it.
+
+Gate
+
+- Every new action reads `ok` on the second apply and `changed` on the
+  first, in the container tests and, for `git`/`download`, on this box.
+- main_pc: `validate --strict` ok; probed plan numbers identical to before
+  the conversion except where a converted step's verdict is now real.
+- mac.yml and work_mac.yml: `validate --strict` ok; `plan --plan-no-probe`
+  shows one line per defaults key. Probed plan on a mac is the owner's.
+- provision's own `tasks/tools.yml` uses `git` and the full gate stays
+  green; teleport's follows in its branch.
+- LOC: three actions under 900 lines together, `actions/` gains three
+  files and nothing else grows.
+
 ## Order and dependencies
 
 ```
-P0 → P1 → P2 → P3 → P4 → P5 → P5b
+P0 → P1 → P2 → P3 → P4 → P5 → P5b → P6
 ```
 
 Strictly linear. P2 could start before P1's output polish is done, but
@@ -469,7 +518,8 @@ is small enough that merge cost exceeds the gain.
 | Item | Reopens when |
 |---|---|
 | `line_in_file` / `text.replace` action | more than 3 shell steps in dotfiles reimplement sed-with-a-guard |
-| `git` action (clone with ref) | more than 3 shell clones need pinned refs |
+| `download` unarchive | more than 3 `download` steps are followed by the same `creates`-gated tar/unzip step |
+| `defaults` `array`/`dict` types | a second array key appears in the mac plans |
 | `pkg` repo/tap/PPA management | a shell recipe from migration.md fails idempotency in practice |
 | Loops | any step repeats itself more than 3 times by copy-paste |
 | Windows typed actions | the PowerShell bootstrap exceeds 500 lines or breaks idempotency |
