@@ -1,6 +1,6 @@
 # provision — build plan
 
-Status: phases 0–4 code complete · phase 5 spec'd, not built · 2026-09-08
+Status: phases 0–5 code complete · 2026-09-08
 
 ## Where this stands
 
@@ -11,7 +11,7 @@ Status: phases 0–4 code complete · phase 5 spec'd, not built · 2026-09-08
 | 2 — typed actions | `file`/`template`/`pkg`/`service`, container tests green | `0cb5e2f` |
 | 3 — tags, polish, Windows | Windows all-targets clean, self-contained `.exe` | `1a5c5f6` |
 | 4 — migration and cut-over | dotfiles applies with provision, main_pc reports no `unknown` | dotfiles `91415fc` |
-| 5 — `run`: tasks and CI steps | moongit CI execs `provision run --step`; moongit's `tasks.yml` runs as `tasks/` | open |
+| 5 — `run`: tasks and CI steps | moongit CI execs `provision run --step`; moongit's `tasks.yml` runs as `tasks/` | `3d293fa` — code; gate owner's |
 
 Windows was exercised natively on main_pc's host on 2026-09-08, from WSL via
 `powershell.exe`, with the cross-compiled `x86_64-pc-windows-gnu` binary run
@@ -37,10 +37,15 @@ Open, and all of it the owner's — none of it can close from this machine:
   `--keep-going` built — spec §8, `main.rs` and `expand.rs`.
 - A tag. `main` lives at `github.com/alehatsman/provision`, public since
   2026-09-08; nothing is tagged.
+- go-quality drops `name:` and `version:` from every preset and tags. Both
+  are root keys provision rejects, and it stays strict: a `version:` in a
+  file provision would never read is a lie to the reader. Then moongit's
+  runner switches to `provision run --step`, then moongit's `tasks.yml`
+  converts. In that order — each one needs the one before it.
 
-Open and the builder's: phase 5. D17 is ruled and spec §8 has `run`;
-nothing is implemented. The dotfiles justfile stays until `tasks/` replaces
-it.
+Nothing is open and the builder's. Phase 5's code landed 2026-09-08
+(`2c4d4ed`, `3d293fa`); its gate is a real moongit run and therefore the
+owner's. The dotfiles justfile stays until `tasks/` replaces it.
 
 Rust, one crate, one binary. Target: **6–9k lines of Rust** including
 tests, all seven actions, three platforms. If it passes 12k, something
