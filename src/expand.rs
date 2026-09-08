@@ -167,7 +167,18 @@ impl Expander {
                 return Ok(());
             }
         };
-        let dir = component.path.parent().unwrap_or(Path::new("."));
+        // `Path::new("ci.yml").parent()` is `Some("")`, not `None`, and
+        // `std::path::absolute("")` fails -- so `provision apply ci.yml`
+        // rendered `component_dir` as the empty string and a preset reaching
+        // for `{{ component_dir }}/clippy.toml` got `/clippy.toml`. It errored
+        // loudly, but at the wrong path and with no hint that the leading
+        // slash was the bug. Same trap as the cwd default before `d531060`:
+        // when the file is named bare, its directory *is* the cwd.
+        let dir = component
+            .path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
         let mut scope = Scope::root(Rc::clone(&self.globals)).child_with_props(props, dir);
         self.walk(&component.steps, &mut scope, 0, &BTreeSet::new());
         Ok(())
@@ -453,6 +464,8 @@ impl Expander {
             Ok(props) => {
                 // `use` runs in a child scope: the parent is visible read-only
                 // and the component's own vars do not leak back (spec §3.1).
+                // A `use` path is always resolved against the naming file,
+                // so it always has a parent.
                 let dir = component.path.parent().unwrap_or(Path::new("."));
                 let mut child = scope.child_with_props(props, dir);
                 self.walk(&component.steps, &mut child, depth + 1, tags);

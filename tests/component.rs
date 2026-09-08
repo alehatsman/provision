@@ -273,6 +273,36 @@ fn an_ungated_step_is_unknown_under_every_verb() {
 // `use`d from above, so the component's own directory and the invocation
 // directory are different answers and a test that mixed them up would say so.
 //
+// Regression: `Path::new("outer.yml").parent()` is `Some("")`, not `None`, and
+// `std::path::absolute("")` fails -- so a component named by a bare filename
+// rendered `component_dir` as the empty string, and a preset reaching for
+// `{{ component_dir }}/scripts/gate.sh` got `/scripts/gate.sh`. It failed at
+// the wrong path with no hint that the leading slash was the fault. The same
+// trap as the cwd default before `d531060`, one field over.
+//
+// The file has to be named bare, so the run happens in its own directory.
+#[test]
+fn a_component_named_bare_still_knows_its_own_directory() {
+    let dir = fixture("nested");
+    let out = Command::new(env!("CARGO_BIN_EXE_provision"))
+        .args(["apply", "inner.yml", "--verbose"])
+        .env("NO_COLOR", "1")
+        .current_dir(&dir)
+        .output()
+        .expect("provision failed to start");
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "{text}");
+    assert!(
+        text.contains(&format!("dir={}", dir.display())),
+        "component_dir should be the directory the file is in:\n{text}"
+    );
+    assert!(
+        !text.contains("dir=\n") && !text.contains("dir=/scripts"),
+        "component_dir rendered empty:\n{text}"
+    );
+}
+
 // Under `apply`, because these two answers are only observable from a step
 // that actually ran. Before 5b this held under `run` and not under `apply`;
 // now there is one rule and one verb that executes it.
