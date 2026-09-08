@@ -25,13 +25,18 @@ pub(crate) fn interrupted() -> bool {
 }
 
 /// Install the Ctrl-C handler. Idempotent; safe to call from `main` only.
-#[expect(unsafe_code, reason = "libc::signal has no safe equivalent in std")]
 pub(crate) fn catch_interrupts() {
     // SAFETY: `on_sigint` is an `extern "C"` function that only stores into
     // an `AtomicBool`, which is async-signal-safe. Installing a handler is
     // sound as long as the handler itself is, and this one does nothing
     // else. Called from `main` before any thread is spawned.
+    //
+    // The expectation sits on the block rather than the function so that it
+    // is compiled away with the block: on Windows there is no unsafe code
+    // here to expect, and a function-level `#[expect]` was firing
+    // `unfulfilled_lint_expectations` on that target.
     #[cfg(unix)]
+    #[expect(unsafe_code, reason = "libc::signal has no safe equivalent in std")]
     unsafe {
         extern "C" fn on_sigint(_: libc::c_int) {
             INTERRUPTED.store(true, Ordering::SeqCst);
