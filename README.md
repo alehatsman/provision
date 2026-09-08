@@ -76,7 +76,9 @@ The job is small and stable. The tool should be too.
 - Not an agent runtime. No MCP, no SDK, no LLM loop.
 - Not transactional. No rollback. Fail-fast and re-run; every step is
   idempotent by construction or by declared gate.
-- Not a task runner. Use `just` or a Makefile for repo tasks.
+- Not a task registry. A task is a component file run with `provision run`;
+  shared ones are checked out by the machine plan, never fetched by
+  provision.
 - Not a secrets manager. `{{ env.TOKEN }}` and file permissions.
 - Not audited. No run log, no state directory.
 

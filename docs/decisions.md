@@ -146,6 +146,15 @@ marketplace plan.
 **Overturned by.** Nothing. If a task runner is wanted, it is a separate
 20-line justfile, not a feature here.
 
+**Amended by the owner 2026-09-08. See D17.** The reason above was about
+the registry, the lockfile and the marketplace — a distribution problem —
+and it was written as if reusing the step executor had caused them. It had
+not. The step core is one thing whether the steps declare state or run a
+command, and provision already ran a tagged step list as a task before
+anyone called it one. What D10 keeps out is the registry: no remote `use`,
+no fetch, no cache, no lockfile. What it no longer keeps out is running a
+component as a task, which D17 specifies.
+
 ## D11 — Plan is best-effort and says so
 
 **Decision.** `plan` probes real state where an action can (`file`,
@@ -301,3 +310,55 @@ with the diff underneath. `--no-diff` exists on `apply` too, where it does
 nothing, so a script can pass the same arguments to both.
 
 **Overturned by.** The owner, in one pass over this section.
+
+## D17 — One executor: tasks are components, `run` judges by exit code, distribution is provisioning's job
+
+**Decided by the owner 2026-09-08**, after review showed that provisioning,
+repo tasks and moongit CI steps share everything but three things: how a run
+is entered, what a step's verdict means, and how a shared step list reaches
+the machine. Each gets the smallest answer that closes it.
+
+**A task is a component file.** A component already has typed props with
+defaults, `required` and `description`, validated before anything runs, and
+a step list. That is a task with its arguments declared. `provision run
+tasks/deploy.yml --prop web_dir=~/x` runs it as the root, the CLI filling
+its props; `provision run tasks/` lists each file with its `description`.
+One file per task and the filesystem is the registry — no `tasks:` mapping,
+so "a plan is a list, a component is a mapping" still holds. The only format
+change is an optional `description:` at the component root. The same
+subcommand takes `--step '<yaml>'` and runs one step from a string, which is
+the contract moongit's runner needs so its CI image can drop mooncake.
+
+**Under `run`, an ungated `shell` or `cmd` that exits 0 is `ok`.** In a task
+the contract of a step is its exit code, and there is no state for provision
+to be unsure about. `unknown` keeps its meaning under `apply` and `plan`
+exactly as D15 says. Every gate and modifier keeps working under `run` —
+`creates` skips a build whose artifact exists, `register` and `when` chain
+steps — so what changes is one default verdict, not the model. There is no
+`plan` for `run`: a task list has nothing to probe.
+
+**Shared step lists are checked out by the machine plan, not fetched by
+provision.** `use` takes a path, renders templates and expands `~`, so a task
+file says `use: "{{ tools_dir }}/go-quality/ci.yml"` and the dotfiles
+component that owns `tools_dir` clones the repo and checks out a pinned tag,
+`creates`-gated and `unless`-gated like any other step. The version pin is a
+dotfiles variable, one place for the fleet; a bump is a provisioning change;
+offline works because the checkout is on disk. This is the module system
+replaced by one component and one variable. A repo that needs a different
+version than the fleet clones its own and passes `--var tools_dir=`.
+
+**Why.** The alternative was to keep D10 as written and send nine repos and
+the fleet to `just`, adding a dependency to every machine to run step lists
+provision could already run. The executor was never the thing that grew
+mooncake; the fetch-and-pin layer was, and that layer stays out.
+
+**Consequences.** The 2026-09-08 ruling that `just` goes in the three
+package lists was made under D10, and D17 removes its reason; the lists
+already carry it (dotfiles `f68a784`), and whether it stays once the
+justfile goes is the owner's call, not a gate. The dotfiles `justfile` is
+interim and becomes `tasks/` once `run` lands. Spec §2, §3.2, §6.1 and §8;
+plan.md phase 5; migration.md §6.
+
+**Overturned by.** A second consumer of `run` that needs something a
+component cannot say — task dependencies, positional arguments, a registry.
+Any of those is the road back to mooncake, and the answer is still no.

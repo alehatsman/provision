@@ -26,7 +26,7 @@ against a machine mooncake has already converged.
 | `vars.load: path` | `vars_file: path` | rename |
 | `import: path` | `import: path` | unchanged; `when`/`tags` on it still apply to all imported steps |
 | `use: path` + `props:` | `use: path` + `props:` | unchanged; component files keep `props:` + `steps:` |
-| `tasks.yml` | delete | task runner is a non-goal; see §6 |
+| `tasks.yml` | `tasks/<name>.yml`, one component per task | run with `provision run` once phase 5 lands (D17); until then the justfile. See §6 |
 
 ### Modifiers
 
@@ -415,6 +415,14 @@ Expected `plan` diffs on an already-converged machine after migration:
   (`just` on apt, pacman and brew alike). Until a machine has been applied
   since, run the recipe's command by hand — it is one line.
 
+  **Superseded 2026-09-08 by D17, same day.** Task running is not a
+  non-goal; a task registry is. The justfile stays until phase 5 ships
+  `provision run`; then each recipe becomes `tasks/<name>.yml`, a component
+  whose props are the recipe's arguments, and the `--json` redirect above
+  is a `shell` step inside it. The `just` entries in the package lists
+  (dotfiles `f68a784`) lose their reason then; keeping or dropping them is
+  the owner's call.
+
 - `mgitci.yml`: replace the `mooncake validate` / `mooncake plan --no-inspect`
   steps with `provision validate` / `provision plan --plan-no-probe`. The CI
   image carries the `provision` binary **as well as** mooncake, not instead
@@ -432,8 +440,14 @@ Expected `plan` diffs on an already-converged machine after migration:
   image is a real apply — §7 step 6, the owner's.
 
 - The nine repos with `tasks.yml` (`dex`, `moongit`, `moongit-*`, `cry-aye`)
-  and the `go-quality` presets are a separate migration to `just`, outside
-  this project's scope. They keep working on mooncake until then.
+  convert to `tasks/*.yml` components run with `provision run` (D17, phase
+  5), moongit's first as the gate. The `go-quality` presets are already
+  component-shaped: each gains a `description:` and is used by path —
+  `use: "{{ tools_dir }}/go-quality/ci.yml"` — from a checkout a dotfiles
+  component pins at a tag. No `source:`, no version in the task file. Once
+  moongit's runner execs `provision run --step '<yaml>'` instead of
+  `mooncake step`, the CI image drops mooncake; that is a moongit change.
+  All of it is outside this repo and keeps working on mooncake until then.
 
 ## 7. Order
 

@@ -22,7 +22,8 @@ and a dry-run a person can trust.
 - Step modifiers: `name`, `when`, `unless`, `creates`, `sudo`, `timeout`,
   `retry`, `env`, `cwd`, `tags`, `register`, `changed_when`, `failed_when`.
 - Facts about the local machine.
-- Three commands: `validate`, `plan`, `apply`.
+- Four commands: `validate`, `plan`, `apply`, `run`. `run` executes a
+  component as a task (§8, D17).
 - TTY and non-TTY output, `--json` event stream.
 
 **Out** (see README non-goals and decisions.md)
@@ -33,7 +34,9 @@ and a dry-run a person can trust.
 - Secrets providers. Run log. State directory. Plugins. Modules registry.
 - Typed Windows actions (registry, firewall, scheduled tasks). Windows is
   supported through `shell` with the PowerShell interpreter.
-- Task runner.
+- A task registry. `use` takes a path: no remote source, no fetch, no cache,
+  no lockfile. Shared components reach a machine by being provisioned onto
+  it (D17).
 
 ## 3. Plan file
 
@@ -76,6 +79,7 @@ that sees the parent's variables read-only plus its own `props`, and whose
 A component file is a mapping, not a list:
 
 ```yaml
+description: render the colour palette   # optional; shown by `run <dir>/`
 props:
   variant:
     type: string          # string | bool | int | list
@@ -103,6 +107,10 @@ Call site:
   Wrong type after template rendering: error. All three at `validate`
   time, not at apply time.
 - Inside the component, props are reachable as `props.<name>`.
+- `description` is optional, a plain string, and only read by
+  `provision run <dir>/` when listing. Any other root key is an error.
+- A component is also a **task**: `provision run <component.yml>` runs it as
+  the root scope with props supplied by `--prop` (§8).
 
 ### 3.3 Variables and precedence
 
@@ -237,6 +245,10 @@ shell:                         # long form
   it: the step's name is what carries the meaning, and a script's first line
   is usually `set -euo pipefail`.)
   `--plan-no-probe` skips `unless` evaluation (for CI without the target).
+- Under `run` (§8) an ungated step that exits 0 is `ok`, not `unknown`: a
+  task step's contract is its exit code, and there is no state to be unsure
+  about. A gated step, `changed_when` and `failed_when` mean under `run`
+  exactly what they mean under `apply`.
 - Streaming: stdout/stderr captured; shown in full on failure, on
   `--verbose`, or streamed live with `--stream`.
 - `set -euo pipefail` is **not** injected. Explicit > magic.
@@ -544,6 +556,9 @@ assert:
 provision validate <plan.yml> [--strict]
 provision plan     <plan.yml> [--tags t,u] [--skip-tags t] [--var k=v]... [--vars-file f]... [--plan-no-probe] [--no-diff] [--json] [--hide-skipped] [--color when]
 provision apply    <plan.yml> [same as plan] [--ask-sudo-pass] [--verbose] [--stream] [--keep-going]
+provision run      <component.yml> [--prop k=v]... [same as apply]
+provision run      <dir>/
+provision run      --step '<yaml>' [--var k=v]... [--vars-file f]... [--verbose] [--stream]
 provision facts    [--json]
 provision --version
 ```
@@ -591,6 +606,26 @@ provision --version
   them. It earns its keep on a bare machine, where the point of the first
   run is the list.
 
+- `run` (D17): `apply` with a component (§3.2) as the root scope. The
+  component's props are filled from `--prop k=v`, each value rendered as a
+  template and checked against the prop's type; an unknown prop, a missing
+  required prop or a wrong type is a validation error, the same three
+  `validate` reports at a `use` site. A trailing `/` lists the directory:
+  one line per `.yml` file, its name and its `description`, nothing run.
+  `--step '<yaml>'` takes exactly one step as a YAML mapping, runs it in a
+  scope holding only facts and `--var`/`--vars-file`, and reports it —
+  the contract a CI runner needs to exec steps one at a time. `--tags` and
+  `--skip-tags` apply as for `apply`. There is no plan for `run` and no
+  `--plan-no-probe`; a task list has nothing to probe.
+
+  `validate` accepts a component file as well as a plan, so `provision
+  validate tasks/deploy.yml` checks a task without running it.
+
+  Verdicts under `run`: an ungated `shell`/`cmd` that exits 0 is `ok`
+  (§6.1); everything else is as under `apply`. Exit codes: `0` every step
+  ok, changed or skipped · `1` a step failed · `3` usage or validation
+  error. Never `2`.
+
 Tag selection (Ansible semantics, deliberately):
 
 - `--tags a,b`: run steps carrying `a` or `b`. Untagged steps are skipped.
@@ -620,7 +655,7 @@ is not a step it may call converged, and driving that count to zero is
 precisely what `--strict` is for. `--plan-no-probe` is the one exception: it
 inspects nothing, so it claims nothing, and exits 0 unless validation failed.
 
-`apply` exits 1 on the first failed step, 0 otherwise. It does not exit 2;
+`run` exits like `apply`. `apply` exits 1 on the first failed step, 0 otherwise. It does not exit 2;
 having done the work, "changes were found" is not news. `plan` also exits 1
 when a step failed — only an `assert` can, and §6.7 says why it keeps walking.
 

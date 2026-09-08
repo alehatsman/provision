@@ -1,6 +1,6 @@
 # provision — build plan
 
-Status: phases 0–4 code complete · 2026-09-08
+Status: phases 0–4 code complete · phase 5 spec'd, not built · 2026-09-08
 
 ## Where this stands
 
@@ -11,6 +11,7 @@ Status: phases 0–4 code complete · 2026-09-08
 | 2 — typed actions | `file`/`template`/`pkg`/`service`, container tests green | `0cb5e2f` |
 | 3 — tags, polish, Windows | Windows all-targets clean, self-contained `.exe` | `1a5c5f6` |
 | 4 — migration and cut-over | dotfiles applies with provision, main_pc reports no `unknown` | dotfiles `91415fc` |
+| 5 — `run`: tasks and CI steps | moongit CI execs `provision run --step`; moongit's `tasks.yml` runs as `tasks/` | open |
 
 Windows was exercised natively on main_pc's host on 2026-09-08, from WSL via
 `powershell.exe`, with the cross-compiled `x86_64-pc-windows-gnu` binary run
@@ -36,6 +37,10 @@ Open, and all of it the owner's — none of it can close from this machine:
   `--keep-going` built — spec §8, `main.rs` and `expand.rs`.
 - A tag. `main` lives at `github.com/alehatsman/provision`, public since
   2026-09-08; nothing is tagged.
+
+Open and the builder's: phase 5. D17 is ruled and spec §8 has `run`;
+nothing is implemented. The dotfiles justfile stays until `tasks/` replaces
+it.
 
 Rust, one crate, one binary. Target: **6–9k lines of Rust** including
 tests, all seven actions, three platforms. If it passes 12k, something
@@ -322,12 +327,45 @@ Gate
 - Building `provision-ci:latest` on main_pc. **Owner's** — CI stays red
   until it exists, which is why that switch landed last and alone.
 - `just` was a new fleet dependency and the owner's call. Ruled 2026-09-08:
-  it goes in all three platform package lists. Closed.
+  it goes in all three platform package lists. Closed. D17, later the same
+  day, removed the reason: provision runs the task lists itself. The lists
+  keep `just` until the owner says otherwise; the justfile is interim.
+
+### Phase 5 — `run`: tasks and CI steps
+
+D17. Provisioning, repo tasks and CI steps share one executor; this phase
+adds the entry point and the verdict rule that let the other two use it,
+and nothing else. Budget: under 300 lines including tests.
+
+Deliverables
+
+- `provision run <component.yml> [--prop k=v]...`: a component as the root
+  scope, props from the CLI through the same schema checks a `use` site
+  gets. `validate` accepts a component file.
+- `provision run <dir>/`: list `.yml` files with their `description`.
+  Optional `description:` at the component root; any other root key is
+  still an error.
+- `provision run --step '<yaml>'`: one step from a string, facts plus
+  `--var`, reported like any step. moongit's runner contract.
+- Verdict: under `run`, an ungated `shell`/`cmd` exiting 0 is `ok`. One arm
+  where the judge already consults the mode; `apply` and `plan` untouched.
+- Snapshot tests for the listing and for a run; a test that the `unknown`
+  verdict is unchanged under `apply`.
+
+Gate
+
+- moongit `mgitci.yml` for dotfiles runs with the runner exec'ing
+  `provision run --step`, in an image that does not carry mooncake. The
+  moongit side is a separate change in that repo, **owner's**.
+- moongit's `tasks.yml` converted to `tasks/*.yml` and every task runs with
+  the same effect as `mooncake task`. **Owner's**.
+- go-quality presets carry `description:` and are used by path from a
+  checkout the machine plan pins. **Owner's**, in that repo and dotfiles.
 
 ## Order and dependencies
 
 ```
-P0 → P1 → P2 → P3 → P4
+P0 → P1 → P2 → P3 → P4 → P5
 ```
 
 Strictly linear. P2 could start before P1's output polish is done, but
@@ -353,3 +391,5 @@ is small enough that merge cost exceeds the gain.
 | Windows typed actions | the PowerShell bootstrap exceeds 500 lines or breaks idempotency |
 | Run log | a real question "what did the last apply do" goes unanswered twice |
 | Remote apply (`ssh host provision apply`) | never as a feature; a shell alias suffices |
+| Remote `use` (fetch by URL, version pin, cache) | never as a feature; the machine plan checks the repo out at a pinned tag (D17) |
+| Task dependencies, positional task arguments | never; a task is a component and props are its arguments (D17) |
