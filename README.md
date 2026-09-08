@@ -45,8 +45,8 @@ A changed `file` or `template` step prints its diff under the line;
 
 ## Why this exists
 
-This replaces [mooncake](https://github.com/alehatsman/mooncake) for one
-job: provisioning a handful of personal machines (Arch laptop, two Windows
+This replaced [mooncake](https://github.com/alehatsman/mooncake), now
+archived, for one job: provisioning a handful of personal machines (Arch laptop, two Windows
 boxes with WSL, two Macs). A review of the real configs driving those
 machines on 2026-09-07 found:
 
@@ -72,7 +72,9 @@ The job is small and stable. The tool should be too.
   with declared props).
 - **Jinja2 templating** (minijinja), strict undefined, the same `.j2` files
   you already have.
-- **Three commands.** `validate`, `plan`, `apply`.
+- **Five commands.** `validate`, `plan`, `apply`, `list`, `facts`. The first
+  three take a machine plan or a component; `list <dir>/` names the components
+  in a directory by their `description:`.
 - **Output a human reads.** One line per step, live, colored on a TTY, plain
   on a pipe, unified diffs for file changes in plan mode, `--json` for
   machines.
@@ -187,35 +189,38 @@ of it.
 
 ## Status
 
-Phases 0 through 4 are code complete. `validate`, `plan`, `apply` and `facts`
-all work, and all seven actions — `shell`, `cmd`, `assert`, `file`,
-`template`, `pkg`, `service` — run for real, with `unless`, `creates`,
-`timeout`, `retry`, `env`, `cwd`, `register`, `changed_when`, `failed_when`,
-tags, sudo, Ctrl-C and `--json`. Windows cross-compiles to a self-contained
-2.6 MB `.exe`.
+Version 0.9.1. Phases 0 through 5b are code complete ([docs/plan.md](docs/plan.md)).
+`validate`, `plan`, `apply`, `list` and `facts` all work, and all seven
+actions — `shell`, `cmd`, `assert`, `file`, `template`, `pkg`, `service` —
+run for real, with `unless`, `creates`, `timeout`, `retry`, `env`, `cwd`,
+`register`, `changed_when`, `failed_when`, tags, sudo, Ctrl-C and `--json`.
+Components take typed `props`, from a `use:` or from `--prop` on the command
+line, and this repo's own tasks and the shared quality gate run through them.
+Windows cross-compiles to a self-contained `.exe` and has been run natively.
 
-What is left is the owner's: applying to each machine, a Windows box to
-validate on, and the release itself.
+Phase 6 — `git`, `download` and `defaults` (spec §6.8–6.10) — is spec'd and
+being built on a branch; nothing here claims it yet.
 
-The spec §11 gate is closed — all 371 steps in the real configs walk against
-the spec with zero unmapped constructs ([docs/audit.md](docs/audit.md)) — and
-so is the phase 0 gate: all five `~/dotfiles` machine plans validate and
-render (migration.md §7 step 1).
+The dotfiles are migrated: all five machine plans validate under `--strict`,
+and the probed plan for this machine reads
 
 ```
 $ provision plan main_pc.yml
   ...
-  -     Install and start the mooncake agentd        skipped   unless  101ms
-  ✓     Verify the agentd is listening               ok  100ms
+  →     Build moongit CI container images (refresh … would run  200ms
+  ✓     Ensure ~/.ssh exists with the permissions s… ok  0ms
+  ✓     Deploy authorized_keys from the declared fl… ok  0ms
+  ✓     Verify the agentd is listening               ok  101ms
 
-  main_pc.yml · 160 steps · 6 would change · 7 would run · 6 would run (unprobed)
-              · 82 ok · 59 skipped · 12.2s
+  main_pc.yml · 166 steps · 1 would change · 9 would run · 6 would run (unprobed)
+              · 90 ok · 60 skipped · 12.6s
 ```
 
 No `unknown` in that line, and that is the point of `validate --strict`:
 every step on this machine can say what it did. The six unprobed ones are
 gated on a register whose step has not run, which plan reports rather than
-guesses (D14).
+guesses (D14). What is left is the owner's: the first real apply on each
+machine.
 
 `plan` exits 0 when there is nothing to do, 2 when there is, and 1 when a step
 failed. Anything that is not `ok` or `skipped` counts as something to do,
