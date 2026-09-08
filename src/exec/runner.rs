@@ -109,10 +109,6 @@ pub(crate) struct Runner {
     /// read-only command and must still work on a machine with a cold sudo
     /// credential, so a root gate it cannot run is reported unprobed (D11).
     pub root_available: bool,
-    /// Spec §6.1, D17: under `run` an ungated `shell`/`cmd` that exits 0 is
-    /// `ok` rather than `unknown`. Set from `Mode::Run`; false everywhere
-    /// else, so `apply` and `plan` are byte-identical to before.
-    pub ungated_ok: bool,
 }
 
 enum Gate {
@@ -170,7 +166,7 @@ impl Runner {
             let fatal = out.how != How::Exited;
             let failed = fatal || judge.failed(&out)?;
             if !failed || fatal || attempt == attempts {
-                return self.verdict(p, judge, out, attempt, attempts);
+                return Self::verdict(p, judge, out, attempt, attempts);
             }
             if !delay.is_zero() {
                 std::thread::sleep(delay);
@@ -250,8 +246,10 @@ impl Runner {
         })
     }
 
+    /// Associated rather than a method: the verdict reads the step and the
+    /// judge, and nothing about the runner. It stopped reading the runner
+    /// when `ungated_ok` went.
     fn verdict(
-        &self,
         p: &Prepared,
         judge: &dyn Judge,
         out: Output,
@@ -283,11 +281,10 @@ impl Runner {
                 None if p.action.never_changes() => Status::Ok,
                 // The gate said the work was needed, and the work succeeded.
                 None if p.gated() => Status::Changed,
-                // Spec §6.1. Under `apply` nothing here can say what an
-                // ungated step did; under `run` the exit code is the whole
-                // contract, so 0 is `ok` and there is nothing to be unsure
-                // about (D17).
-                None if self.ungated_ok => Status::Ok,
+                // Spec §6.1: nothing here can say what an ungated step did.
+                // A step whose exit code is its whole contract declares
+                // `changed_when: false` and is judged above; there is no verb
+                // under which an undeclared step reads as anything but this.
                 None => Status::Unknown,
             },
         };

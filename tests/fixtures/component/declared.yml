@@ -1,0 +1,9 @@
+---
+description: the same ungated command, with its contract declared
+steps:
+  # Spec §6.1: a step whose exit code is its whole contract says so. That is
+  # the task case, and it is the same declaration a plan would make -- there
+  # is no verb under which an undeclared step reads as anything but `unknown`.
+  - name: A step that declares what it means
+    shell: "true"
+    changed_when: "false"

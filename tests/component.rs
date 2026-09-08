@@ -1,8 +1,9 @@
-//! `provision run` — D17. A component executed as a task, a directory
-//! listed, and one step from a string.
+//! A component as the root of `validate`, `plan` and `apply` — D17 as
+//! amended by phase 5b.
 //!
-//! The `--step` form is moongit's exec contract, so its exit code and its
-//! message are asserted, not just that it worked.
+//! The point of the phase is that the same file means the same thing under
+//! every verb, so where a fact is verb-independent this file asserts it under
+//! each of them rather than picking one.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -12,7 +13,7 @@ const EXIT_VALIDATION: i32 = 3;
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/run")
+        .join("tests/fixtures/component")
         .join(name)
 }
 
@@ -225,83 +226,44 @@ fn a_prop_on_a_plan_is_a_usage_error() {
     }
 }
 
-// ── the one verdict that moves ────────────────────────────────────────────
-
-// Spec §6.1, D17. This is the whole behavioural difference between `run` and
-// `apply`, so it is asserted from both sides of the same file.
-#[test]
-fn an_ungated_step_is_ok_under_run_and_unknown_under_apply() {
-    let path = fixture("plain.yml");
-    let (code, out) = run(&["run", path.to_str().unwrap()]);
-    assert_eq!(code, 0, "{out}");
-    assert!(
-        out.contains(" ok "),
-        "an ungated step should be ok under run:\n{out}"
-    );
-    assert!(!out.contains("unknown"), "{out}");
-
-    // `apply` cannot read the component form, so the same step is applied
-    // from the plan that holds only it.
-    let plain = fixture("not_a_component.yml");
-    let (code, out) = run(&["apply", plain.to_str().unwrap()]);
-    assert_eq!(code, 0, "{out}");
-    assert!(out.contains("unknown"), "apply must be unchanged:\n{out}");
-}
-
 // The listing is its own verb now, and its own test file: `tests/list.rs`.
 #[test]
 fn a_directory_is_not_something_to_run() {
     let dir = format!("{}/", fixture("nested").display());
-    let (code, out) = run(&["run", &dir]);
+    let (code, out) = run(&["apply", &dir]);
     assert_eq!(code, EXIT_VALIDATION, "{out}");
     assert!(out.contains("provision list <dir>/"), "{out}");
 }
 
-// ── --step: the CI runner's contract ──────────────────────────────────────
+// ── the verdict that no longer moves ──────────────────────────────────────
 
+// Spec §6.1, D17 as amended. Phase 5 made an ungated step `ok` under `run`
+// and `unknown` under `apply`; 5b withdrew that, because a verb is not a
+// declaration. The same component now reads `unknown` wherever it is entered,
+// and a step whose exit code is its whole contract says so itself.
 #[test]
-fn one_step_from_a_string_runs_and_reports() {
-    let (code, out) = run(&["run", "--step", "name: from a string\nshell: echo hi"]);
+fn an_ungated_step_is_unknown_under_every_verb() {
+    let path = fixture("plain.yml");
+    let p = path.to_str().unwrap();
+
+    let (code, out) = run(&["apply", p]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains("from a string"), "{out}");
-    // Ungated and exited 0, so `ok` — the same rule as a component's steps.
-    assert!(out.contains(" ok "), "{out}");
-}
-
-#[test]
-fn a_failing_step_from_a_string_exits_1() {
-    let (code, out) = run(&["run", "--step", "shell: exit 7"]);
-    assert_eq!(code, 1, "{out}");
-    assert!(out.contains("FAILED"), "{out}");
-    assert!(out.contains("exit 7"), "{out}");
-}
-
-#[test]
-fn a_list_is_not_one_step() {
-    // clap would take the leading `- ` for a flag and exit 2, which `run`
-    // never does; `allow_hyphen_values` is what lets this message happen.
-    let (code, out) = run(&["run", "--step", "- shell: \"true\""]);
-    assert_eq!(code, EXIT_VALIDATION, "{out}");
-    assert!(out.contains("--step takes one step, not a list"), "{out}");
-}
-
-#[test]
-fn a_structural_key_is_not_one_step() {
-    for key in ["use: ./x.yml", "import: ./x.yml", "vars_file: ./x.yml"] {
-        let (code, out) = run(&["run", "--step", key]);
-        assert_eq!(code, EXIT_VALIDATION, "{key}:\n{out}");
-        assert!(out.contains("cannot be a --step"), "{key}:\n{out}");
-    }
-}
-
-#[test]
-fn a_step_from_a_string_carries_its_own_position() {
-    let (code, out) = run(&["run", "--step", "name: x\nshell: y\nbogus: 1"]);
-    assert_eq!(code, EXIT_VALIDATION, "{out}");
     assert!(
-        out.contains("<step>:"),
-        "the diagnostic should be located:\n{out}"
+        out.contains("unknown"),
+        "an ungated step is unknown under apply:\n{out}"
     );
+
+    // §8: plan exits 2 on an `unknown`, because it is provision saying it
+    // does not know, which is not the same as nothing to do (D15).
+    let (code, out) = run(&["plan", p]);
+    assert_eq!(code, 2, "{out}");
+    assert!(out.contains("unknown"), "{out}");
+
+    // The declaration, not the verb, is what makes it `ok`.
+    let (code, out) = run(&["apply", fixture("declared.yml").to_str().unwrap()]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains(" ok "), "{out}");
+    assert!(!out.contains("unknown"), "{out}");
 }
 
 // ── component_dir and the one cwd rule ────────────────────────────────────
@@ -311,31 +273,28 @@ fn a_step_from_a_string_carries_its_own_position() {
 // `use`d from above, so the component's own directory and the invocation
 // directory are different answers and a test that mixed them up would say so.
 //
-// Asserted under every verb that walks a root: one cwd rule means the same
-// file gives the same answer whichever way you enter it, and that identity is
-// the whole of phase 5b. Running it three times is cheap and it is exactly
-// what regressed before.
+// Under `apply`, because these two answers are only observable from a step
+// that actually ran. Before 5b this held under `run` and not under `apply`;
+// now there is one rule and one verb that executes it.
 #[test]
 fn a_used_component_knows_its_own_directory_and_runs_in_the_invocation_one() {
     let path = fixture("outer.yml");
     let root = env!("CARGO_MANIFEST_DIR");
 
-    for verb in ["run", "apply"] {
-        let (code, out) = run(&[verb, path.to_str().unwrap(), "--verbose"]);
-        assert_eq!(code, 0, "{verb}:\n{out}");
+    let (code, out) = run(&["apply", path.to_str().unwrap(), "--verbose"]);
+    assert_eq!(code, 0, "{out}");
 
-        // §3.2: absolute, and the component's own directory — not the
-        // caller's, and not where provision was invoked.
-        assert!(
-            out.contains(&format!("dir={root}/tests/fixtures/run/nested")),
-            "{verb}: component_dir should be the component's own directory:\n{out}"
-        );
-        // §4: the invocation directory, even for a step inside a `use`. A
-        // shared gate checked out under ~/.cache must gate the repo you are
-        // standing in, not `cd` to its own toplevel and gate itself.
-        assert!(
-            out.contains(&format!("cwd={root}\n")),
-            "{verb}: a step should default to the invocation directory:\n{out}"
-        );
-    }
+    // §3.2: absolute, and the component's own directory — not the caller's,
+    // and not where provision was invoked.
+    assert!(
+        out.contains(&format!("dir={root}/tests/fixtures/component/nested")),
+        "component_dir should be the component's own directory:\n{out}"
+    );
+    // §4: the invocation directory, even for a step inside a `use`. A shared
+    // gate checked out under ~/.cache must gate the repo you are standing in,
+    // not `cd` to its own toplevel and gate itself.
+    assert!(
+        out.contains(&format!("cwd={root}\n")),
+        "a step should default to the invocation directory:\n{out}"
+    );
 }

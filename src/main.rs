@@ -2,6 +2,8 @@
 //!
 //! Three commands over one walk: `validate` checks and runs nothing, `plan`
 //! checks and asks the machine questions, `apply` checks and does the work.
+//! Each takes a plan or a component as its root, and the root's own shape
+//! says which it is (spec §8, D17). `list` and `facts` walk nothing.
 
 mod actions;
 mod config;
@@ -94,41 +96,6 @@ enum Command {
         /// Set a prop, when the root file is a component rather than a plan.
         #[arg(long = "prop", value_name = "KEY=VALUE")]
         prop: Vec<String>,
-        #[command(flatten)]
-        run: RunArgs,
-    },
-    /// Run a component as a task (D17), or list a directory of them.
-    Run {
-        /// A component file, or a directory (with a trailing `/`) to list.
-        target: Option<PathBuf>,
-        /// Run exactly one step, given as a YAML mapping. The contract a CI
-        /// runner needs to exec steps one at a time.
-        /// `allow_hyphen_values`: a step given as a YAML list starts with
-        /// `- `, which clap would otherwise read as a flag and reject with
-        /// its own exit 2. Letting it through is what puts the "not a list"
-        /// message on the error instead.
-        #[arg(
-            long,
-            value_name = "YAML",
-            allow_hyphen_values = true,
-            conflicts_with_all = ["target", "prop"]
-        )]
-        step: Option<String>,
-        /// Set one of the component's props. Repeatable.
-        #[arg(long = "prop", value_name = "KEY=VALUE")]
-        prop: Vec<String>,
-        /// Read the sudo password once, instead of requiring `sudo -n`.
-        #[arg(long)]
-        ask_sudo_pass: bool,
-        /// Print each step's captured output, not only a failure's.
-        #[arg(long)]
-        verbose: bool,
-        /// Let each step write straight to the terminal as it runs.
-        #[arg(long)]
-        stream: bool,
-        /// Carry on past a failed step. Ctrl-C still stops.
-        #[arg(long)]
-        keep_going: bool,
         #[command(flatten)]
         run: RunArgs,
     },
@@ -355,7 +322,6 @@ fn run() -> Result<u8, Diag> {
                     sudo: Sudo::none(),
                     stream: false,
                     root_available: sudo::root_is_reachable(),
-                    ungated_ok: false,
                 })
                 .with_sink(run.sink(base.clone(), false, false));
 
@@ -380,83 +346,6 @@ fn run() -> Result<u8, Diag> {
             }
             Ok(if ex.summary.has_changes() {
                 EXIT_CHANGES
-            } else {
-                EXIT_OK
-            })
-        }
-
-        Command::Run {
-            target,
-            step,
-            prop,
-            ask_sudo_pass,
-            verbose,
-            stream,
-            keep_going,
-            run,
-        } => {
-            run.apply_color();
-            let base = cwd();
-
-            let Some(target) = target else {
-                let Some(src) = step else {
-                    return Err(Diag::file_level(
-                        "run",
-                        "give a component file, a directory with a trailing `/`, or --step",
-                    ));
-                };
-                return run_one_step(&src, &run, verbose, stream, ask_sudo_pass, &base);
-            };
-            if step.is_some() {
-                return Err(Diag::file_level("--step", "takes no file argument"));
-            }
-
-            // The listing is `provision list <dir>/` now, and nothing else.
-            if target.is_dir() {
-                return Err(Diag::file_level(&target, "is a directory")
-                    .with_note("`provision list <dir>/` names the components in one"));
-            }
-
-            let target = check_exists(&target)?;
-            let props = pairs(&prop, "--prop")?;
-
-            // Spec §7: the same walk that finds the sudo steps validates the
-            // whole task before the first one runs.
-            let mut check = expander(&run.vars, Mode::Validate { strict: false }, run.selection())?;
-            check.run_component(&target, &props)?;
-            if !check.diags.is_empty() {
-                report(&check, &base, Some(&target));
-                return Ok(EXIT_USAGE);
-            }
-            let sudo = Sudo::preflight(check.needs_sudo, ask_sudo_pass)?;
-
-            exec::process::catch_interrupts();
-            let mut ex = expander(&run.vars, Mode::Run, run.selection())?
-                .keep_going(keep_going)
-                .with_runner(Runner {
-                    sudo,
-                    stream,
-                    root_available: true,
-                    ungated_ok: true,
-                })
-                .with_sink(run.sink(base.clone(), verbose, stream));
-
-            let started = Instant::now();
-            ex.run_component(&target, &props)?;
-            ex.summarize(&target, started.elapsed());
-
-            if !ex.diags.is_empty() {
-                eprintln!();
-                report(&ex, &base, None);
-                return Ok(EXIT_USAGE);
-            }
-            if ex.summary.interrupted {
-                return Ok(EXIT_INTERRUPTED);
-            }
-            // Never 2: a task has nothing to plan, so "found changes" is not
-            // an answer `run` can give (D17).
-            Ok(if ex.summary.failed > 0 {
-                EXIT_FAILED
             } else {
                 EXIT_OK
             })
@@ -494,7 +383,6 @@ fn run() -> Result<u8, Diag> {
                     sudo,
                     stream,
                     root_available: true,
-                    ungated_ok: false,
                 })
                 .with_sink(run.sink(base.clone(), verbose, stream));
 
@@ -566,76 +454,6 @@ fn expander(vars: &VarArgs, mode: Mode, selection: Selection) -> Result<Expander
     Ok(Expander::new(globals, mode, selection))
 }
 
-/// `provision run --step '<yaml>'` — one step from a string, in a scope
-/// holding only facts and `--var`/`--vars-file`. This is the contract a CI
-/// runner execs against, so its stdout, stderr and exit code are the API and
-/// not just output.
-fn run_one_step(
-    src: &str,
-    run: &RunArgs,
-    verbose: bool,
-    stream: bool,
-    ask_sudo_pass: bool,
-    base: &Path,
-) -> Result<u8, Diag> {
-    let doc = yaml::Doc::from_str("<step>", src)?;
-    let node = doc.node();
-    // A list is the plan shape, and `--step` takes one step. Saying which it
-    // got beats a mapping error from three layers down.
-    if node.as_seq().is_ok() {
-        return Err(node
-            .err("--step takes one step, not a list")
-            .with_note("run a list of steps by putting them in a component and running the file"));
-    }
-    let step = config::model::parse_step(node)?;
-    if step.is_structural() {
-        return Err(node
-            .err(format!("`{}` cannot be a --step", step.key))
-            .with_note(
-                "`import`, `use` and `vars_file` resolve paths against the file \
-that names them, and there is no file here; `vars` would set variables \
-nothing later could read",
-            ));
-    }
-    config::model::check_modifiers(&step)?;
-
-    let mut check = expander(&run.vars, Mode::Validate { strict: false }, run.selection())?;
-    check.run_steps(std::slice::from_ref(&step))?;
-    if !check.diags.is_empty() {
-        report(&check, base, None);
-        return Ok(EXIT_USAGE);
-    }
-    let sudo = Sudo::preflight(check.needs_sudo, ask_sudo_pass)?;
-
-    exec::process::catch_interrupts();
-    let mut ex = expander(&run.vars, Mode::Run, run.selection())?
-        .with_runner(Runner {
-            sudo,
-            stream,
-            root_available: true,
-            ungated_ok: true,
-        })
-        .with_sink(run.sink(base.to_path_buf(), verbose, stream));
-
-    let started = Instant::now();
-    ex.run_steps(std::slice::from_ref(&step))?;
-    ex.summarize(Path::new("<step>"), started.elapsed());
-
-    if !ex.diags.is_empty() {
-        eprintln!();
-        report(&ex, base, None);
-        return Ok(EXIT_USAGE);
-    }
-    if ex.summary.interrupted {
-        return Ok(EXIT_INTERRUPTED);
-    }
-    Ok(if ex.summary.failed > 0 {
-        EXIT_FAILED
-    } else {
-        EXIT_OK
-    })
-}
-
 /// `KEY=VALUE` pairs from a repeatable flag. Shared by `--prop` on `run` and
 /// on `validate`, which check the same three things.
 fn pairs(given: &[String], flag: &str) -> Result<Vec<(String, String)>, Diag> {
@@ -693,9 +511,16 @@ fn list_tasks(dir: &Path, base: &Path) -> Result<u8, Diag> {
     Ok(EXIT_OK)
 }
 
+/// The root of a walk is one file — a plan or a component. A directory is
+/// the listing's argument and nothing else's, so it is named here rather
+/// than left to fail three layers down as "not a mapping".
 fn check_exists(plan: &Path) -> Result<PathBuf, Diag> {
     if !plan.exists() {
         return Err(Diag::file_level(plan, "no such plan file"));
+    }
+    if plan.is_dir() {
+        return Err(Diag::file_level(plan, "is a directory")
+            .with_note("`provision list <dir>/` names the components in one"));
     }
     Ok(plan.to_path_buf())
 }

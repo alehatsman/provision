@@ -37,16 +37,11 @@ pub(crate) enum Mode {
     Plan { probe: bool },
     /// Check everything, then do it.
     Apply,
-    /// `apply` with a component as the root (D17). Identical in every
-    /// respect but one: an ungated `shell`/`cmd` that exits 0 is `ok`, not
-    /// `unknown`. In a task the step's contract is its exit code, and there
-    /// is no state for provision to be unsure about.
-    Run,
 }
 
 impl Mode {
     fn executes(self) -> bool {
-        matches!(self, Mode::Apply | Mode::Run)
+        matches!(self, Mode::Apply)
     }
     fn reports(self) -> bool {
         !matches!(self, Mode::Validate { .. })
@@ -175,18 +170,6 @@ impl Expander {
         let dir = component.path.parent().unwrap_or(Path::new("."));
         let mut scope = Scope::root(Rc::clone(&self.globals)).child_with_props(props, dir);
         self.walk(&component.steps, &mut scope, 0, &BTreeSet::new());
-        Ok(())
-    }
-
-    /// D17 `run --step`: steps that came from somewhere other than a file,
-    /// walked in a scope holding only facts and the command line.
-    #[expect(
-        clippy::unnecessary_wraps,
-        reason = "the same shape as `run` and `run_component`, which the caller treats alike"
-    )]
-    pub(crate) fn run_steps(&mut self, steps: &[Step<'static>]) -> Result<()> {
-        let mut scope = Scope::root(Rc::clone(&self.globals));
-        self.walk(steps, &mut scope, 0, &BTreeSet::new());
         Ok(())
     }
 
