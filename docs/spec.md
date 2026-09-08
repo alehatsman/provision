@@ -229,8 +229,11 @@ shell:                         # long form
   non-zero, or `creates` did not exist, so the work was needed — a successful
   run is `changed`. With no gate the verdict is `unknown`: the step ran, and
   nothing here can say what it did. `changed_when` overrides either.
-- Plan: prints `would run` plus the first line of the script. If `unless` or
-  `creates` is set, plan evaluates it and reports `skip` or `would run`.
+- Plan: prints `would run`. If `unless` or `creates` is set, plan evaluates
+  it and reports `skip` or `would run`. (This used to promise "plus the first
+  line of the script". The renderer never printed one and nothing has wanted
+  it: the step's name is what carries the meaning, and a script's first line
+  is usually `set -euo pipefail`.)
   `--plan-no-probe` skips `unless` evaluation (for CI without the target).
 - Streaming: stdout/stderr captured; shown in full on failure, on
   `--verbose`, or streamed live with `--stream`.
@@ -529,11 +532,15 @@ assert:
 
 ```
 provision validate <plan.yml> [--strict]
-provision plan     <plan.yml> [--tags t,u] [--skip-tags t] [--var k=v]... [--vars-file f]... [--plan-no-probe] [--no-diff] [--json]
-provision apply    <plan.yml> [same as plan] [--ask-sudo-pass] [--verbose] [--stream] [--hide-skipped]
+provision plan     <plan.yml> [--tags t,u] [--skip-tags t] [--var k=v]... [--vars-file f]... [--plan-no-probe] [--no-diff] [--json] [--hide-skipped] [--color when]
+provision apply    <plan.yml> [same as plan] [--ask-sudo-pass] [--verbose] [--stream]
 provision facts    [--json]
-provision version
+provision --version
 ```
+
+`--hide-skipped` and `--color` are shared by `plan` and `apply`, not
+`apply`-only: a plan is the output most worth quieting. There is no
+`provision version` subcommand — the flag is the whole of it.
 
 - `validate`: parse, schema, template syntax, prop schemas, file existence
   for `import`/`use`/`vars_file`/`src`, **and the body of every action** — a
@@ -623,7 +630,9 @@ One line per step, updated in place while running (spinner), then frozen:
   context. `--no-diff` suppresses them. The flag exists on `apply` too, where
   it does nothing, so that a script can pass the same arguments to both.
 - The summary counts `would change` before `would run`.
-- Retries render as `attempt 2/3` on the line while running.
+- Retries render as `attempt 2/3` on the finished line. The spinner
+  carries the step's name only; the attempt count is not known until the
+  attempt that succeeded has finished.
 
 ### 9.2 Non-TTY
 
