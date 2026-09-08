@@ -367,13 +367,18 @@ impl Expander {
             if root.is_null() {
                 continue; // an empty vars file sets nothing, which is not an error
             }
-            let Some(pairs) = self.diags.absorb(root.as_map().map_err(|_| {
+            #[expect(
+                clippy::map_err_ignore,
+                reason = "the replacement diagnostic restates the cause"
+            )]
+            let mapped = root.as_map().map_err(|_| {
                 entry.err(format!(
                     "vars_file {} is {}, expected a mapping of variables",
                     path.display(),
                     root.kind()
                 ))
-            })) else {
+            });
+            let Some(pairs) = self.diags.absorb(mapped) else {
                 continue;
             };
             for (k, v) in pairs {
@@ -1224,9 +1229,14 @@ fn typed_prop(schema: &load::PropSchema, text: &str) -> std::result::Result<Valu
     };
     // Read through the same YAML the rest of the crate reads, so `3`, `true`
     // and `[a, b]` mean here exactly what they mean in a plan file.
-    let value = crate::yaml::Doc::from_str("--prop", text)
+    #[expect(
+        clippy::map_err_ignore,
+        reason = "the replacement diagnostic restates the cause"
+    )]
+    let parsed = crate::yaml::Doc::from_str("--prop", text)
         .and_then(|d| d.node().to_value())
-        .map_err(|_| bad())?;
+        .map_err(|_| bad());
+    let value = parsed?;
     if schema.ty.accepts(&value) {
         Ok(value)
     } else {

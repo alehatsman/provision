@@ -223,10 +223,14 @@ impl VarArgs {
             if root.is_null() {
                 continue;
             }
-            for (k, v) in root
-                .as_map()
-                .map_err(|_| Diag::file_level(path, "--vars-file must be a mapping of variables"))?
-            {
+            #[expect(
+                clippy::map_err_ignore,
+                reason = "the replacement diagnostic restates the cause"
+            )]
+            let pairs = root.as_map().map_err(|_| {
+                Diag::file_level(path, "--vars-file must be a mapping of variables")
+            })?;
+            for (k, v) in pairs {
                 m.insert(k.as_scalar_string()?, v.to_value()?);
             }
         }

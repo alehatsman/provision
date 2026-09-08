@@ -144,6 +144,7 @@ impl Component {
 /// Parse a component file: a mapping with `props` and `steps`, not a list.
 pub(crate) fn parse_component(doc: &'static Doc) -> Result<Component> {
     let root = doc.node();
+    #[expect(clippy::map_err_ignore, reason = "the replacement diagnostic restates the cause")]
     root.as_map().map_err(|_| {
         root.err(format!("a component is a mapping, found {}", root.kind())).with_note(
             "a component has `steps:` and optional `props:`; a plan is a bare list and is entered with `import:`",
@@ -153,6 +154,10 @@ pub(crate) fn parse_component(doc: &'static Doc) -> Result<Component> {
     // `provision run <dir>/` when listing, ignored everywhere else.
     root.deny_unknown_keys(&["props", "steps", "description"], "a component")?;
 
+    #[expect(
+        clippy::map_err_ignore,
+        reason = "the replacement diagnostic restates the cause"
+    )]
     let steps_at = root.require("steps").map_err(|_| {
         root.err("component has no `steps:`")
             .with_note("a component is `props:` (optional) plus `steps:`")
@@ -170,6 +175,10 @@ pub(crate) fn parse_component(doc: &'static Doc) -> Result<Component> {
                 &["type", "default", "required", "description"],
                 &format!("prop `{name}`"),
             )?;
+            #[expect(
+                clippy::map_err_ignore,
+                reason = "the replacement diagnostic restates the cause"
+            )]
             let ty = PropType::parse(schema.require("type").map_err(|_| {
                 schema
                     .err(format!("prop `{name}` has no `type`"))

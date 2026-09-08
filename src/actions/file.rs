@@ -292,6 +292,11 @@ fn state_name(s: State) -> &'static str {
     }
 }
 
+// ParseIntError says "invalid digit"; the note below says what a mode is.
+#[expect(
+    clippy::map_err_ignore,
+    reason = "the replacement diagnostic restates the cause"
+)]
 fn parse_mode(text: &str, at: N<'_>) -> Result<u32> {
     u32::from_str_radix(text.trim(), 8).map_err(|_| {
         at.err(format!("`{text}` is not a file mode"))

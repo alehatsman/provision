@@ -133,6 +133,12 @@ pub(crate) struct Mods<'a> {
 /// A malformed step does not stop the others: the gate is that *every*
 /// validation error carries a position, which means reporting all of them.
 pub(crate) fn parse_steps(root: N<'_>) -> Result<(Vec<Step<'_>>, Vec<crate::error::Diag>)> {
+    // The dropped cause is our own "expected a sequence" — the replacement
+    // says the same thing and names the kind it actually found.
+    #[expect(
+        clippy::map_err_ignore,
+        reason = "the replacement diagnostic restates the cause"
+    )]
     let items = root.as_seq().map_err(|_| {
         root.err(format!("a plan is a list of steps, found {}", root.kind()))
             .with_note(
@@ -151,6 +157,10 @@ pub(crate) fn parse_steps(root: N<'_>) -> Result<(Vec<Step<'_>>, Vec<crate::erro
 }
 
 pub(crate) fn parse_step<'a>(at: N<'a>) -> Result<Step<'a>> {
+    #[expect(
+        clippy::map_err_ignore,
+        reason = "the replacement diagnostic restates the cause"
+    )]
     let keys = at
         .as_map()
         .map_err(|_| at.err(format!("a step is a mapping, found {}", at.kind())))
@@ -238,7 +248,18 @@ pub(crate) fn parse_duration(at: N<'_>) -> Result<Duration> {
             .with_note("use a number and a unit: 30s, 5m, 1h")
     };
     let (num, unit) = s.split_at(s.find(|c: char| !c.is_ascii_digit()).ok_or_else(bad)?);
-    let n: u64 = num.parse().map_err(|_| bad())?;
+    // `num` is ASCII digits by construction, so once it is non-empty the only
+    // way this fails is overflow — and there "use a number and a unit" is
+    // misleading advice for input that is exactly a number and a unit. An
+    // empty `num` is `soon`, where the cause says nothing `bad()` does not.
+    let n: u64 = num.parse().map_err(|e| {
+        if num.is_empty() {
+            bad()
+        } else {
+            at.err(format!("`{s}` is not a duration: {e}"))
+                .with_note("the largest a duration can be is 18446744073709551615s")
+        }
+    })?;
     let secs = match unit {
         "s" => n,
         "m" => n * 60,
@@ -260,7 +281,7 @@ pub(crate) fn parse_retry(at: N<'_>) -> Result<Retry> {
     let attempts: u32 = attempts_at
         .as_scalar_string()?
         .parse()
-        .map_err(|_| attempts_at.err("`attempts` must be a whole number"))?;
+        .map_err(|e| attempts_at.err(format!("`attempts` must be a whole number: {e}")))?;
     if attempts < 1 {
         return Err(attempts_at.err("`attempts` must be at least 1"));
     }
