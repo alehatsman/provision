@@ -1,0 +1,14 @@
+---
+# Copied into a tempdir and run three ways — bare filename, `./`-prefixed,
+# and absolute — to prove all three agree. d531060: `Path::new("x1.yml").
+# parent()` is `Some("")`, not `None`, and `Command::current_dir("")` is
+# ENOENT, so every step here died before exec under the bare form alone.
+- name: Where the shell actually runs
+  shell: pwd
+  changed_when: "false"
+
+- name: A relative path stays with the plan
+  file:
+    path: out.txt
+    state: file
+    content: "here\n"

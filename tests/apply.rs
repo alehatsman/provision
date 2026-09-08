@@ -531,6 +531,48 @@ fn cwd_defaults_to_the_plan_files_directory_and_can_be_overridden() {
 }
 
 #[test]
+fn a_bare_plan_filename_runs_from_its_own_directory() {
+    // Regression test for d531060: `Path::new("x1.yml").parent()` is
+    // `Some("")`, not `None`, and `Command::current_dir("")` is ENOENT — so
+    // every step in a bare-named plan died before exec, reported as
+    // ``cannot run `bash`: No such file or directory``, blaming the
+    // interpreter rather than the cwd. `./x1.yml` and an absolute path both
+    // worked, which is what hid it: every fixture in this suite passes one
+    // of those two, but the bare form is what the README documents and what
+    // the justfile recipes use.
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("bare_path.yml");
+    std::fs::copy(fixture("bare_path.yml"), &plan).unwrap();
+    let here = dir.path().canonicalize().unwrap();
+
+    let run = |arg: &str| -> (i32, String) {
+        let out = Command::new(env!("CARGO_BIN_EXE_provision"))
+            .args(["apply", arg, "--verbose"])
+            .current_dir(dir.path())
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        (
+            out.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&out.stdout).into_owned()
+                + &String::from_utf8_lossy(&out.stderr),
+        )
+    };
+
+    for arg in ["bare_path.yml", "./bare_path.yml", plan.to_str().unwrap()] {
+        let (code, out) = run(arg);
+        assert_eq!(code, 0, "{arg}: {out}");
+        assert!(out.contains(&here.display().to_string()), "{arg}: pwd was not the tempdir:\n{out}");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("out.txt")).unwrap(),
+            "here\n",
+            "{arg}: the relative path did not land in the plan's own directory"
+        );
+        std::fs::remove_file(dir.path().join("out.txt")).unwrap();
+    }
+}
+
+#[test]
 fn changed_when_and_friends_are_read_as_literal_booleans_too() {
     // Regression test for 3def20c: `changed_when`, `when` and `failed_when`
     // read with `as_str()`, which errors on a YAML boolean, silently
