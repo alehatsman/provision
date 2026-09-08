@@ -12,7 +12,7 @@ Status: phases 0–5b code complete · 2026-09-08
 | 3 — tags, polish, Windows | Windows all-targets clean, self-contained `.exe` | `1a5c5f6` |
 | 4 — migration and cut-over | dotfiles applies with provision, main_pc reports no `unknown` | dotfiles `91415fc` |
 | 5 — `run`: tasks and CI steps | moongit CI execs `provision run --step`; moongit's `tasks.yml` runs as `tasks/` | `3d293fa` — code; superseded by 5b |
-| 5b — one meaning per file | no `run` verb; `apply`/`plan`/`validate` take a component; moongit runs a job as `provision apply job.yml --json` | `47450ed` — code; gate owner's |
+| 5b — one meaning per file | no `run` verb; `apply`/`plan`/`validate` take a component; moongit runs a job as `provision apply job.yml --json` | `e00862a` — review verified; moongit `apply job.yml --json` in moongit is the owner's |
 
 Windows was exercised natively on main_pc's host on 2026-09-08, from WSL via
 `powershell.exe`, with the cross-compiled `x86_64-pc-windows-gnu` binary run

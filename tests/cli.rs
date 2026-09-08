@@ -393,7 +393,8 @@ fn a_bad_command_line_exits_3_for_every_command() {
         vec!["apply"],
         vec!["validate"],
         vec!["facts", "--bogus"],
-        vec!["run", "--step"],
+        // A verb that takes an argument, given none.
+        vec!["list"],
         vec!["nonsense"],
     ] {
         let out = run(&args);

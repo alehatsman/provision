@@ -21,10 +21,14 @@ pub(crate) struct Doc {
 }
 
 impl Doc {
-    /// D17: a document from a string rather than a file, for
-    /// `run --step '<yaml>'`. `name` stands in for the path in every
-    /// diagnostic, so an error reads `<step>:2:5` and points into the
-    /// argument the caller passed.
+    /// A document parsed from a string rather than a file. `name` stands in
+    /// for the path in every diagnostic, so an error reads `--prop:1:8` and
+    /// points into the argument the caller passed rather than at a file that
+    /// does not exist.
+    ///
+    /// Its one caller is `typed_prop`, reading a `--prop` value as the type
+    /// its declaration gives it (spec §8). It arrived for `run --step`, which
+    /// phase 5b removed.
     pub(crate) fn from_str(name: &str, text: &str) -> Result<&'static Doc> {
         let path = PathBuf::from(name);
         let text: &'static str = Box::leak(text.to_string().into_boxed_str());
