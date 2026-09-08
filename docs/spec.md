@@ -80,7 +80,7 @@ that sees the parent's variables read-only plus its own `props`, and whose
 A component file is a mapping, not a list:
 
 ```yaml
-description: render the colour palette   # optional; shown by `run <dir>/`
+description: render the colour palette   # optional; shown by `list <dir>/`
 props:
   variant:
     type: string          # string | bool | int | list
@@ -570,7 +570,7 @@ assert:
 ## 8. Commands
 
 ```
-provision validate <file.yml> [--strict] [--prop k=v]...
+provision validate <file.yml> [--strict] [--prop k=v]... [--var k=v]... [--vars-file f]...
 provision plan     <file.yml> [--prop k=v]... [--tags t,u] [--skip-tags t] [--var k=v]... [--vars-file f]... [--plan-no-probe] [--no-diff] [--json] [--hide-skipped] [--color when]
 provision apply    <file.yml> [same as plan] [--ask-sudo-pass] [--verbose] [--stream] [--keep-going]
 provision list     <dir>/
@@ -643,6 +643,12 @@ provision --version
   unaffected and stays untyped strings.
   Decided by review and confirmed by the owner 2026-09-08.
 
+  A `--prop` aimed at a **plan** is a usage error, not a value quietly
+  dropped: a plan declares no props, and the caller who typed one believes
+  it took effect. A **directory** given to any of the three is a usage error
+  naming `list`, for the same reason — it is the listing's argument and
+  nothing else's.
+
   Nothing else changes with the root's shape. The working directory is §4's
   one rule, the verdicts are §6's, the exit codes are the command's. A
   component run as the root means exactly what it means when a plan `use`s
@@ -655,8 +661,10 @@ provision --version
   keys is parsed and nothing runs, so a directory holding one broken file
   still lists — a file that will not load, or whose root is not a component,
   prints `(not a component)` where a description would go rather than being
-  silently dropped. Exit 0, or 3 if the directory is not there. This is the
-  task runner's "what can I run here", and the only thing `list` does.
+  silently dropped. Exit 0, or 3 if the directory is not there. The trailing
+  separator is optional — the verb already says what the argument is; it was
+  required only while the listing shared a verb with something else. This is
+  the task runner's "what can I run here", and the only thing `list` does.
 
 - **A CI runner** wanting one result per step does not get a per-step entry
   point. It writes the job's steps to a file and runs one process,

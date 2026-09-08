@@ -33,4 +33,9 @@ steps:
       FEATURE_ARGS="{{ props.feature_args }}" \
       CAP_LOC="{{ props.cap_loc }}" \
         bash "$rq/scripts/gate.sh" full
+    # Spec §6.1: this step's exit code is its whole contract -- there is no
+    # state to inspect and nothing for provision to be unsure about -- so it
+    # says so. A verb cannot make that declaration on a file's behalf (D17,
+    # phase 5b), which is why it is written here.
+    changed_when: "false"
     timeout: 30m

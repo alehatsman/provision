@@ -14,6 +14,11 @@ props:
 steps:
   - name: cargo build --release
     shell: cargo build --release
+    # Spec §6.1: this step's exit code is its whole contract -- there is no
+    # state to inspect and nothing for provision to be unsure about -- so it
+    # says so. A verb cannot make that declaration on a file's behalf (D17,
+    # phase 5b), which is why it is written here.
+    changed_when: "false"
     timeout: 20m
 
   - name: Ensure the destination directory exists
@@ -22,8 +27,8 @@ steps:
       state: dir
 
   # `../`: a `file` step's `src` resolves against the file that names it
-  # (spec §4), which is this one, in `tasks/`. Only a step's default *cwd*
-  # follows the invocation directory under `run` — and that is why this is a
+  # (spec §3), which is this one, in `tasks/`. Only a step's default *cwd*
+  # follows the invocation directory (spec §4) — and that is why this is a
   # `file` step rather than the justfile's `cp`: it reports `ok` when the
   # binary on PATH already matches, which `cp` cannot.
   - name: Copy the binary into place
