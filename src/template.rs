@@ -8,6 +8,7 @@ use crate::yaml::N;
 use minijinja::value::{Value, ValueKind as Kind};
 use minijinja::{Environment, UndefinedBehavior};
 use std::error::Error as _;
+use std::fmt::Write as _;
 use std::path::Path;
 
 pub(crate) struct Engine {
@@ -181,7 +182,7 @@ pub(crate) fn describe(e: &minijinja::Error) -> String {
     let mut msg = e.to_string();
     let mut src = e.source();
     while let Some(s) = src {
-        msg.push_str(&format!(": {s}"));
+        write!(msg, ": {s}").expect("writing to a String cannot fail");
         src = s.source();
     }
     msg
@@ -419,6 +420,8 @@ mod tests {
 
     #[test]
     fn to_yaml_round_trips_through_the_parser() {
+        use saphyr::LoadableYamlNode;
+
         let e = Engine::new();
         let mut m = BTreeMap::new();
         m.insert("name".to_string(), Value::from("zsh"));
@@ -427,7 +430,6 @@ mod tests {
         let out = e
             .render("{{ m | to_yaml }}", &ctx(&[("m", Value::from(m))]))
             .unwrap();
-        use saphyr::LoadableYamlNode;
         let parsed = saphyr::Yaml::load_from_str(&out).unwrap();
         assert_eq!(parsed.len(), 1, "emitted YAML did not parse: {out}");
     }

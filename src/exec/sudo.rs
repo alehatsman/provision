@@ -126,13 +126,13 @@ fn read_password() -> Result<String, Diag> {
     // SAFETY: `tcgetattr` writes through the pointer to a `termios` we own
     // and outlives the call. A non-zero return means stdin is not a tty, and
     // `have_tty` is what everything below keys on.
-    let have_tty = unsafe { libc::tcgetattr(libc::STDIN_FILENO, &mut term) } == 0;
+    let have_tty = unsafe { libc::tcgetattr(libc::STDIN_FILENO, &raw mut term) } == 0;
     let restore = term;
     if have_tty {
         term.c_lflag &= !libc::ECHO;
         // SAFETY: reached only when `tcgetattr` succeeded, so stdin is a tty
         // and `term` is the settings it just handed us with ECHO cleared.
-        unsafe { libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &term) };
+        unsafe { libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &raw const term) };
     }
 
     let mut line = String::new();
@@ -142,7 +142,7 @@ fn read_password() -> Result<String, Diag> {
         // SAFETY: `restore` is the copy taken before ECHO was cleared, so
         // this puts the terminal back exactly as it was found. Unconditional
         // on how the read went: a failed read must not leave echo off.
-        unsafe { libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &restore) };
+        unsafe { libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &raw const restore) };
     }
     eprintln!();
 

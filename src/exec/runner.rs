@@ -231,7 +231,7 @@ impl Runner {
             argv
         };
         let stdin = if as_root { self.sudo.stdin() } else { None };
-        process::run(Spawn {
+        process::run(&Spawn {
             argv: &argv,
             cwd: p.cwd.as_deref(),
             env: &p.env,
@@ -459,7 +459,7 @@ impl Runner {
                     }));
                 }
                 How::Interrupted => return Err(Stop::Fail(interrupted())),
-                _ => {}
+                How::Exited => {}
             }
         }
         if let Some(path) = &p.creates

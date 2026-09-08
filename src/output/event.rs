@@ -51,13 +51,12 @@ impl Status {
     pub(crate) fn glyph(&self) -> &'static str {
         match self {
             Status::Ok => "✓",
-            Status::Changed => "~",
-            Status::Unknown => "?",
+            // Spec §9.1: a plan verdict wears its apply twin's glyph.
+            Status::Changed | Status::WouldChange => "~",
+            Status::Unknown | Status::WouldRunUnprobed => "?",
             Status::Skipped(_) => "-",
             Status::Failed(_) => "✗",
-            Status::WouldChange => "~",
             Status::WouldRun => "→",
-            Status::WouldRunUnprobed => "?",
         }
     }
 

@@ -22,7 +22,7 @@ impl Json {
         clippy::let_underscore_must_use,
         reason = "a failed write to the terminal has nowhere to be reported: the terminal is where a report would go"
     )]
-    fn emit(&self, v: &serde_json::Value) {
+    fn emit(v: &serde_json::Value) {
         let mut out = std::io::stdout().lock();
         let _ = writeln!(out, "{v}");
         let _ = out.flush();
@@ -69,11 +69,11 @@ impl Sink for Json {
             m.insert("attempt".into(), json!(ev.attempt));
             m.insert("attempts".into(), json!(ev.attempts));
         }
-        self.emit(&o);
+        Self::emit(&o);
     }
 
     fn summary(&mut self, plan: &Path, s: &Summary) {
-        self.emit(&json!({
+        Self::emit(&json!({
             "event": "summary",
             "plan": self.rel(plan),
             "total": s.total,

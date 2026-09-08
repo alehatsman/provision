@@ -842,7 +842,7 @@ fn an_unless_that_hangs_fails_the_step_instead_of_running_it() {
     );
     assert!(out.contains("`unless` timed out after 2"), "{out}");
     assert!(
-        elapsed < std::time::Duration::from_secs(60),
+        elapsed < std::time::Duration::from_mins(1),
         "the gate was never killed: {elapsed:?}"
     );
     // The part that matters: the step's own script never ran.
@@ -1324,13 +1324,14 @@ struct Unit {
 
 impl Unit {
     fn new() -> Option<Unit> {
-        let runtime = std::env::var("XDG_RUNTIME_DIR").ok()?;
-        let dir = Path::new(&runtime).join("systemd/user");
-        std::fs::create_dir_all(&dir).ok()?;
         // Tests share one process, so the pid alone is not unique enough:
         // two of them would build the same unit name and each Drop would
         // remove the other's file.
         static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+        let runtime = std::env::var("XDG_RUNTIME_DIR").ok()?;
+        let dir = Path::new(&runtime).join("systemd/user");
+        std::fs::create_dir_all(&dir).ok()?;
         let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let name = format!("provision-test-{}-{n}.service", std::process::id());
         let path = dir.join(&name);
@@ -2183,7 +2184,7 @@ fn a_typed_actions_command_is_bound_by_the_steps_timeout() {
     // the way the shell path words it.
     assert!(text.contains("timed out after 2"), "{text}");
     assert!(
-        elapsed < std::time::Duration::from_secs(60),
+        elapsed < std::time::Duration::from_mins(1),
         "the step was never killed: {elapsed:?}"
     );
 

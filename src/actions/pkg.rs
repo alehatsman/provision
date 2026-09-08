@@ -338,15 +338,13 @@ pub(crate) fn parse(
             let Some(text) = render(n.as_str()?) else {
                 return Ok(None);
             };
-            match find(&text) {
-                Some(m) => m,
-                None => {
-                    let known: Vec<&str> = MANAGERS.iter().map(|m| m.name).collect();
-                    return Err(n
-                        .err(format!("unknown package manager `{text}`"))
-                        .with_note(format!("one of: {}", known.join(", "))));
-                }
-            }
+            let Some(m) = find(&text) else {
+                let known: Vec<&str> = MANAGERS.iter().map(|m| m.name).collect();
+                return Err(n
+                    .err(format!("unknown package manager `{text}`"))
+                    .with_note(format!("one of: {}", known.join(", "))));
+            };
+            m
         }
         // Spec §6.5: the first of the table on PATH, skipping the ones a plan
         // has to ask for by name.
@@ -571,7 +569,7 @@ impl Spec {
             && let Some(refresh) = m.refresh
         {
             let argv: Vec<&str> = refresh.to_vec();
-            self.exec(ctx, &argv)?;
+            Self::exec(ctx, &argv)?;
         }
         let batches: Vec<&[String]> = if m.one_per_call {
             names.chunks(1).collect()
@@ -586,12 +584,12 @@ impl Spec {
                 argv.push(flag);
             }
             argv.extend(batch.iter().map(String::as_str));
-            self.exec(ctx, &argv)?;
+            Self::exec(ctx, &argv)?;
         }
         Ok(())
     }
 
-    fn exec(&self, ctx: &Ctx<'_>, argv: &[&str]) -> std::result::Result<(), Effect> {
+    fn exec(ctx: &Ctx<'_>, argv: &[&str]) -> std::result::Result<(), Effect> {
         match ctx.perform(argv, ctx.sudo) {
             Some(bad) => Err(bad),
             None => Ok(()),

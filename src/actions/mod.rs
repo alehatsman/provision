@@ -215,6 +215,10 @@ impl Action {
             "cmd" => {
                 // A single expression may hold the whole argv, which is how a
                 // list built in `vars` reaches a `cmd` (spec §3.4).
+                #[expect(
+                    clippy::single_match_else,
+                    reason = "both arms build the same Vec by different routes; an if-let hides that"
+                )]
                 let items: Vec<Value> = match body.as_seq() {
                     Ok(nodes) => {
                         let mut v = Vec::with_capacity(nodes.len());
@@ -370,7 +374,7 @@ impl Ctx<'_> {
         } else {
             (argv, None)
         };
-        process::capture(process::Spawn {
+        process::capture(&process::Spawn {
             argv: &argv,
             cwd: None,
             env: self.env,

@@ -25,7 +25,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 /// Spec §4: a step with no `timeout` gets ten minutes.
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(600);
+const DEFAULT_TIMEOUT: Duration = Duration::from_mins(10);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Mode {
@@ -180,6 +180,10 @@ impl Expander {
 
     /// D17 `run --step`: steps that came from somewhere other than a file,
     /// walked in a scope holding only facts and the command line.
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "the same shape as `run` and `run_component`, which the caller treats alike"
+    )]
     pub(crate) fn run_steps(&mut self, steps: &[Step<'static>]) -> Result<()> {
         let mut scope = Scope::root(Rc::clone(&self.globals));
         self.walk(steps, &mut scope, 0, &BTreeSet::new());
@@ -278,7 +282,7 @@ impl Expander {
             "vars_file" => self.do_vars_file(step, scope),
             "import" => self.do_import(step, scope, depth, &tags),
             "use" => self.do_use(step, scope, depth, &tags),
-            _ => self.do_action(step, scope, depth, &tags),
+            _ => self.do_action(step, scope, depth),
         }
     }
 
@@ -607,13 +611,10 @@ impl Expander {
 
     // ── actions ───────────────────────────────────────────────────────────
 
-    fn do_action(
-        &mut self,
-        step: &Step<'static>,
-        scope: &mut Scope,
-        depth: usize,
-        tags: &BTreeSet<String>,
-    ) {
+    /// Takes no tags: filtering already happened in `step`, and the two
+    /// reporting helpers below stopped reading them when `record` and `emit`
+    /// did.
+    fn do_action(&mut self, step: &Step<'static>, scope: &mut Scope, depth: usize) {
         let ctx = scope.ctx();
 
         // Render every string field. This is where an undefined variable in a
@@ -786,7 +787,7 @@ impl Expander {
         {
             self.stopped = true;
         }
-        self.emit(step, scope, depth, &tags, done, elapsed);
+        self.emit(step, scope, depth, done, elapsed);
     }
 
     /// Turn a checked step into something the runner can execute.
@@ -1003,11 +1004,9 @@ impl Expander {
         step: &Step<'static>,
         scope: &Scope,
         depth: usize,
-        tags: &BTreeSet<String>,
         done: crate::exec::runner::Done,
         elapsed: Duration,
     ) {
-        let _ = tags;
         let (detail, note) = (done.detail.clone(), done.note.clone());
         self.finish(
             step,

@@ -215,13 +215,11 @@ impl<'a> N<'a> {
     /// A single node, or the items of a list. `vars_file: p` and
     /// `vars_file: [p, q]` are both legal (spec §3.1).
     pub(crate) fn as_str_or_seq_nodes(&self) -> Result<Vec<N<'a>>> {
-        match &self.node.data {
-            YamlData::Sequence(_) => self.as_seq(),
-            _ => {
-                self.as_str()?;
-                Ok(vec![*self])
-            }
+        if matches!(&self.node.data, YamlData::Sequence(_)) {
+            return self.as_seq();
         }
+        self.as_str()?;
+        Ok(vec![*self])
     }
 
     /// Convert to a template value, preserving YAML types.

@@ -71,8 +71,8 @@ pub(crate) enum How {
 /// Spawn, capture, and wait — killing the whole group on timeout or Ctrl-C.
 ///
 /// The lossy view, for the runner and for `register`.
-pub(crate) fn run(s: Spawn<'_>) -> std::io::Result<Output> {
-    let raw = run_raw(&s)?;
+pub(crate) fn run(s: &Spawn<'_>) -> std::io::Result<Output> {
+    let raw = run_raw(s)?;
     Ok(Output {
         rc: raw.rc,
         stdout: String::from_utf8_lossy(&raw.stdout).into_owned(),
@@ -86,8 +86,8 @@ pub(crate) fn run(s: Spawn<'_>) -> std::io::Result<Output> {
 /// `file` compares a target against itself byte for byte, and a lossy String
 /// makes a binary file differ from itself forever. This is the same spawn,
 /// the same process group and the same watchdog — only the last step differs.
-pub(crate) fn capture(s: Spawn<'_>) -> std::io::Result<Raw> {
-    run_raw(&s)
+pub(crate) fn capture(s: &Spawn<'_>) -> std::io::Result<Raw> {
+    run_raw(s)
 }
 
 pub(crate) struct Raw {
@@ -171,9 +171,10 @@ fn wait_for(child: &mut Child, pid: u32, timeout: Duration) -> How {
     let tick = Duration::from_millis(100);
     loop {
         match child.try_wait() {
-            Ok(Some(_)) => return How::Exited,
+            // A child that has exited and a child we cannot ask about are the
+            // same answer here: stop waiting and let the exit code speak.
+            Ok(Some(_)) | Err(_) => return How::Exited,
             Ok(None) => {}
-            Err(_) => return How::Exited,
         }
         if interrupted() {
             kill_group(pid);
@@ -293,7 +294,13 @@ fn own_process_group(cmd: &mut Command) {
     reason = "killing a process *group* is not in std; Command::process_group is"
 )]
 fn kill_group(pid: u32) {
-    let pgid = pid as libc::pid_t;
+    // `as` would wrap an out-of-range pid to a negative pgid, and a negative
+    // pgid is not a group -- `killpg(-1, ...)` is every process this user may
+    // signal. Nothing on a real system produces one; refusing to guess costs
+    // nothing.
+    let Ok(pgid) = libc::pid_t::try_from(pid) else {
+        return;
+    };
     // SAFETY: `killpg` takes a pgid and a signal and touches no memory. The
     // pgid is this process's own child, put in its own group by
     // `own_process_group` at spawn, so the worst a stale one can do is fail

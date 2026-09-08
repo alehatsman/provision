@@ -5,6 +5,7 @@
 use super::Sink;
 use super::event::{Event, Status, Summary, human, tail};
 use anstyle::{AnsiColor, Style};
+use std::fmt::Write as _;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -132,10 +133,11 @@ impl Sink for Text {
         let name = truncate(&format!("{}{}", indent(ev.depth), ev.name), NAME_WIDTH);
         let mut label = ev.status.label();
         if let Some(n) = &ev.note {
-            label.push_str(&format!("   {n}"));
+            write!(label, "   {n}").expect("writing to a String cannot fail");
         }
         if ev.attempts > 1 {
-            label.push_str(&format!("   attempt {}/{}", ev.attempt, ev.attempts));
+            write!(label, "   attempt {}/{}", ev.attempt, ev.attempts)
+                .expect("writing to a String cannot fail");
         }
         let dim = Style::new().dimmed();
         self.write(format_args!(
