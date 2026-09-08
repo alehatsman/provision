@@ -1,6 +1,31 @@
 # provision — build plan
 
-Status: draft v0.1 · 2026-09-07
+Status: phases 0–4 code complete · 2026-09-08
+
+## Where this stands
+
+| Phase | Gate | Closed at |
+|---|---|---|
+| 0 — parse, validate, plan | five machine plans validate and render | `c5a310b` |
+| 1 — execution core | `shell`/`cmd`/`assert` run twice, changed then ok | `e88c41f` |
+| 2 — typed actions | `file`/`template`/`pkg`/`service`, container tests green | `0cb5e2f` |
+| 3 — tags, polish, Windows | Windows all-targets clean, self-contained `.exe` | `1a5c5f6` |
+| 4 — migration and cut-over | dotfiles applies with provision, main_pc reports no `unknown` | dotfiles `91415fc` |
+
+Open, and all of it the owner's — none of it can close from this machine:
+
+- Apply to each machine, x1 first (migration.md §7 steps 2–6). Every gate
+  below that line is a real apply.
+- `validate` and `plan` on a Windows box. Both are validated on Linux with
+  `--vars-file`; neither has run on Windows.
+- Build `provision-ci:latest` on main_pc. dotfiles CI is red until it exists.
+- `just` is installed on no machine and provisioned by nothing, so the
+  justfile apply recipes are documentation. Adding it is a fleet dependency.
+- Rulings: D1's windows-gnu amendment, D16, `--explain-var` (spec'd, not
+  implemented, nothing asks for it), `--keep-going` (mooncake had it,
+  provision does not), the hung-`unless` failure, and whether mooncake gets
+  uninstalled anywhere.
+- The tag, a `main` branch, and any push. The repo has none of the three.
 
 Rust, one crate, one binary. Target: **6–9k lines of Rust** including
 tests, all seven actions, three platforms. If it passes 12k, something
