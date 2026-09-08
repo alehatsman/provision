@@ -6,6 +6,12 @@
 
 # Test code exists to provoke failure. Panicking there is the point, so the
 # panic-surface restriction lints are scoped to production code only.
+#
+# "in tests" means inside a `#[test]` function, and nothing else. A helper in
+# tests/ that is not itself a test -- a fixture builder, a `fn run(..)` wrapper
+# -- is production code as far as these are concerned, and `.unwrap()` there is
+# a finding. Use `.expect("what cannot fail and why")`: the reason is the thing
+# the reader wants at 3am, and `expect_used` is off precisely so you can.
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true
