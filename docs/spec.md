@@ -748,11 +748,14 @@ printed the same way. Suitable for CI logs.
 One JSON object per line on stdout, human output goes to stderr. `status` is
 one of `ok`, `changed`, `unknown`, `skipped`, `failed`, `would_change`,
 `would_run`, `would_run_unprobed`. `diff` is present only when there is one.
-A step that ran a command — `shell`, `cmd`, `assert`, or a step whose
-`unless` ran — carries `rc`, `stdout` and `stderr` whatever its status, in
-full, not truncated (phase 5b; before it `rc` and `stderr` came only with a
-failure). That is the whole of what a CI runner reads per step (§8), so it
-is emitted as each step finishes, never batched:
+`rc`, `stdout` and `stderr` are the step's own command's and are present
+exactly when the step ran one: `shell`, `cmd` and `assert`, whatever their
+status, in full, not truncated. A typed action ran no command and carries
+none; a skipped step ran none and carries none. A gate's (`unless`,
+`creates`) result is never reported: it decides whether the step runs, it
+is not the step's result (phase 5b; before it `rc` and `stderr` came only
+with a failure). That is the whole of what a CI runner reads per step (§8),
+so it is emitted as each step finishes, never batched:
 
 ```json
 {"event":"step","index":3,"name":"Deploy .zshrc","status":"changed","duration_ms":12,"file":"components/zsh/index.yml","line":41,"diff":"..."}
