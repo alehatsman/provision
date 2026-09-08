@@ -1500,6 +1500,79 @@ fn parse_space_pairs_reads_a_pacman_query() {
     assert!(!out.contains("install bash") && !out.contains("install coreutils"), "{out}");
 }
 
+/// Apply with a stubbed manager on PATH. Unlike `pkg_plan_with_path`, this
+/// one lets the stub mutate: apply is the only mode that calls install.
+fn pkg_apply_with_path(dir: &Path, body: &str, bin_dir: &Path) -> (i32, String) {
+    let path = dir.join("pkg.yml");
+    std::fs::write(&path, body).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_provision"))
+        .args(["apply", path.to_str().unwrap()])
+        .env("PATH", format!("{}:{}", bin_dir.display(), std::env::var("PATH").unwrap_or_default()))
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned()
+            + &String::from_utf8_lossy(&out.stderr),
+    )
+}
+
+// Spec §6.5: `changed` means missing before *and present after*. The live
+// case that found this: `apt-get install -y yarn` exits 0 on Debian and
+// installs nothing, because `yarn` is a virtual package `cmdtest` provides,
+// and `dpkg-query` still reports the name absent. Reported as `changed` the
+// step never converges — every apply on main_pc claimed the same install.
+#[test]
+fn an_install_that_did_nothing_fails_instead_of_claiming_changed() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    // The virtual package: the query never lists it, whatever apt-get says.
+    fake_manager(&bin, "dpkg-query", "printf 'cmdtest\t0.32\tinstall ok installed\n'
+");
+    fake_manager(&bin, "apt-get", "exit 0
+");
+
+    let (code, out) = pkg_apply_with_path(
+        dir.path(),
+        "- name: A virtual package\n  pkg:\n    names: [yarn]\n    manager: apt\n",
+        &bin,
+    );
+    assert_eq!(code, 1, "a no-op install was not a failure:\n{out}");
+    assert!(out.contains("yarn still not installed after `apt-get install`"), "{out}");
+    assert!(!out.contains("install yarn"), "it still claimed the install:\n{out}");
+}
+
+// The other half: an install that really installs is still `changed`. Without
+// this the fix above could pass by failing every install there is.
+#[test]
+fn an_install_that_worked_is_still_changed() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let marker = dir.path().join("installed");
+    // The query answers from the marker the install call leaves behind, so
+    // the second query in the same step sees what the first one did not.
+    fake_manager(
+        &bin,
+        "dpkg-query",
+        &format!(
+            "[ -f {m} ] && printf 'tree\t1.8\tinstall ok installed\n'\nexit 0\n",
+            m = marker.display()
+        ),
+    );
+    fake_manager(&bin, "apt-get", &format!("touch {}\n", marker.display()));
+
+    let (code, out) = pkg_apply_with_path(
+        dir.path(),
+        "- name: A real package\n  pkg:\n    names: [tree]\n    manager: apt\n",
+        &bin,
+    );
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("install tree"), "{out}");
+}
+
 fn fake_brew(bin_dir: &Path) {
     let body = format!(
         "case \"$*\" in\n  *--cask*)\n{}    ;;\n  *)\n{}    ;;\nesac\n",

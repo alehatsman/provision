@@ -397,6 +397,14 @@ pkg:
 - Changed when the manager's own query says the package was missing before
   and present after. One query for the whole set, one install call for the
   missing subset.
+- The "and present after" half is **checked**, not assumed: `apply` re-runs
+  the query after the install or remove call, and a name that is still
+  missing — or, under `absent`, still present — **fails** the step naming it.
+  An install call that exits 0 having done nothing is real: on Debian
+  `apt-get install -y yarn` succeeds and installs nothing, because `yarn` is
+  a virtual package `cmdtest` provides, and `dpkg-query` still reports the
+  name absent. Without the check that step reports `changed` on every apply,
+  forever. `plan` does not re-query: it installed nothing.
 - **Default manager**, when `manager` is absent: the first of `pacman`,
   `apt`, `brew`, `winget` found on PATH. `yay` is never chosen by default — a
   plan that wants the AUR says `manager: yay` and means it.

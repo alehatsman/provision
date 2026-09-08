@@ -356,8 +356,13 @@ impl Spec {
                 if missing.is_empty() {
                     return Effect::Ok;
                 }
-                if act && let Err(bad) = self.run_on(ctx, m.install, &missing) {
-                    return bad;
+                if act {
+                    if let Err(bad) = self.run_on(ctx, m.install, &missing) {
+                        return bad;
+                    }
+                    if let Some(bad) = self.verify(ctx, &missing, true) {
+                        return bad;
+                    }
                 }
                 Effect::Changed(Some(format!("install {}", missing.join(" "))))
             }
@@ -366,8 +371,13 @@ impl Spec {
                 if present.is_empty() {
                     return Effect::Ok;
                 }
-                if act && let Err(bad) = self.run_on(ctx, m.remove, &present) {
-                    return bad;
+                if act {
+                    if let Err(bad) = self.run_on(ctx, m.remove, &present) {
+                        return bad;
+                    }
+                    if let Some(bad) = self.verify(ctx, &present, false) {
+                        return bad;
+                    }
                 }
                 Effect::Changed(Some(format!("remove {}", present.join(" "))))
             }
@@ -414,6 +424,42 @@ impl Spec {
                 }
             }
         }
+    }
+
+    /// Spec §6.5: `changed` means the query said missing before *and present
+    /// after*. The second half has to be checked, because a manager call can
+    /// exit 0 having done nothing — `apt-get install -y yarn` succeeds on
+    /// Debian and installs nothing, `yarn` being a virtual package `cmdtest`
+    /// provides, and `dpkg-query` still reports the name absent. Reported as
+    /// `changed`, that step never converges: every apply claims the same
+    /// install. `None` when the call did what it said.
+    fn verify(&self, ctx: &Ctx<'_>, names: &[String], want_present: bool) -> Option<Effect> {
+        let after = match self.installed(ctx) {
+            Ok(map) => map,
+            Err(bad) => return Some(bad),
+        };
+        let wrong: Vec<&str> = names
+            .iter()
+            .filter(|n| after.contains_key(key(n)) != want_present)
+            .map(String::as_str)
+            .collect();
+        if wrong.is_empty() {
+            return None;
+        }
+        let (verb, call) = if want_present {
+            ("still not installed", "install")
+        } else {
+            ("still installed", "remove")
+        };
+        // Named after the binary, not the row: the row is called `apt` and
+        // what ran was `apt-get`, and an error should name the command a
+        // reader can retype.
+        Some(Effect::fail(format!(
+            "{} {verb} after `{} {}` reported success",
+            wrong.join(" "),
+            self.manager.bin,
+            call,
+        )))
     }
 
     /// One query for the whole set (spec §6.5), not one per package.
