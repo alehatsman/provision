@@ -1,6 +1,6 @@
 # provision — build plan
 
-Status: phases 0–5 code complete · phase 5b spec'd, not built · 2026-09-08
+Status: phases 0–5b code complete · 2026-09-08
 
 ## Where this stands
 
@@ -12,7 +12,7 @@ Status: phases 0–5 code complete · phase 5b spec'd, not built · 2026-09-08
 | 3 — tags, polish, Windows | Windows all-targets clean, self-contained `.exe` | `1a5c5f6` |
 | 4 — migration and cut-over | dotfiles applies with provision, main_pc reports no `unknown` | dotfiles `91415fc` |
 | 5 — `run`: tasks and CI steps | moongit CI execs `provision run --step`; moongit's `tasks.yml` runs as `tasks/` | `3d293fa` — code; superseded by 5b |
-| 5b — one meaning per file | no `run` verb; `apply`/`plan`/`validate` take a component; moongit runs a job as `provision apply job.yml --json` | open |
+| 5b — one meaning per file | no `run` verb; `apply`/`plan`/`validate` take a component; moongit runs a job as `provision apply job.yml --json` | `47450ed` — code; gate owner's |
 
 Windows was exercised natively on main_pc's host on 2026-09-08, from WSL via
 `powershell.exe`, with the cross-compiled `x86_64-pc-windows-gnu` binary run
@@ -53,8 +53,10 @@ This repo is D17's first consumer: its own `justfile` is gone, replaced by
 [rust-quality](https://github.com/alehatsman/rust-quality) pinned at a tag in
 `tasks/tools.yml`. `provision apply tasks/ci.yml` is what runs before a push.
 That is the dogfood — it found `component_dir` (§3.2), the working-directory
-rule (§4), and finally that the `run` verb itself was the wrong shape (phase
-5b), and none of that would have surfaced from the machine plans.
+rule (§4), that an `apt-get install` reporting success can install nothing
+(§6.5), and finally that the `run` verb itself was the wrong shape (phase
+5b), and none of that would have surfaced from the machine plans. Running the
+tool the way the README tells a reader to run it is what found all four.
 
 Rust, one crate, one binary. Target: **6–9k lines of Rust** including
 tests, all seven actions, three platforms. If it passes 12k, something
@@ -415,6 +417,34 @@ Gate
   image without mooncake, reading `rc`/`stdout`/`stderr` off the stream.
   **Owner's**, in moongit.
 - The phase 5 gate bullets above, read with `apply` for `run`.
+
+Result, 2026-09-08
+
+Code closed at `47450ed`, five commits, net **-227 lines** across the
+`run` removal alone. 141 tests green throughout, clippy 0 under
+rust-quality's block, windows-gnu all-targets clean.
+
+- Fleet, before and after the working-directory change (dotfiles `f68a784`):
+  `validate --strict main_pc.yml` ok both times; `plan
+  machines/main_pc/index.yml` reports 160 steps · 5 would run · 6 would run
+  (unprobed) · 88 ok · 61 skipped, **identical**. No step in the fleet
+  depended on the old default and no snapshot in the suite renders a cwd.
+- Snapshots that moved, all additions: `apply__json` gains `rc`, `stdout`
+  and `stderr` on its four command steps and leaves the skipped one alone;
+  `apply__plan_all_verdicts_json` gains them on the assert, the only step
+  `plan` actually runs. `run__listing` was renamed `list__listing` with its
+  content byte-identical, because the harness names a snapshot after the
+  test file it lives in.
+- `provision list tasks/` matches the phase 5 listing exactly.
+- `provision apply tasks/ci-fast.yml` exits 0. `provision apply
+  tasks/ci.yml` is green through step 4 -- fmt, clippy, 141 tests, rustdoc
+  -- and red on step 5, `provision = 0.9.0 is unlicensed`. The repo has no
+  `LICENSE` and no `license` field, and has been public since 2026-09-08.
+  **Owner's**, and the gate stays red until he names one. Step 6,
+  `cargo machete`, reports `serde` unused -- only `serde_json` is used --
+  which is a dependency change and so also **owner's**. Steps 7 and 8 pass:
+  no lint-block drift, and the soft caps are informational (expand.rs 1313,
+  actions/file.rs 903, main.rs 688, actions/pkg.rs 610, exec/runner.rs 516).
 
 ## Order and dependencies
 

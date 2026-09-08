@@ -116,8 +116,8 @@ manifests, so `tasks/lints-check.yml` reports drift instead.
 
 **There is no CI for this repo yet.** No `mgitci.yml`, no Rust CI image; both
 wait on moongit's runner running a job as `provision apply job.yml --json`.
-Until then the
-gate is a local one, and running it before a push is the whole of it.
+Until then the gate is a local one, and running it before a push is the whole
+of it.
 
 ## Documents
 
