@@ -8,6 +8,7 @@
 name = "provision"
 version = "0.9.0"
 edition = "2024"
+license = "MIT"
 autoexamples = false   # examples/ holds YAML plans, not Rust examples
 
 # Opt this package into the workspace lint block below. Without it
