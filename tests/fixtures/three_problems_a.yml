@@ -1,0 +1,5 @@
+- name: typo
+  shell: echo a
+  creats: /tmp/x
+
+- import: ./three_problems_b.yml

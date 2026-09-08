@@ -1,0 +1,29 @@
+---
+# One of each plan-mode verdict, so the plan renderers (text and json) have
+# something to render. Probed and --plan-no-probe both run this file; under
+# --plan-no-probe every line collapses to `would run (unprobed)` (spec §7).
+- vars:
+    scratch: "{{ env.PROVISION_SCRATCH }}"
+
+- name: An assert that already holds
+  assert:
+    expr: "1 == 1"
+
+- name: A file that would change
+  file:
+    path: "{{ scratch }}/hello.txt"
+    state: file
+    content: |
+      one
+      two
+
+- name: A gated shell not yet done
+  shell: echo not done
+  creates: "{{ scratch }}/never-there"
+
+- name: An ungated shell cannot be judged
+  shell: "true"
+
+- name: A gate that says the work is done
+  shell: "false"
+  unless: "true"

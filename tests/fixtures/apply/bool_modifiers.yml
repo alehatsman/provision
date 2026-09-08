@@ -1,0 +1,16 @@
+---
+# `changed_when`, `when` and `failed_when` as literal YAML booleans, not
+# quoted strings. 3def20c: all three were read with `as_str()`, which is
+# `Err` on a YAML boolean, and the whole modifier was silently dropped —
+# `changed_when: "false"` (quoted) worked, which is what hid it.
+- name: changed_when false as a literal boolean
+  shell: echo hi
+  changed_when: false
+
+- name: when false as a literal boolean skips
+  shell: echo should not run
+  when: false
+
+- name: failed_when false as a literal boolean forgives
+  shell: exit 1
+  failed_when: false

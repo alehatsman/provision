@@ -1,0 +1,10 @@
+---
+source: tests/apply.rs
+expression: text
+---
+  tests/fixtures/apply/interrupt.yml
+  ✗ Sleeps until something stops it                  FAILED  [t]
+    │ (interrupted)
+
+  tests/fixtures/apply/interrupt.yml · 1 step · 1 failed · [t]
+  interrupted

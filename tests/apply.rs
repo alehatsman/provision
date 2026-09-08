@@ -260,6 +260,7 @@ fn hide_skipped_drops_the_lines_but_not_the_count() {
     assert_eq!(code, 0, "{out}");
     assert!(!out.contains("work is done"), "{out}");
     assert!(out.contains("1 skipped"), "the summary still counts it:\n{out}");
+    snapshot!("hide_skipped", out);
 }
 
 #[test]
@@ -272,6 +273,7 @@ fn verbose_shows_the_output_of_a_step_that_worked() {
     let (code, loud) = apply(dir.path(), "verdicts.yml", &["--verbose"]);
     assert_eq!(code, 0, "{loud}");
     assert!(loud.contains("│ hello"), "{loud}");
+    snapshot!("verbose", loud);
 }
 
 // ── snapshots ─────────────────────────────────────────────────────────────
@@ -295,6 +297,106 @@ fn snapshot_retry_rendering() {
     let dir = tempfile::tempdir().unwrap();
     let (_, out) = apply(dir.path(), "retry.yml", &[]);
     snapshot!("retry", out);
+}
+
+// ── plan output, every verdict at once ──────────────────────────────────────
+//
+// plan_all_verdicts.yml carries one step per plan-mode verdict: `ok` (an
+// assert that already holds), `would change` with a diff (a `file` step
+// against the scratch dir), `would run` (a gated shell not yet done),
+// `unknown` (an ungated shell — D15, nothing to judge it by), and `skipped`
+// with its reason (a gate that says the work is done already). The same
+// file under `--plan-no-probe` collapses every line to
+// `would run (unprobed)` (spec §7), which is that verdict's own case.
+
+/// The diff under "would change" carries the scratch dir's real path
+/// (`+++ /tmp/.../hello.txt`), and that path is different every run — a
+/// snapshot can't carry it. Nothing else in this file's output touches the
+/// filesystem: every other line is a static step name.
+fn redact_scratch(text: &str, scratch: &Path) -> String {
+    text.replace(&scratch.display().to_string(), "[SCRATCH]")
+}
+
+#[test]
+fn snapshot_plan_text_shows_every_verdict() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture("plan_all_verdicts.yml");
+    let out = run_in(dir.path(), &["plan", path.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(2));
+    let text = redact_scratch(&String::from_utf8_lossy(&out.stdout), dir.path());
+    for verdict in ["ok", "would change", "would run", "unknown", "skipped"] {
+        assert!(text.contains(verdict), "{verdict} missing:\n{text}");
+    }
+    snapshot!("plan_all_verdicts", text);
+}
+
+#[test]
+fn snapshot_plan_no_probe_is_would_run_unprobed_throughout() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture("plan_all_verdicts.yml");
+    let out = run_in(dir.path(), &["plan", "--plan-no-probe", path.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(0));
+    let text = String::from_utf8_lossy(&out.stdout);
+    // 6, not 5: the summary line names the verdict too ("5 would run
+    // (unprobed)"), on top of one line per step. That accounts for every
+    // occurrence in the text, so no line's own verdict column can be
+    // anything else — a substring check for "unknown" or "would change"
+    // would also match those words inside two of the fixture's own step
+    // names ("cannot be judged", "that would change").
+    assert_eq!(text.matches("would run (unprobed)").count(), 6, "{text}");
+    snapshot!("plan_all_verdicts_no_probe", text);
+}
+
+#[test]
+fn plan_json_status_matches_spec_9_3_exactly() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture("plan_all_verdicts.yml");
+    let out = run_in(dir.path(), &["plan", path.to_str().unwrap(), "--json"]);
+    let stdout = redact_scratch(&String::from_utf8_lossy(&out.stdout), dir.path());
+    let rows: Vec<serde_json::Value> = stdout.lines().map(|l| serde_json::from_str(l).expect(l)).collect();
+
+    let steps: Vec<&serde_json::Value> = rows.iter().filter(|r| r["event"] == "step").collect();
+    assert_eq!(steps.len(), 5, "{stdout}");
+    let statuses: Vec<&str> = steps.iter().map(|s| s["status"].as_str().unwrap()).collect();
+    // Spec §9.3's exact vocabulary, no others — `ok`, `would_change`,
+    // `would_run`, `unknown`, `skipped` here; `changed`, `failed` and
+    // `would_run_unprobed` belong to fixtures elsewhere.
+    assert_eq!(statuses, vec!["ok", "would_change", "would_run", "unknown", "skipped"], "{stdout}");
+    assert!(steps[1]["diff"].as_str().unwrap().contains("+one"), "{stdout}");
+    assert_eq!(steps[4]["reason"], "unless", "{stdout}");
+
+    let summary = rows.last().unwrap();
+    assert_eq!(summary["event"], "summary");
+    assert_eq!(summary["total"], 5, "{stdout}");
+
+    snapshot!("plan_all_verdicts_json", stdout);
+}
+
+#[test]
+fn the_json_summary_counts_a_would_change_step() {
+    // Regression test for a defect this test found and reported rather than
+    // patched around: `Summary` tracked `would_change` (src/output/event.rs,
+    // used by the text renderer's own summary line) but src/output/json.rs
+    // never serialized it, so a `plan --json` summary with a would-change
+    // step was missing a key its own per-step `status` vocabulary promises
+    // exists, and its component counts silently didn't add up to `total`.
+    // Fixed while this batch was in flight.
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture("plan_all_verdicts.yml");
+    let out = run_in(dir.path(), &["plan", path.to_str().unwrap(), "--json"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let summary: serde_json::Value =
+        serde_json::from_str(stdout.lines().last().unwrap()).unwrap();
+    assert_eq!(summary["would_change"], 1, "{stdout}");
+    let counted = summary["ok"].as_u64().unwrap()
+        + summary["changed"].as_u64().unwrap()
+        + summary["would_change"].as_u64().unwrap_or(0)
+        + summary["would_run"].as_u64().unwrap()
+        + summary["would_run_unprobed"].as_u64().unwrap()
+        + summary["unknown"].as_u64().unwrap()
+        + summary["skipped"].as_u64().unwrap()
+        + summary["failed"].as_u64().unwrap();
+    assert_eq!(counted, summary["total"].as_u64().unwrap(), "{stdout}");
 }
 
 // ── context, streaming, and Ctrl-C ────────────────────────────────────────
@@ -343,6 +445,11 @@ fn ctrl_c_kills_the_step_and_exits_130() {
     assert_eq!(out.status.code(), Some(130), "{text}");
     assert!(text.contains("interrupted"), "{text}");
     assert!(text.contains("1 step"), "the summary is still printed:\n{text}");
+    // The step's own duration varies with exactly when the signal lands, but
+    // every other line is the same fixture, the same status, and the same
+    // "(interrupted)" body every time — stable enough for a snapshot once
+    // durations are filtered, which `snapshot!` already does.
+    snapshot!("interrupted", text);
 }
 
 #[test]
@@ -387,6 +494,28 @@ fn cwd_defaults_to_the_plan_files_directory_and_can_be_overridden() {
     let (code, out) = apply(dir.path(), "cwd_default.yml", &[]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(std::fs::read_to_string(dir.path().join("from-cwd-override")).unwrap(), "here");
+}
+
+#[test]
+fn changed_when_and_friends_are_read_as_literal_booleans_too() {
+    // Regression test for 3def20c: `changed_when`, `when` and `failed_when`
+    // read with `as_str()`, which errors on a YAML boolean, silently
+    // dropping the whole modifier. The quoted form (`changed_when: "false"`,
+    // used elsewhere in this suite) worked, which is what hid it — this
+    // fixture is the unquoted form everywhere.
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(dir.path(), "bool_modifiers.yml", &[]);
+    assert_eq!(code, 0, "{out}");
+    // Dropped, `changed_when: false` would report `changed` on every run
+    // instead of `ok` (the step has no other gate).
+    assert_eq!(verdict(&out, "changed_when false"), "ok", "{out}");
+    // Dropped, `when: false` would run the step instead of skipping it.
+    // ("when false" alone would also match the first step's name.)
+    assert!(line_for(&out, "boolean skips").contains("skipped"), "{out}");
+    assert!(!out.contains("should not run"), "{out}");
+    // Dropped, `failed_when: false` would fail the step (and the whole
+    // apply, at exit 1) on the `exit 1` it exists to forgive.
+    assert!(!out.contains("FAILED"), "{out}");
 }
 
 #[test]

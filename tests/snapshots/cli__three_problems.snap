@@ -1,0 +1,12 @@
+---
+source: tests/cli.rs
+expression: out
+---
+  error: tests/fixtures/three_problems_a.yml:3:3: unknown key `creats` in a step
+      did you mean `creates`?
+  error: tests/fixtures/three_problems_b.yml:3:3: step has 2 action keys: shell, cmd
+      a step carries exactly one action or structural key
+  error: tests/fixtures/three_problems_b.yml:7:12: `soon` is not a duration
+      use a number and a unit: 30s, 5m, 1h
+
+  3 problems in tests/fixtures/three_problems_a.yml

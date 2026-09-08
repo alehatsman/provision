@@ -1,0 +1,11 @@
+---
+source: tests/apply.rs
+expression: out
+---
+  tests/fixtures/apply/verdicts.yml
+  ? An ungated shell cannot be judged                unknown  [t]
+  ~ changed_when decides                             changed  [t]
+  ✓ A later step reads the register                  ok  [t]
+  ✓ failed_when forgives a non-zero exit             ok  [t]
+
+  tests/fixtures/apply/verdicts.yml · 5 steps · 1 changed · 2 ok · 1 skipped · 1 unknown · [t]

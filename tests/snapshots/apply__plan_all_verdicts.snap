@@ -1,0 +1,17 @@
+---
+source: tests/apply.rs
+expression: text
+---
+  tests/fixtures/apply/plan_all_verdicts.yml
+  ✓ An assert that already holds                     ok  [t]
+  ~ A file that would change                         would change  [t]
+    │ --- current
+    │ +++ [SCRATCH]/hello.txt
+    │ @@ -0,0 +1,2 @@
+    │ +one
+    │ +two
+  → A gated shell not yet done                       would run  [t]
+  ? An ungated shell cannot be judged                unknown  [t]
+  - A gate that says the work is done                skipped   unless  [t]
+
+  tests/fixtures/apply/plan_all_verdicts.yml · 5 steps · 1 would change · 1 would run · 1 ok · 1 skipped · 1 unknown · [t]

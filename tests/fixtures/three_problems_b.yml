@@ -1,0 +1,7 @@
+- name: nope
+  shell: echo a
+  cmd: [echo, a]
+
+- name: bad wait
+  shell: echo a
+  timeout: soon

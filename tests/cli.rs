@@ -9,6 +9,12 @@ use std::process::{Command, Output};
 /// Spec §8: `3` is "usage or validation error".
 const EXIT_VALIDATION: i32 = 3;
 
+macro_rules! snapshot {
+    ($name:expr, $text:expr) => {
+        insta::assert_snapshot!($name, $text)
+    };
+}
+
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
@@ -106,6 +112,20 @@ fn validate_rejects_what_plan_would_reject() {
     assert!(out.contains("`file` state file needs `content` or `src`"), "{out}");
     assert!(out.contains("`service` needs `state` or `enabled`"), "{out}");
     assert_positioned(&out);
+}
+
+#[test]
+fn snapshot_three_problems_across_two_files() {
+    // Spec §8: validate collects every problem in one pass rather than
+    // stopping at the first, across an import too, and the trailer counts
+    // them together under the file that was actually named on the command
+    // line — not the two files they came from.
+    let (code, out) = validate("three_problems_a.yml");
+    assert_eq!(code, EXIT_VALIDATION, "{out}");
+    assert!(out.contains("three_problems_a.yml") && out.contains("three_problems_b.yml"), "{out}");
+    assert!(out.contains("3 problems in"), "{out}");
+    assert_positioned(&out);
+    snapshot!("three_problems", out);
 }
 
 #[test]

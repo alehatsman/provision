@@ -1,0 +1,12 @@
+---
+source: tests/apply.rs
+expression: text
+---
+  tests/fixtures/apply/plan_all_verdicts.yml
+  ? An assert that already holds                     would run (unprobed)  [t]
+  ? A file that would change                         would run (unprobed)  [t]
+  ? A gated shell not yet done                       would run (unprobed)  [t]
+  ? An ungated shell cannot be judged                would run (unprobed)  [t]
+  ? A gate that says the work is done                would run (unprobed)  [t]
+
+  tests/fixtures/apply/plan_all_verdicts.yml · 5 steps · 5 would run (unprobed) · [t]
