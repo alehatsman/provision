@@ -2971,6 +2971,16 @@ fn no_ref_takes_the_remotes_default_branch() {
 
 // ── `defaults` (spec §6.10) ───────────────────────────────────────────────
 
+/// The non-macOS case, and now gated to say so.
+///
+/// The name always claimed this, but nothing enforced it, so on a Mac the
+/// assertions failed — and the `apply` at the bottom is a real one.
+/// `defaults.yml` names `com.apple.finder`, `com.apple.screencapture` and
+/// `NSGlobalDomain`, so running the suite on a Mac converged the preferences
+/// of whoever ran it: Finder's hidden files, the screenshot location and the
+/// trackpad corner-click behaviour. The Mac side is
+/// `defaults_applies_twice_changed_then_ok`, against a scratch plist.
+#[cfg(not(target_os = "macos"))]
 #[test]
 fn defaults_off_macos_is_unknown_at_plan_and_a_failure_at_apply() {
     let dir = tempfile::tempdir().unwrap();
@@ -2993,6 +3003,39 @@ fn defaults_off_macos_is_unknown_at_plan_and_a_failure_at_apply() {
     let (code, got) = apply(dir.path(), "defaults.yml", &[]);
     assert_eq!(code, 1, "{got}");
     assert!(got.contains("macOS only"), "{got}");
+}
+
+/// The macOS side of §6.10, which the suite had no coverage of: the only test
+/// that applied `defaults` asserted the *failure* path, so on the one platform
+/// where the action does something, nothing checked that it did it twice the
+/// same way.
+///
+/// The domain is a plist inside the scratch directory. `defaults` takes an
+/// absolute path wherever it takes a domain, so the action can be exercised
+/// for real without touching the preferences of whoever is running this.
+#[cfg(target_os = "macos")]
+#[test]
+fn defaults_applies_twice_changed_then_ok() {
+    let dir = tempfile::tempdir().unwrap();
+
+    let (code, first) = apply(dir.path(), "defaults_scratch.yml", &[]);
+    assert_eq!(code, 0, "{first}");
+    for step in ["A bool", "A string", "An int"] {
+        assert!(line_for(&first, step).contains("changed"), "{first}");
+    }
+
+    // Spec §11: the second run is the one that matters.
+    let (code, second) = apply(dir.path(), "defaults_scratch.yml", &[]);
+    assert_eq!(code, 0, "{second}");
+    for step in ["A bool", "A string", "An int"] {
+        assert_eq!(verdict(&second, step), "ok", "{second}");
+    }
+
+    // Written where it was told to, and nowhere else.
+    assert!(
+        dir.path().join("provision-test.plist").is_file(),
+        "the scratch plist was not created — did the domain resolve?"
+    );
 }
 
 #[test]
