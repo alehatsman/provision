@@ -23,10 +23,11 @@ and a dry-run a person can trust.
 - Step modifiers: `name`, `when`, `unless`, `creates`, `sudo`, `timeout`,
   `retry`, `env`, `cwd`, `tags`, `register`, `changed_when`, `failed_when`.
 - Facts about the local machine.
-- Four commands: `validate`, `plan`, `apply`, `list`. The first three take
-  a plan or a component as the root; a component's props come from `--prop`
-  (§8, D17). `list` names the components in a directory, or describes one
-  component's props.
+- Five commands: `validate`, `plan`, `apply`, `list`, `facts`. The first
+  three take a plan or a component as the root; a component's props come from
+  `--prop` (§8, D17). `list` names the components in a directory, or
+  describes one component's props. `facts` prints what this machine reports
+  about itself and walks nothing.
 - TTY and non-TTY output, `--json` event stream.
 
 **Out** (see README non-goals and decisions.md)
