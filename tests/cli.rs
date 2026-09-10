@@ -358,18 +358,27 @@ fn the_readme_example_validates_and_plans() {
 #[test]
 fn a_probed_plan_runs_the_asserts() {
     // Spec §6.7: plan runs asserts, because an assert failing at plan time is
-    // the cheapest way to learn the plan is aimed at the wrong machine. The
-    // example is x1's, and the test host is not x1.
-    let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/x1.yml");
-    let out = run(&["plan", example.to_str().unwrap(), "--color", "never"]);
+    // the cheapest way to learn the plan is aimed at the wrong machine.
+    //
+    // The fixture's guard fails everywhere. This used to plan `examples/x1.yml`
+    // and lean on that example's guard failing — but that guard refuses a list
+    // of the author's own hostnames, so the test passed on three machines and
+    // failed on every other one. It also meant planning against the running
+    // user's real home directory, printing a diff of their dotfiles into the
+    // test output on the way.
+    let path = fixtures().join("failing_assert.yml");
+    let out = run(&["plan", path.to_str().expect("fixture paths are UTF-8")]);
     let text = String::from_utf8_lossy(&out.stdout);
-    let guard = text.lines().find(|l| l.contains("wrong machine")).unwrap();
+    let guard = text
+        .lines()
+        .find(|l| l.contains("wrong machine"))
+        .unwrap_or_else(|| panic!("no guard line in:\n{text}"));
     assert!(guard.contains("FAILED"), "{text}");
     assert_eq!(out.status.code(), Some(1), "{text}");
     // Spec §6.7: plan reports the failure and keeps walking, so the rest of
     // the plan is still on screen. Only apply stops at the first failure.
-    assert!(text.contains("Reload shell hint"), "{text}");
-    assert!(text.contains("19 steps"), "{text}");
+    assert!(text.contains("After the guard"), "{text}");
+    assert!(text.contains("2 steps"), "{text}");
 }
 
 #[test]

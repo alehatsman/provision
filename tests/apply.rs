@@ -41,6 +41,20 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
+/// The `os` fact, derived the way `src/facts.rs` derives it.
+///
+/// A `cfg!` there and a `cfg!` here, both compiled for the same target, so a
+/// fixture that interpolates `{{ os }}` can still be asserted exactly —
+/// without the test deciding in advance which machine it is running on. This
+/// file is `#![cfg(unix)]`, so `windows` is not reachable from it.
+fn os_fact() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "darwin"
+    } else {
+        "linux"
+    }
+}
+
 /// Run a command with `$PROVISION_SCRATCH` pointed at a directory the plan
 /// owns. The plans read it through `env.PROVISION_SCRATCH`.
 fn run_in(scratch: &Path, args: &[&str]) -> Output {
@@ -1306,9 +1320,12 @@ fn a_template_and_a_tree_apply_twice_changed_then_ok() {
     assert!(line_for(&first, "whole tree").contains("3 of 3"), "{first}");
 
     let out = dir.path().join("rendered");
+    // The fixture interpolates `{{ os }}`, which is the point — a fact reaches
+    // a template. Asserting the rendered value against a literal `linux` made
+    // the test pass on the machine it was written on and nowhere else.
     assert_eq!(
         std::fs::read_to_string(dir.path().join("one")).unwrap(),
-        "single file for linux\n"
+        format!("single file for {}\n", os_fact())
     );
     // The `.j2` comes off the destination name; a file without one is still
     // rendered.
@@ -1319,7 +1336,7 @@ fn a_template_and_a_tree_apply_twice_changed_then_ok() {
     assert!(
         std::fs::read_to_string(out.join("nested/inner.conf"))
             .unwrap()
-            .contains("linux")
+            .contains(os_fact())
     );
     // Spec §6.4: a file that is not valid UTF-8 is placed byte for byte.
     let src =
