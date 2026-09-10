@@ -1,0 +1,14 @@
+---
+source: tests/list.rs
+expression: out
+---
+  deploy                    stage a build and stamp it
+
+  props:
+    dest                    string  default: {{ home }}/out
+                            Where the build lands.
+    stamp                   string  required
+                            The version string to stamp in.
+    retries                 int     optional
+                            How many times to retry the upload.
+    dry_run                 bool    default: false

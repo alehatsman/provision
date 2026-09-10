@@ -1,5 +1,27 @@
 ---
 description: stage a build and stamp it
+
+# Four props, one per shape `list <component.yml>` has to print: one with a
+# default, one required, one with neither, and one with no `description`.
+# `dest`'s default carries a template deliberately — spec §3.2 says a default
+# is data in the file and is never rendered, so the listing has to show the
+# braces rather than this machine's home directory.
+props:
+  dest:
+    type: string
+    default: "{{ home }}/out"
+    description: Where the build lands.
+  stamp:
+    type: string
+    required: true
+    description: The version string to stamp in.
+  retries:
+    type: int
+    description: How many times to retry the upload.
+  dry_run:
+    type: bool
+    default: false
+
 steps:
   - name: Nothing
     shell: "true"

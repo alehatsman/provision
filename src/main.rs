@@ -99,11 +99,11 @@ enum Command {
         #[command(flatten)]
         run: RunArgs,
     },
-    /// Name the components in a directory, with their descriptions.
+    /// Name the components in a directory, or describe one component's props.
     List {
-        /// A directory of component files. A trailing separator is optional:
-        /// the verb already says what the argument is.
-        dir: PathBuf,
+        /// A directory of component files, or one component file. A trailing
+        /// separator is optional: the verb already says what the argument is.
+        path: PathBuf,
     },
     /// Print the facts this machine reports.
     Facts {
@@ -255,7 +255,7 @@ fn run() -> Result<u8, Diag> {
         }
     };
     match cli.command {
-        Command::List { dir } => list_tasks(&dir, &cwd()),
+        Command::List { path } => list(&path, &cwd()),
 
         Command::Facts { json } => {
             let f = facts::Facts::detect();
@@ -474,15 +474,80 @@ fn is_component(path: &Path) -> Result<bool, Diag> {
     Ok(yaml::Doc::load(path)?.node().as_map().is_ok())
 }
 
+/// `provision list` at its two granularities (spec §8): a directory says what
+/// can be run here, a file says what one of them takes. One verb, because it
+/// is one question asked with two amounts of precision, and the directory
+/// form used to answer only the first half of it.
+fn list(path: &Path, base: &Path) -> Result<u8, Diag> {
+    if path.is_dir() {
+        return list_tasks(path, base);
+    }
+    if !path.exists() {
+        return Err(Diag::file_level(path, "no such file or directory")
+            .with_note("`list` takes a directory of components, or one component file"));
+    }
+    describe_component(path)
+}
+
+/// `provision list <component.yml>`. The description, then one line per prop:
+/// name, type, and either `required` or the default **as written** — §3.2 says
+/// a default is data in the file and is never rendered, so this prints the
+/// four braces when that is what is there rather than implying a value the
+/// component would not produce.
+///
+/// Nothing below the root keys is parsed and nothing runs, exactly as the
+/// directory form promises.
+fn describe_component(path: &Path) -> Result<u8, Diag> {
+    let doc = yaml::Doc::load(path)?;
+    // A plan gets the same answer `--prop` on a plan already gets: it declares
+    // no props, and asking one for its interface is that same mistake.
+    if doc.node().as_seq().is_ok() {
+        return Err(
+            Diag::file_level(path, "this file is a plan, not a component")
+                .with_note("props are declared at a component's root; a plan takes `--var`"),
+        );
+    }
+    let component = config::load::parse_component(doc)?;
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    let description = component.description.unwrap_or_default();
+    println!("  {stem:<24}  {description}");
+
+    if component.props.is_empty() {
+        println!("\n  no props");
+        return Ok(EXIT_OK);
+    }
+    println!("\n  props:");
+    for p in &component.props {
+        // `required` and a default are mutually exclusive — `parse_component`
+        // rejects a prop carrying both — so this is a choice, never a join.
+        let requirement = match &p.default {
+            Some(d) => format!("default: {}", as_written(*d)),
+            None if p.required => "required".to_string(),
+            // Neither: optional and unset, which reads as undefined inside the
+            // component. Saying "optional" out loud beats an empty column.
+            None => "optional".to_string(),
+        };
+        let name = &p.name;
+        println!("    {name:<22}  {:<6}  {requirement}", p.ty.name());
+        if let Some(d) = &p.description {
+            println!("    {:<22}  {d}", "");
+        }
+    }
+    Ok(EXIT_OK)
+}
+
+/// A default's source text. Spec §3.2: taken as written, never rendered.
+fn as_written(n: yaml::N<'static>) -> String {
+    n.as_scalar_string()
+        .or_else(|_| n.to_value().map(|v| v.to_string()))
+        .unwrap_or_default()
+}
+
 /// `provision list <dir>/`. One line per `.yml` file, sorted by stem: the
 /// file stem, then its `description` or nothing. Nothing below the root keys
 /// is parsed and nothing is run, so a directory holding one broken file
-/// still lists. This is the task runner's "what can I run here", and the
-/// only thing `list` does (spec §8).
+/// still lists. This is the task runner's "what can I run here" (spec §8).
 fn list_tasks(dir: &Path, base: &Path) -> Result<u8, Diag> {
-    if !dir.is_dir() {
-        return Err(Diag::file_level(dir, "no such directory"));
-    }
     let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
         .map_err(|e| Diag::file_level(dir, format!("cannot read: {e}")))?
         .filter_map(|e| e.ok().map(|e| e.path()))
