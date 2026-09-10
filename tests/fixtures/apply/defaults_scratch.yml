@@ -1,0 +1,33 @@
+---
+# The macOS side of §6.10, written against a plist inside the scratch
+# directory rather than a real preferences domain.
+#
+# `defaults` takes an absolute path where it takes a domain, which is the only
+# way to exercise the action on a Mac without converging the preferences of
+# whoever is running the suite. `defaults.yml` names live domains —
+# com.apple.finder, com.apple.screencapture, NSGlobalDomain — and is applied
+# only by the test that is gated off macOS, where `defaults` does not exist
+# and nothing can be written.
+- vars:
+    plist: "{{ env.PROVISION_SCRATCH }}/provision-test"
+
+- name: A bool
+  defaults:
+    domain: "{{ plist }}"
+    key: SomeFlag
+    type: bool
+    value: true
+
+- name: A string
+  defaults:
+    domain: "{{ plist }}"
+    key: SomePath
+    type: string
+    value: "{{ env.PROVISION_SCRATCH }}/where"
+
+- name: An int
+  defaults:
+    domain: "{{ plist }}"
+    key: SomeCount
+    type: int
+    value: 3

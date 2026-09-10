@@ -124,10 +124,7 @@ pub(crate) fn parse(
             .with_note("a root write lands in /var/root's preferences, not yours"));
     }
 
-    let macos = ctx
-        .get_attr("os")
-        .ok()
-        .is_some_and(|v| v.to_string() == "darwin");
+    let macos = ctx.get_attr("os").is_ok_and(|v| v.to_string() == "darwin");
 
     Ok(Some(Spec {
         domain,
