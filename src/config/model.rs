@@ -242,34 +242,81 @@ fn all_subject_keys() -> Vec<&'static str> {
 
 // ── modifier types ────────────────────────────────────────────────────────
 
+/// Why a duration would not read. `TooBig` gets its own note, because "use a
+/// number and a unit" is misleading advice for input that is exactly a number
+/// and a unit.
+pub(crate) enum BadDuration {
+    /// Not `<digits><unit>` at all.
+    Shape,
+    /// The right shape, more seconds than one can hold. Carries the cause.
+    TooBig(String),
+}
+
+impl BadDuration {
+    pub(crate) fn note(&self) -> &'static str {
+        match self {
+            BadDuration::Shape => "use a number and a unit: 30s, 5m, 1h",
+            BadDuration::TooBig(_) => "the largest a duration can be is 18446744073709551615s",
+        }
+    }
+
+    /// Named after a colon when there is a cause worth naming.
+    pub(crate) fn cause(&self) -> Option<&str> {
+        match self {
+            BadDuration::Shape => None,
+            BadDuration::TooBig(c) => Some(c),
+        }
+    }
+}
+
 /// `30s`, `5m`, `1h`. Spec §4.
+///
+/// Split out for `--deadline` (§8), which has a string from the command line
+/// and no YAML node to hang a position on. One grammar with two entry points
+/// rather than two grammars: a `--deadline 5m` that meant something other
+/// than a step's `timeout: 5m` would be a trap laid for the one reader who
+/// noticed.
+pub(crate) fn duration_from_str(s: &str) -> std::result::Result<Duration, BadDuration> {
+    let s = s.trim();
+    let split = s
+        .find(|c: char| !c.is_ascii_digit())
+        .ok_or(BadDuration::Shape)?;
+    let (num, unit) = s.split_at(split);
+    // `num` is ASCII digits by construction, so once it is non-empty the only
+    // way this fails is overflow. An empty `num` is `soon`, which is a shape
+    // problem and not something the overflow note would help with.
+    let n: u64 = num.parse().map_err(|e: std::num::ParseIntError| {
+        if num.is_empty() {
+            BadDuration::Shape
+        } else {
+            BadDuration::TooBig(e.to_string())
+        }
+    })?;
+    // `checked_mul`, not `*`: `1000000000h` wrapped silently in release and
+    // panicked in debug, so the one duration nobody should be able to write
+    // was the one that behaved differently per profile.
+    let too_big =
+        || BadDuration::TooBig(format!("{n}{unit} is more seconds than a duration holds"));
+    let secs = match unit {
+        "s" => n,
+        "m" => n.checked_mul(60).ok_or_else(too_big)?,
+        "h" => n.checked_mul(3600).ok_or_else(too_big)?,
+        _ => return Err(BadDuration::Shape),
+    };
+    Ok(Duration::from_secs(secs))
+}
+
+/// The same grammar, positioned.
 pub(crate) fn parse_duration(at: N<'_>) -> Result<Duration> {
     let raw = at.as_scalar_string()?;
     let s = raw.trim();
-    let bad = || {
-        at.err(format!("`{s}` is not a duration"))
-            .with_note("use a number and a unit: 30s, 5m, 1h")
-    };
-    let (num, unit) = s.split_at(s.find(|c: char| !c.is_ascii_digit()).ok_or_else(bad)?);
-    // `num` is ASCII digits by construction, so once it is non-empty the only
-    // way this fails is overflow — and there "use a number and a unit" is
-    // misleading advice for input that is exactly a number and a unit. An
-    // empty `num` is `soon`, where the cause says nothing `bad()` does not.
-    let n: u64 = num.parse().map_err(|e| {
-        if num.is_empty() {
-            bad()
-        } else {
-            at.err(format!("`{s}` is not a duration: {e}"))
-                .with_note("the largest a duration can be is 18446744073709551615s")
-        }
-    })?;
-    let secs = match unit {
-        "s" => n,
-        "m" => n * 60,
-        "h" => n * 3600,
-        _ => return Err(bad()),
-    };
-    Ok(Duration::from_secs(secs))
+    duration_from_str(s).map_err(|e| {
+        let msg = match e.cause() {
+            Some(cause) => format!("`{s}` is not a duration: {cause}"),
+            None => format!("`{s}` is not a duration"),
+        };
+        at.err(msg).with_note(e.note())
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

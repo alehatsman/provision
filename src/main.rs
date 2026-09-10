@@ -35,6 +35,8 @@ const EXIT_FAILED: u8 = 1;
 /// "plan found changes", which is why it is not an error (D15).
 const EXIT_CHANGES: u8 = 2;
 const EXIT_USAGE: u8 = 3;
+/// `timeout(1)`'s code, for `--deadline` (D19).
+const EXIT_DEADLINE: u8 = 124;
 /// The shell's convention for a process ended by SIGINT.
 const EXIT_INTERRUPTED: u8 = 130;
 
@@ -130,6 +132,10 @@ struct RunArgs {
     json: bool,
     #[arg(long, value_enum, default_value_t = Color::Auto)]
     color: Color,
+    /// A wall clock for the whole run: `30s`, `5m`, `1h`. Steps still carry
+    /// their own `timeout`; this bounds the sum of them (spec §8, D19).
+    #[arg(long, value_name = "DURATION")]
+    deadline: Option<String>,
     #[command(flatten)]
     vars: VarArgs,
 }
@@ -148,6 +154,24 @@ impl RunArgs {
             tags: self.tags.clone(),
             skip_tags: self.skip_tags.clone(),
         }
+    }
+
+    /// Spec §8: `--deadline` takes §4's duration grammar, through §4's parser.
+    /// A bad one is a usage error like any other bad flag value, reported
+    /// before anything is walked.
+    fn deadline(&self) -> Result<Option<std::time::Duration>, Diag> {
+        self.deadline
+            .as_deref()
+            .map(|s| {
+                config::model::duration_from_str(s).map_err(|e| {
+                    let msg = match e.cause() {
+                        Some(cause) => format!("`{s}` is not a duration: {cause}"),
+                        None => format!("`{s}` is not a duration"),
+                    };
+                    Diag::file_level("--deadline", msg).with_note(e.note())
+                })
+            })
+            .transpose()
     }
 
     /// Spec §9.1: `NO_COLOR` and `--color=never` are honored. anstream reads
@@ -323,6 +347,7 @@ fn run() -> Result<u8, Diag> {
                     stream: false,
                     root_available: sudo::root_is_reachable(),
                 })
+                .with_deadline(run.deadline()?)
                 .with_sink(run.sink(base.clone(), false, false));
 
             let started = Instant::now();
@@ -333,6 +358,13 @@ fn run() -> Result<u8, Diag> {
                 eprintln!();
                 report(&ex, &base, None);
                 return Ok(EXIT_USAGE);
+            }
+            // Spec §8, the exit-code precedence: the clock beats a failed
+            // step, because when it ran out the run stopped for that reason
+            // and whatever the last step reported is not why. `plan` installs
+            // no signal handlers, so there is no interrupt to rank above it.
+            if ex.summary.deadline_exceeded {
+                return Ok(EXIT_DEADLINE);
             }
             // Only an `assert` can fail at plan time. The walk kept going
             // (§6.7), so this is the whole plan's verdict, not the first
@@ -363,6 +395,10 @@ fn run() -> Result<u8, Diag> {
             run.apply_color();
             let plan = check_exists(&plan)?;
             let props = pairs(&prop, "--prop")?;
+            // Read here, used below: a typo'd `--deadline` is a usage error,
+            // and finding it after the sudo prompt would mean asking for a
+            // password to run nothing.
+            let deadline = run.deadline()?;
             let base = cwd();
 
             // Spec §7: the walk that finds the sudo steps also validates the
@@ -384,6 +420,10 @@ fn run() -> Result<u8, Diag> {
                     stream,
                     root_available: true,
                 })
+                // The clock starts here, after the preflight, on purpose: a
+                // password typed at a prompt is the operator's time, not the
+                // job's.
+                .with_deadline(deadline)
                 .with_sink(run.sink(base.clone(), verbose, stream));
 
             let started = Instant::now();
@@ -395,8 +435,15 @@ fn run() -> Result<u8, Diag> {
                 report(&ex, &base, None);
                 return Ok(EXIT_USAGE);
             }
+            // Spec §8, the exit-code precedence: a stop from outside beats the
+            // clock, which beats a failed step. Read down, the rule is "the
+            // reason the run ended", and a signal is always a better answer
+            // than whatever the walk was doing when it arrived.
             if ex.summary.interrupted {
                 return Ok(EXIT_INTERRUPTED);
+            }
+            if ex.summary.deadline_exceeded {
+                return Ok(EXIT_DEADLINE);
             }
             Ok(if ex.summary.failed > 0 {
                 EXIT_FAILED

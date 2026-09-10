@@ -106,6 +106,9 @@ pub(crate) struct Expander {
     /// Spec §8 `--keep-going`: carry on past a failed step, so one run
     /// reports everything broken instead of the first thing.
     keep_going: bool,
+    /// Spec §8 `--deadline`: when the run's wall clock runs out. `None` is no
+    /// deadline, which is the default and every `validate`.
+    deadline: Option<Instant>,
 }
 
 impl Expander {
@@ -127,6 +130,7 @@ impl Expander {
             index: 0,
             stopped: false,
             keep_going: false,
+            deadline: None,
         }
     }
 
@@ -134,6 +138,15 @@ impl Expander {
     /// failure, so there is nothing for the flag to change there.
     pub(crate) fn keep_going(mut self, yes: bool) -> Expander {
         self.keep_going = yes;
+        self
+    }
+
+    /// Spec §8 `--deadline`. The clock starts here rather than at
+    /// construction, which for `apply` is what keeps the sudo preflight out of
+    /// the budget: a password typed at a prompt is the operator's time, not
+    /// the job's, and the expander that gets a deadline is built after it.
+    pub(crate) fn with_deadline(mut self, d: Option<Duration>) -> Expander {
+        self.deadline = d.map(|d| Instant::now() + d);
         self
     }
 
@@ -207,6 +220,7 @@ impl Expander {
         inherited: &BTreeSet<String>,
     ) {
         for step in steps {
+            self.check_clock();
             if self.stopped {
                 return;
             }
@@ -215,6 +229,29 @@ impl Expander {
                 continue;
             }
             self.step(step, scope, depth, inherited);
+        }
+    }
+
+    /// Time left on the run's clock. `None` is "no deadline", not "no time".
+    fn remaining(&self) -> Option<Duration> {
+        self.deadline
+            .map(|d| d.saturating_duration_since(Instant::now()))
+    }
+
+    /// Spec §8: the run's clock, checked before each step and again after it.
+    ///
+    /// Both, and that is the whole subtlety. Before, so the walk stops without
+    /// starting work it cannot finish. After, so a step the deadline itself
+    /// killed ends the run on 124 rather than on that step's own 1 — the clock
+    /// is why the run ended, and whether `--keep-going` was passed has no
+    /// bearing on that.
+    ///
+    /// Setting `stopped` is what unwinds the walk, so the deadline reuses the
+    /// path a first failure already takes rather than inventing a second one.
+    fn check_clock(&mut self) {
+        if self.deadline.is_some_and(|d| Instant::now() >= d) {
+            self.summary.deadline_exceeded = true;
+            self.stopped = true;
         }
     }
 
@@ -805,6 +842,10 @@ impl Expander {
             self.stopped = true;
         }
         self.emit(step, scope, depth, done, elapsed);
+        // The other half of the rule in `check_clock`: a step killed by the
+        // run's clock has to end the run on the clock's exit code, and the
+        // failure it reported cannot say that by itself.
+        self.check_clock();
     }
 
     /// Turn a checked step into something the runner can execute.
@@ -867,6 +908,19 @@ impl Expander {
         // every other path a plan names.
         let cwd = text(step.mods.cwd).map(|dir| load::resolve(step.at.file, &expanduser(&dir)));
 
+        // Spec §8: a step's effective timeout is the lesser of its own and the
+        // time the run has left, so no step can outlive the deadline it was
+        // admitted under. Without the clamp, `--deadline 30s` on a plan whose
+        // next step takes the ten-minute default is a thirty-second promise
+        // and a ten-minute run.
+        let own_timeout = step
+            .mods
+            .timeout
+            .and_then(|n| model::parse_duration(n).ok())
+            .unwrap_or(DEFAULT_TIMEOUT);
+        let left = self.remaining();
+        let timeout = left.map_or(own_timeout, |l| l.min(own_timeout));
+
         Some(Prepared {
             action,
             unless: text(step.mods.unless),
@@ -874,13 +928,10 @@ impl Expander {
             cwd,
             env,
             sudo: step.mods.sudo.is_some_and(|n| n.as_bool().unwrap_or(false)),
-            timeout: step
-                .mods
-                .timeout
-                .and_then(|n| model::parse_duration(n).ok())
-                .unwrap_or(DEFAULT_TIMEOUT),
+            timeout,
             retry: step.mods.retry.and_then(|n| model::parse_retry(n).ok()),
             has_changed_when: step.mods.changed_when.is_some(),
+            deadline_bound: timeout < own_timeout,
         })
     }
 

@@ -779,6 +779,72 @@ fn keep_going_does_not_carry_the_run_past_ctrl_c() {
     );
 }
 
+// Spec §8: `--deadline` bounds the whole run, and a step's own `timeout` is
+// clamped to what is left of it — without the clamp a one-second deadline on a
+// step taking the ten-minute default is a one-second promise and a ten-minute
+// run. The message names the run's clock rather than a step timeout the file
+// does not contain, which is the difference between a reader finding the
+// number and hunting for one nobody wrote.
+#[test]
+fn a_deadline_stops_the_run_and_exits_124() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(dir.path(), "deadline.yml", &["--deadline", "1s"]);
+    assert_eq!(code, 124, "{out}");
+    assert!(out.contains("deadline exceeded"), "{out}");
+    assert!(
+        !out.contains("Must not run after the deadline"),
+        "the walk did not stop:\n{out}"
+    );
+}
+
+// The other side of the clamp. A run where every timeout blamed the deadline
+// would make `--deadline` unusable on any plan that sets its own, so a step
+// whose `timeout` is the smaller number reads as the ordinary step timeout it
+// is — and exits 1, not 124, because the clock is not why the run ended.
+#[test]
+fn a_steps_own_timeout_wins_when_it_is_the_smaller() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(
+        dir.path(),
+        "deadline_step_timeout.yml",
+        &["--deadline", "5m"],
+    );
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("timed out after"), "{out}");
+    assert!(
+        !out.contains("deadline exceeded"),
+        "blamed the deadline for a step timeout:\n{out}"
+    );
+}
+
+// Spec §8: `--keep-going` is about a step failing, not about the run's clock
+// running out. It carries on past the first and never past the second.
+#[test]
+fn keep_going_does_not_carry_the_run_past_the_deadline() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(
+        dir.path(),
+        "deadline.yml",
+        &["--deadline", "1s", "--keep-going"],
+    );
+    assert_eq!(code, 124, "{out}");
+    assert!(
+        !out.contains("Must not run after the deadline"),
+        "--keep-going walked past the deadline:\n{out}"
+    );
+}
+
+// §4's grammar through §4's parser, reported before anything is walked. A
+// `--deadline 5m` that meant something other than a step's `timeout: 5m` would
+// be a trap laid for the one reader who noticed.
+#[test]
+fn a_deadline_that_is_not_a_duration_is_a_usage_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(dir.path(), "deadline.yml", &["--deadline", "soon"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("is not a duration"), "{out}");
+}
+
 #[test]
 fn ctrl_c_kills_the_step_and_exits_130() {
     let dir = tempfile::tempdir().unwrap();

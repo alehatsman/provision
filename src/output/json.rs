@@ -106,6 +106,10 @@ impl Sink for Json {
             "would_run": s.would_run,
             "would_run_unprobed": s.unprobed,
             "interrupted": s.interrupted,
+            // Spec §9.3: always present, both of them. A runner reading only
+            // the summary has to tell a job that finished from one that was
+            // stopped, and an absent key is not that answer.
+            "deadline_exceeded": s.deadline_exceeded,
             "duration_ms": s.duration.as_millis(),
         }));
     }

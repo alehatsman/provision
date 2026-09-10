@@ -172,6 +172,12 @@ impl Sink for Text {
             let red = Style::new().fg_color(Some(AnsiColor::Red.into()));
             self.write(format_args!("  {red}interrupted{red:#}\n"));
         }
+        // Both can be true of one run, and both are printed when they are: the
+        // exit code has to pick one (§8) and a reader does not.
+        if s.deadline_exceeded {
+            let red = Style::new().fg_color(Some(AnsiColor::Red.into()));
+            self.write(format_args!("  {red}deadline exceeded{red:#}\n"));
+        }
     }
 }
 

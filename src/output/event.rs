@@ -121,6 +121,11 @@ pub(crate) struct Summary {
     pub unprobed: usize,
     pub duration: Duration,
     pub interrupted: bool,
+    /// Spec §8 `--deadline`: the run's clock ran out. Distinct from
+    /// `interrupted`, which is someone outside saying stop — the clock is the
+    /// run keeping a promise it made about itself, and the two exit codes
+    /// (124 against 130/143) are what a runner reads to tell them apart.
+    pub deadline_exceeded: bool,
 }
 
 impl Summary {
