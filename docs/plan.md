@@ -1,6 +1,6 @@
 # provision — build plan
 
-Status: phases 0–5b code complete · phase 6 spec'd, not built · 2026-09-08
+Status: phases 0–7 code complete · 2026-09-10
 
 ## Where this stands
 
@@ -13,7 +13,8 @@ Status: phases 0–5b code complete · phase 6 spec'd, not built · 2026-09-08
 | 4 — migration and cut-over | dotfiles applies with provision, main_pc reports no `unknown` | dotfiles `91415fc` |
 | 5 — `run`: tasks and CI steps | moongit CI execs `provision run --step`; moongit's `tasks.yml` runs as `tasks/` | `3d293fa` — code; superseded by 5b |
 | 5b — one meaning per file | no `run` verb; `apply`/`plan`/`validate` take a component; moongit runs a job as `provision apply job.yml --json` | `e00862a` — review verified; moongit `apply job.yml --json` in moongit is the owner's |
-| 6 — `git`, `download`, `defaults` | the six fleet clones, twelve fetches and twenty mac defaults are typed; mac plan `unknown` count drops to zero for that step; main_pc numbers unchanged | open |
+| 6 — `git`, `download`, `defaults` | the six fleet clones, twelve fetches and twenty mac defaults are typed; mac plan `unknown` count drops to zero for that step; main_pc numbers unchanged | `2edd4e6`, `7dbe36a`, `2a76521` — code; the mac's probed plan is the owner's |
+| 7 — the runner's contract | a job can be cancelled (SIGTERM, 143), bounded (`--deadline`, 124), and asked what it takes (`list <component.yml>`) | `d660619` — D19 |
 
 Windows was exercised natively on main_pc's host on 2026-09-08, from WSL via
 `powershell.exe`, with the cross-compiled `x86_64-pc-windows-gnu` binary run
@@ -37,13 +38,18 @@ Open, and all of it the owner's — none of it can close from this machine:
   `--explain-var` stays spec'd and unbuilt, marked as such in §10.
   mooncake stays installed everywhere: a tool, not a dependency.
   `--keep-going` built — spec §8, `main.rs` and `expand.rs`.
-- A tag. `main` lives at `github.com/alehatsman/provision`, public since
-  2026-09-08; nothing is tagged.
+- ~~A tag~~ — `v0.9.1` is cut. `main` lives at
+  `github.com/alehatsman/provision`, public since 2026-09-08.
 - go-quality drops `name:` and `version:` from every preset and tags. Both
   are root keys provision rejects, and it stays strict: a `version:` in a
   file provision would never read is a lie to the reader. Then moongit's
-  runner switches to `provision run --step`, then moongit's `tasks.yml`
-  converts. In that order — each one needs the one before it.
+  runner switches to `provision apply job.yml --json` — `--step` was phase
+  5's contract and 5b withdrew it — then moongit's `tasks.yml` converts. In
+  that order: each one needs the one before it.
+
+  Phase 7 finished provision's half of that switch. The runner can cancel a
+  job (SIGTERM), bound it (`--deadline`) and ask a component what it takes
+  (`list <component.yml>`), so nothing on this side is now blocking it.
 
 Nothing is open and the builder's. Phase 5's code landed 2026-09-08
 (`2c4d4ed`, `3d293fa`); its gate is a real moongit run and therefore the
@@ -501,10 +507,46 @@ Gate
   temp-hash-rename order, typed comparison), and the budget was the guess,
   not the code.
 
+### Phase 7 — the runner's contract
+
+D19. D17 settled that provisioning, tasks and CI share one executor; phase 7
+is what reading provision *as* moongit's runner then found, and nothing else.
+Three obligations, each a flag or a signal handler, none a new noun.
+
+Deliverables
+
+- **SIGTERM** (spec §10): the same path as Ctrl-C, exit 143. `exec/process.rs`
+  caught SIGINT only, so a cancelled job killed provision where it stood and
+  orphaned the step's process group — measured against `main`, not inferred.
+  The flag becomes the signal number, because the exit code is `128 + it`.
+- **`--deadline`** (spec §8) on `plan` and `apply`: the walk stops before a
+  step it has no time for, and each step's `timeout` is clamped to the time
+  left. A step the clock kills says `deadline exceeded`, never a step timeout
+  the file does not contain. Exit 124. `--keep-going` does not override it.
+- **`list <component.yml>`** (spec §8): the component's props, with defaults
+  printed as written (§3.2). The directory form said what could be run
+  without saying what any of it took.
+- `tasks/install.yml` stops copying `build.yml`'s step and `use`s it.
+
+Gate
+
+- **Done.** 182 tests green, `provision apply tasks/ci.yml` exit 0, every
+  commit clippy-clean standalone. The SIGTERM test asserts the *orphan*, not
+  the exit code: the shell reports 143 for an unhandled TERM too, so the code
+  alone cannot tell the fix from the bug.
+- **Not run, and said plainly rather than counted green:** the Windows
+  cross-check. `exec/process.rs` is the file that changed and it has
+  `cfg(unix)`/`cfg(windows)` split paths, so
+  `cargo check --target x86_64-pc-windows-gnu --all-targets` on the Linux box
+  is the thing that closes this. The mac it was built on has no such target.
+- **Owner's:** moongit's runner actually reading the stream, cancelling with
+  TERM and passing `--deadline`. That is the real gate and it lives in that
+  repo.
+
 ## Order and dependencies
 
 ```
-P0 → P1 → P2 → P3 → P4 → P5 → P5b → P6
+P0 → P1 → P2 → P3 → P4 → P5 → P5b → P6 → P7
 ```
 
 Strictly linear. P2 could start before P1's output polish is done, but
@@ -533,3 +575,6 @@ is small enough that merge cost exceeds the gain.
 | Remote apply (`ssh host provision apply`) | never as a feature; a shell alias suffices |
 | Remote `use` (fetch by URL, version pin, cache) | never as a feature; the machine plan checks the repo out at a pinned tag (D17) |
 | Task dependencies, positional task arguments | never; a task is a component and props are its arguments (D17) |
+| Parallel steps | a real gate's wall time is dominated by independent steps **and** splitting it into two `provision apply` invocations runner-side is measured worse. Sequential execution is a semantic guarantee — `register` chaining rests on it (D19) |
+| `use` deduplication | never as stated; running a component twice is a performance question, not a correctness one, and the fix is a graph, and a graph is `needs:` (D19) |
+| Secret masking | a real secret reaches a real log through provision **and** the runner could not have caught it at the log-write boundary. A promise to redact that a step can defeat by base64-ing a token is worse than no promise (D19) |

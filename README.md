@@ -6,6 +6,9 @@ One YAML file per machine. Ten actions. Sequential execution, fail-fast,
 honest dry-run, readable output. No fleet, no daemon, no agent, no plugin
 economy.
 
+The same executor runs a repo's tasks and a CI job: same file format, same
+verdicts, one meaning per file. See [Tasks and CI](#tasks-and-ci).
+
 ![provision apply on a real machine](docs/demo.gif)
 
 A real, full `provision apply` — every component of a real desktop's
@@ -67,8 +70,8 @@ The job is small and stable. The tool should be too.
   steps *idempotent by declaration* (`creates`, `unless`) instead of
   pretending a typed action exists for everything.
 - **Ten actions** where idempotency genuinely needs state inspection:
-  `shell`, `cmd`, `file`, `template`, `pkg`, `service`, `assert`, and from
-  phase 6 `git`, `download`, `defaults` (D4 as amended).
+  `shell`, `cmd`, `file`, `template`, `pkg`, `service`, `assert`, `git`,
+  `download`, `defaults` (D4 as amended).
 - **Composition** with `vars`, `vars_file`, `import`, and `use` (a component
   with declared props).
 - **Jinja2 templating** (minijinja), strict undefined, the same `.j2` files
@@ -147,8 +150,8 @@ The decisions are in [docs/decisions.md](docs/decisions.md).
 | `service`, `systemd` | `service` | `state: started/stopped/restarted/reloaded`, `enabled` |
 | `command`, `shell` | `cmd`, `shell` | `shell` needs `creates`, `unless` or `changed_when` under `validate --strict` (D3) |
 | `assert`, `fail`, `wait_for` | `assert` with `retry` | plan runs asserts once; `retry` belongs to apply |
-| `get_url`, `git` | `download`, `git` | phase 6, spec §6.8–6.9 |
-| `osx_defaults` | `defaults` | phase 6, spec §6.10; four scalar types |
+| `get_url`, `git` | `download`, `git` | spec §6.8–6.9 |
+| `osx_defaults` | `defaults` | spec §6.10; four scalar types |
 | `register`, `when`, `changed_when`, `failed_when` | the same | `result.rc`, `result.stdout`, `result.changed`, `result.skipped` |
 | `until`, `retries`, `delay` | `retry: {attempts, delay}` | timeout is per attempt |
 | `ignore_errors: true` | `failed_when: false` | |
@@ -213,8 +216,10 @@ reports drift instead of copying.
 
 **There is no CI for this repo yet.** No `mgitci.yml`, no Rust CI image; both
 wait on moongit's runner running a job as `provision apply job.yml --json`.
-Until then the gate is a local one, and running it before a push is the whole
-of it.
+Provision's half of that contract is finished — the runner can read the
+stream, cancel a job and bound it (D19) — so what is left is the moongit
+side. Until then the gate is a local one, and running it before a push is the
+whole of it.
 
 ## Documents
 
@@ -230,20 +235,19 @@ of it.
 
 ## Status
 
-Version 0.9.1. Phases 0 through 5b are code complete ([docs/plan.md](docs/plan.md)).
+Version 0.9.1. Phases 0 through 7 are code complete ([docs/plan.md](docs/plan.md)).
 `validate`, `plan`, `apply`, `list` and `facts` all work, and all ten
 actions — `shell`, `cmd`, `assert`, `file`, `template`, `pkg`, `service`,
 `git`, `download`, `defaults` — run for real, with `unless`, `creates`,
 `timeout`, `retry`, `env`, `cwd`, `register`, `changed_when`, `failed_when`,
-tags, sudo, Ctrl-C and `--json`. Components take typed `props`, from a `use:`
-or from `--prop` on the command line, and this repo's own tasks and the
-shared quality gate run through them. Windows cross-compiles to a
-self-contained `.exe` and has been run natively.
+tags, sudo, `--deadline`, Ctrl-C, SIGTERM and `--json`. Components take typed
+`props`, from a `use:` or from `--prop` on the command line, and this repo's
+own tasks and the shared quality gate run through them. Windows
+cross-compiles to a self-contained `.exe` and has been run natively.
 
-Phase 6 — `git`, `download` and `defaults` (spec §6.8–6.10) — is in. The one
-of the three this machine cannot exercise is `defaults`: its compare is unit
-tested against captured `defaults read` output, and a probed run on a mac is
-the owner's.
+The one action this machine cannot exercise is `defaults`: its compare is
+unit tested against captured `defaults read` output, and a probed run on a
+mac is the owner's.
 
 The dotfiles are migrated: all five machine plans validate under `--strict`,
 and the probed plan for this machine reads
@@ -271,13 +275,32 @@ failed. Anything that is not `ok` or `skipped` counts as something to do,
 `unknown` and `would run (unprobed)` included: a step provision cannot judge is
 not a step it may call converged, and `validate --strict` is how that count is
 driven to zero. `--plan-no-probe` inspects nothing, so it claims nothing, and
-exits 0.
+exits 0. A run stopped from outside exits `128 + signal` — 130 for Ctrl-C, 143
+for SIGTERM — and one that runs out of its `--deadline` exits 124.
+
+A plan is written for one machine and can say so. `examples/x1.yml` guards
+its own hostname with an `assert` tagged `always`, so on one of the machines
+it refuses, it refuses before touching anything:
 
 ```
-$ provision apply examples/x1.yml
+$ provision apply examples/x1.yml        # run on mainpc
   examples/x1.yml
   ✗ Refuse to run on the wrong machine               FAILED  0ms
     │ (exit 1 · hostname mainpc belongs to another machine)
 
   examples/x1.yml · 1 step · 1 failed · 1ms
+```
+
+That example is an Arch laptop's, it illustrates every construct in the spec
+once, and it is written to be **read rather than applied** — its second step
+edits `/etc/pacman.conf`. The two commands that exercise it on any machine
+without touching one are the ones that run nothing:
+
+```
+$ provision validate examples/x1.yml
+  ok  examples/x1.yml
+
+$ provision plan --plan-no-probe examples/x1.yml
+  ...
+  examples/x1.yml · 19 steps · 16 would run (unprobed) · 3 skipped · 3ms
 ```
