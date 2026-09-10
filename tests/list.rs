@@ -58,6 +58,54 @@ fn the_trailing_separator_is_optional_and_changes_nothing() {
     assert_eq!(bare_out, slash_out);
 }
 
+// Spec §10: `provision list tasks/ | head -3` is ordinary use, and it used to
+// exit 101 with a panic and a backtrace — Rust ignores SIGPIPE, so a closed
+// pipe arrives as an EPIPE write error and `println!` panics on it.
+//
+// The pipe buffer is what makes the naive version of this test a coin flip: a
+// short listing is written in one go and lands in the buffer before `head`
+// ever exits, so nothing fails. This generates a listing far larger than the
+// buffer, which makes provision block mid-write with the reader already gone —
+// the one arrangement where EPIPE is certain.
+//
+// `set -o pipefail` is load-bearing too. Without it the pipeline reports
+// `head`'s status, which is 0 whatever provision did.
+#[test]
+fn a_closed_stdout_is_not_an_error() {
+    let dir = tempfile::tempdir().unwrap();
+    // ~600 bytes of description each, 400 files: comfortably past the 64 KiB
+    // a pipe holds on both Linux and macOS.
+    let filler = "x".repeat(600);
+    for i in 0..400 {
+        std::fs::write(
+            dir.path().join(format!("task{i:03}.yml")),
+            format!("description: {filler}\nsteps: []\n"),
+        )
+        .unwrap();
+    }
+
+    let script = format!(
+        "set -o pipefail; '{}' list '{}' | head -3 >/dev/null",
+        env!("CARGO_BIN_EXE_provision"),
+        dir.path().display()
+    );
+    let out = Command::new("bash")
+        .args(["-c", &script])
+        .output()
+        .expect("bash failed to start");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+
+    assert!(
+        !stderr.contains("panicked"),
+        "list panicked when its reader went away:\n{stderr}"
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "the reader asking for less is not an error:\n{stderr}"
+    );
+}
+
 #[test]
 fn listing_a_path_that_is_not_there_is_a_usage_error() {
     let dir = format!("{}/", listing_dir().join("nosuch").display());
