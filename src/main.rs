@@ -286,7 +286,10 @@ fn run() -> Result<u8, Diag> {
             let f = facts::Facts::detect();
             if json {
                 let m: std::collections::BTreeMap<_, _> = f.iter().collect();
-                println!("{}", serde_json::to_string_pretty(&m).unwrap_or_default());
+                output::line(format_args!(
+                    "{}",
+                    serde_json::to_string_pretty(&m).unwrap_or_default()
+                ));
             } else {
                 for (k, v) in f.iter() {
                     // Jinja2 renders booleans Python-style (`True`). Facts are
@@ -296,7 +299,7 @@ fn run() -> Result<u8, Diag> {
                     } else {
                         v.to_string()
                     };
-                    println!("{k:<20} {shown}");
+                    output::line(format_args!("{k:<20} {shown}"));
                 }
             }
             Ok(EXIT_OK)
@@ -318,7 +321,7 @@ fn run() -> Result<u8, Diag> {
             walk_root(&mut ex, &plan, &props)?;
             let base = cwd();
             if ex.diags.is_empty() {
-                println!("  ok  {}", rel(&plan, &base));
+                output::line(format_args!("  ok  {}", rel(&plan, &base)));
                 return Ok(EXIT_OK);
             }
             report(&ex, &base, Some(&plan));
@@ -558,13 +561,13 @@ fn describe_component(path: &Path) -> Result<u8, Diag> {
     let component = config::load::parse_component(doc)?;
     let stem = path.file_stem().unwrap_or_default().to_string_lossy();
     let description = component.description.unwrap_or_default();
-    println!("  {stem:<24}  {description}");
+    output::line(format_args!("  {stem:<24}  {description}"));
 
     if component.props.is_empty() {
-        println!("\n  no props");
+        output::line(format_args!("\n  no props"));
         return Ok(EXIT_OK);
     }
-    println!("\n  props:");
+    output::line(format_args!("\n  props:"));
     for p in &component.props {
         // `required` and a default are mutually exclusive — `parse_component`
         // rejects a prop carrying both — so this is a choice, never a join.
@@ -576,9 +579,12 @@ fn describe_component(path: &Path) -> Result<u8, Diag> {
             None => "optional".to_string(),
         };
         let name = &p.name;
-        println!("    {name:<22}  {:<6}  {requirement}", p.ty.name());
+        output::line(format_args!(
+            "    {name:<22}  {:<6}  {requirement}",
+            p.ty.name()
+        ));
         if let Some(d) = &p.description {
-            println!("    {:<22}  {d}", "");
+            output::line(format_args!("    {:<22}  {d}", ""));
         }
     }
     Ok(EXIT_OK)
@@ -607,7 +613,7 @@ fn list_tasks(dir: &Path, base: &Path) -> Result<u8, Diag> {
     files.sort_by(|a, b| a.file_stem().cmp(&b.file_stem()));
 
     if files.is_empty() {
-        println!("  no tasks in {}", rel(dir, base));
+        output::line(format_args!("  no tasks in {}", rel(dir, base)));
         return Ok(EXIT_OK);
     }
     for path in &files {
@@ -619,7 +625,7 @@ fn list_tasks(dir: &Path, base: &Path) -> Result<u8, Diag> {
             Ok(c) => c.description.unwrap_or_default(),
             Err(_) => "(not a component)".to_string(),
         };
-        println!("  {stem:<24}  {note}");
+        output::line(format_args!("  {stem:<24}  {note}"));
     }
     Ok(EXIT_OK)
 }
