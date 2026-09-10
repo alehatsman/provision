@@ -1,0 +1,9 @@
+---
+# The other side of the clamp (spec §8): the step's own `timeout` is the
+# smaller of the two, so this is an ordinary step timeout and has to read like
+# one. A run where every timeout blamed the deadline would make `--deadline`
+# unusable on any plan that sets its own.
+- name: Its own timeout is the smaller one
+  shell: sleep 30
+  timeout: 1s
+  changed_when: "false"

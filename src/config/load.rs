@@ -124,6 +124,11 @@ pub(crate) struct PropSchema {
     pub ty: PropType,
     pub required: bool,
     pub default: Option<N<'static>>,
+    /// Spec §3.2. Accepted since props existed and read by nothing until
+    /// `list <component.yml>` (§8) — which is that command's whole point: a
+    /// declared interface nobody could print is one nobody outside the file
+    /// could use.
+    pub description: Option<String>,
     pub at: N<'static>,
 }
 
@@ -194,11 +199,16 @@ pub(crate) fn parse_component(doc: &'static Doc) -> Result<Component> {
                     .err(format!("prop `{name}` is both required and has a default"))
                     .with_note("a default makes it optional; drop one"));
             }
+            let description = match schema.get("description") {
+                Some(n) => Some(n.as_scalar_string()?),
+                None => None,
+            };
             props.push(PropSchema {
                 name: name.to_string(),
                 ty,
                 required,
                 default,
+                description,
                 at: name_at,
             });
         }

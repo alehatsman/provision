@@ -33,6 +33,10 @@ pub(crate) struct Prepared {
     pub timeout: Duration,
     pub retry: Option<Retry>,
     pub has_changed_when: bool,
+    /// Spec §8: `timeout` above is the run's remaining `--deadline` rather
+    /// than anything the file asked for, because the deadline was the smaller
+    /// of the two. Only the wording of a timeout message depends on it.
+    pub deadline_bound: bool,
 }
 
 impl Prepared {
@@ -40,6 +44,19 @@ impl Prepared {
     /// changing means. Without a gate the honest answer is `unknown`.
     fn gated(&self) -> bool {
         self.unless.is_some() || self.creates.is_some() || self.has_changed_when
+    }
+
+    /// What to call a timeout, which depends on whose clock ran out (spec §8).
+    /// Naming a step timeout the file does not contain would send a reader
+    /// hunting for a number nobody wrote, and §4's per-step number earns its
+    /// keep precisely because it can be found.
+    fn timed_out(&self) -> String {
+        let d = crate::output::event::human(self.timeout);
+        if self.deadline_bound {
+            format!("deadline exceeded after {d}")
+        } else {
+            format!("timed out after {d}")
+        }
     }
 }
 
@@ -267,7 +284,7 @@ impl Runner {
         let status = match out.how {
             How::Interrupted => Status::Failed(interrupted()),
             How::TimedOut => Status::Failed(Failure {
-                msg: format!("timed out after {}", crate::output::event::human(p.timeout)),
+                msg: p.timed_out(),
                 rc: None,
                 stderr: out.stderr.clone(),
                 interrupted: false,
@@ -482,8 +499,8 @@ impl Runner {
                 How::TimedOut => {
                     return Err(Stop::Fail(Failure {
                         msg: format!(
-                            "`unless` timed out after {}: {}",
-                            crate::output::event::human(p.timeout),
+                            "`unless` {}: {}",
+                            p.timed_out(),
                             cmd.lines().next().unwrap_or("")
                         ),
                         rc: None,
@@ -517,6 +534,7 @@ fn gate_context(p: &Prepared) -> Prepared {
         timeout: p.timeout,
         retry: None,
         has_changed_when: false,
+        deadline_bound: p.deadline_bound,
     }
 }
 

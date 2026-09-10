@@ -779,6 +779,126 @@ fn keep_going_does_not_carry_the_run_past_ctrl_c() {
     );
 }
 
+// Spec §10, D19. The exit code is the least of it: before the handler existed
+// provision died where it stood, so the assertions that matter are that a
+// summary was printed at all and that the step's *grandchild* is gone.
+//
+// `orphan.txt` is the second one. The fixture backgrounds an `sh` that writes
+// it two seconds in; a killed process group never lets it, and an orphaned one
+// writes it well after provision has exited — which is exactly the failure a
+// correct-looking exit code would otherwise hide. 143 is `128 + SIGTERM`, and
+// the shell reports the same number for a process killed *without* a handler,
+// so the code alone cannot tell the fix from the bug. The file can.
+#[test]
+fn sigterm_kills_the_whole_step_group_and_exits_143() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture("terminate.yml");
+    let child = Command::new(env!("CARGO_BIN_EXE_provision"))
+        .args(["apply", path.to_str().expect("fixture paths are UTF-8")])
+        .env("PROVISION_SCRATCH", dir.path())
+        .env("NO_COLOR", "1")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("provision failed to start");
+
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the child's own output is the assertion"
+    )]
+    let _ = Command::new("kill")
+        .args(["-TERM", &child.id().to_string()])
+        .status();
+
+    let out = child.wait_with_output().expect("child was spawned");
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+
+    assert_eq!(out.status.code(), Some(143), "{text}");
+    assert!(
+        text.contains("interrupted"),
+        "the summary is still printed:\n{text}"
+    );
+    assert!(
+        !text.contains("Must not run after a TERM"),
+        "kept going past the TERM:\n{text}"
+    );
+
+    // Past the moment the backgrounded writer would have fired.
+    std::thread::sleep(std::time::Duration::from_millis(2500));
+    assert!(
+        !dir.path().join("orphan.txt").exists(),
+        "the step's process group outlived the run:\n{text}"
+    );
+}
+
+// Spec §8: `--deadline` bounds the whole run, and a step's own `timeout` is
+// clamped to what is left of it — without the clamp a one-second deadline on a
+// step taking the ten-minute default is a one-second promise and a ten-minute
+// run. The message names the run's clock rather than a step timeout the file
+// does not contain, which is the difference between a reader finding the
+// number and hunting for one nobody wrote.
+#[test]
+fn a_deadline_stops_the_run_and_exits_124() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(dir.path(), "deadline.yml", &["--deadline", "1s"]);
+    assert_eq!(code, 124, "{out}");
+    assert!(out.contains("deadline exceeded"), "{out}");
+    assert!(
+        !out.contains("Must not run after the deadline"),
+        "the walk did not stop:\n{out}"
+    );
+}
+
+// The other side of the clamp. A run where every timeout blamed the deadline
+// would make `--deadline` unusable on any plan that sets its own, so a step
+// whose `timeout` is the smaller number reads as the ordinary step timeout it
+// is — and exits 1, not 124, because the clock is not why the run ended.
+#[test]
+fn a_steps_own_timeout_wins_when_it_is_the_smaller() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(
+        dir.path(),
+        "deadline_step_timeout.yml",
+        &["--deadline", "5m"],
+    );
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("timed out after"), "{out}");
+    assert!(
+        !out.contains("deadline exceeded"),
+        "blamed the deadline for a step timeout:\n{out}"
+    );
+}
+
+// Spec §8: `--keep-going` is about a step failing, not about the run's clock
+// running out. It carries on past the first and never past the second.
+#[test]
+fn keep_going_does_not_carry_the_run_past_the_deadline() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(
+        dir.path(),
+        "deadline.yml",
+        &["--deadline", "1s", "--keep-going"],
+    );
+    assert_eq!(code, 124, "{out}");
+    assert!(
+        !out.contains("Must not run after the deadline"),
+        "--keep-going walked past the deadline:\n{out}"
+    );
+}
+
+// §4's grammar through §4's parser, reported before anything is walked. A
+// `--deadline 5m` that meant something other than a step's `timeout: 5m` would
+// be a trap laid for the one reader who noticed.
+#[test]
+fn a_deadline_that_is_not_a_duration_is_a_usage_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(dir.path(), "deadline.yml", &["--deadline", "soon"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("is not a duration"), "{out}");
+}
+
 #[test]
 fn ctrl_c_kills_the_step_and_exits_130() {
     let dir = tempfile::tempdir().unwrap();

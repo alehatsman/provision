@@ -59,9 +59,53 @@ fn the_trailing_separator_is_optional_and_changes_nothing() {
 }
 
 #[test]
-fn listing_a_directory_that_is_not_there_is_a_usage_error() {
+fn listing_a_path_that_is_not_there_is_a_usage_error() {
     let dir = format!("{}/", listing_dir().join("nosuch").display());
     let (code, out) = run(&["list", &dir]);
     assert_eq!(code, EXIT_VALIDATION, "{out}");
-    assert!(out.contains("no such directory"), "{out}");
+    // "no such directory" until the argument could also be a file. The verb
+    // takes both now, so the message names both.
+    assert!(out.contains("no such file or directory"), "{out}");
+}
+
+// Spec §8: the directory form says what can be run here, the file form says
+// what one of them takes. `deploy.yml` carries one prop of each shape.
+//
+// The assertion that earns this snapshot is `dest`: its default is
+// `{{ home }}/out` in the file, and §3.2 says a default is data and is never
+// rendered — so the listing has to print the braces. A listing that rendered
+// it would show this machine's home directory, which is both wrong and, in a
+// snapshot, wrong differently on every machine.
+#[test]
+fn a_component_file_lists_its_props() {
+    let path = listing_dir().join("deploy.yml");
+    let (code, out) = run(&["list", path.to_str().expect("fixture paths are UTF-8")]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("{{ home }}/out"),
+        "a default was rendered:\n{out}"
+    );
+    insta::assert_snapshot!("component", out);
+}
+
+// An empty column would read as "props it did not bother to name". Saying it
+// out loud is the difference between a component with no inputs and a listing
+// that failed to find them.
+#[test]
+fn a_component_with_no_props_says_so() {
+    let path = listing_dir().join("undescribed.yml");
+    let (code, out) = run(&["list", path.to_str().expect("fixture paths are UTF-8")]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("no props"), "{out}");
+}
+
+// Spec §8: a plan declares no props, and `--prop` on one is already a usage
+// error. Asking a plan for its interface is that same mistake and gets that
+// same answer, rather than an empty listing implying it simply has none.
+#[test]
+fn listing_a_plan_is_a_usage_error() {
+    let path = listing_dir().join("a_plan.yml");
+    let (code, out) = run(&["list", path.to_str().expect("fixture paths are UTF-8")]);
+    assert_eq!(code, EXIT_VALIDATION, "{out}");
+    assert!(out.contains("is a plan, not a component"), "{out}");
 }

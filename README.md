@@ -75,7 +75,8 @@ The job is small and stable. The tool should be too.
   you already have.
 - **Five commands.** `validate`, `plan`, `apply`, `list`, `facts`. The first
   three take a machine plan or a component; `list <dir>/` names the components
-  in a directory by their `description:`.
+  in a directory by their `description:`, and `list <component.yml>` prints
+  the props one takes.
 - **Output a human reads.** One line per step, live, colored on a TTY, plain
   on a pipe, unified diffs for file changes in plan mode, `--json` for
   machines.
@@ -91,6 +92,45 @@ The job is small and stable. The tool should be too.
   provision.
 - Not a secrets manager. `{{ env.TOKEN }}` and file permissions.
 - Not audited. No run log, no state directory.
+
+## Tasks and CI
+
+One executor, one file format, one meaning per file. A task is a component:
+typed props are its arguments and the filesystem is the registry. `list`
+answers both halves of "what can I run here, and how":
+
+```
+$ provision list tasks/install.yml
+  install                   copy the release binary onto PATH
+
+  props:
+    dest                    string  default: ~/.local/bin/provision
+                            Where the binary lands. `~` expands.
+```
+
+A CI runner gets no per-step entry point. It writes the job to a file and
+runs one process — `provision apply job.yml --json --deadline 30m` — and
+reads every step's status, exit code, captured output, duration and
+`file:line` off stdout as that step finishes. Cancel it with SIGTERM: the
+step's process group dies, the summary is still printed, exit 143.
+`--deadline` bounds the run, so the runner never has to SIGKILL from outside
+and lose the summary it came for.
+
+And because `validate`, `plan` and `apply` are one walk at three depths of
+commitment, the first two are a **pipeline linter** — the thing no other step
+runner in this family ships:
+
+```
+$ provision validate job.yml   # parse, render every template, resolve every
+                               # path. Run nothing.
+$ provision plan job.yml       # ...and say which steps would run.
+```
+
+What stays the runner's: checkout, environment, secret delivery, scheduling,
+log retention. Job facts — commit, branch, PR — arrive as `--var` and are not
+facts. The line is written down in [D19](docs/decisions.md), along with what
+this deliberately does not buy: parallel steps, `use` deduplication, secret
+masking.
 
 ## For Ansible users
 
@@ -125,7 +165,7 @@ The decisions are in [docs/decisions.md](docs/decisions.md).
 | `debug` | none | `--verbose` shows every command's output; `facts` prints the facts |
 | `ansible-vault` | none | decrypt with age or sops outside the plan and read the result with `vars_file` |
 | `ansible-galaxy`, collections | a git checkout at a pinned tag, `use`d by path | no registry, no lockfile (D17) |
-| `ansible-playbook` output | one line per step, live; `--json` one object per line | exit 0/1/2/3: converged, failed, would change, usage |
+| `ansible-playbook` output | one line per step, live; `--json` one object per line | exit 0/1/2/3: converged, failed, would change, usage; 124 deadline, 130/143 stopped |
 
 ## Development
 

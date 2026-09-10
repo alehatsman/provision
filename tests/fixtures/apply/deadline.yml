@@ -1,0 +1,14 @@
+---
+# The run's clock runs out inside the first step (spec §8).
+#
+# No `timeout:` here on purpose: the step takes the ten-minute default, so the
+# only thing that can stop it is `--deadline`, and the clamp is what makes it
+# stop at all. The second step proves the walk stopped rather than merely
+# reporting a failure.
+- name: Sleeps past the deadline
+  shell: sleep 30
+  changed_when: "false"
+
+- name: Must not run after the deadline
+  shell: "true"
+  changed_when: "false"

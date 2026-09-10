@@ -12,14 +12,15 @@ props:
     description: Where the binary lands. `~` expands.
 
 steps:
-  - name: cargo build --release
-    shell: cargo build --release
-    # Spec §6.1: this step's exit code is its whole contract -- there is no
-    # state to inspect and nothing for provision to be unsure about -- so it
-    # says so. A verb cannot make that declaration on a file's behalf (D17,
-    # phase 5b), which is why it is written here.
-    changed_when: "false"
-    timeout: 20m
+  # `use`, not a second copy of `build.yml`'s step. It was a copy -- the same
+  # shell, the same `changed_when`, the same `timeout` and the same four-line
+  # comment -- and plan.md's deferred table watches for exactly that: three
+  # copies of one step is the threshold that reopens the loop question. This
+  # is the answer that does not need loops, because it already exists. A
+  # component with no props is a task's dependency spelled with the one
+  # mechanism provision has for reusing a step list (D17).
+  - name: build
+    use: ./build.yml
 
   - name: Ensure the destination directory exists
     file:

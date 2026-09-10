@@ -11,37 +11,66 @@ use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-/// Set by the SIGINT handler. A handler may only touch async-signal-safe
-/// things, and storing to an atomic is one of them; the killing happens on
-/// the main thread, which is watching this flag.
-static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+/// The signal that stopped this run, or `0`. A handler may only touch
+/// async-signal-safe things, and storing to an atomic is one of them; the
+/// killing happens on the main thread, which is watching this.
+///
+/// The number rather than a bool because the exit code is `128 + it` (spec
+/// §8), and 130 against 143 is the difference between "the operator pressed
+/// Ctrl-C" and "the runner cancelled the job" — which is the first question
+/// anyone asks of a job that stopped.
+static STOP_SIGNAL: AtomicI32 = AtomicI32::new(0);
 
 pub(crate) fn interrupted() -> bool {
-    INTERRUPTED.load(Ordering::SeqCst)
+    STOP_SIGNAL.load(Ordering::SeqCst) != 0
 }
 
-/// Install the Ctrl-C handler. Idempotent; safe to call from `main` only.
+/// The shell's `128 + signal`. `130` when nothing was recorded: Windows
+/// installs no handler, so a stop there has no signal number to report and
+/// Ctrl-C is the only way one arrives.
+pub(crate) fn stop_code() -> u8 {
+    let sig = STOP_SIGNAL.load(Ordering::SeqCst);
+    u8::try_from(sig)
+        .ok()
+        .filter(|s| *s != 0)
+        .map_or(130, |s| 128_u8.saturating_add(s))
+}
+
+/// Install the stop handlers. Idempotent; safe to call from `main` only.
 pub(crate) fn catch_interrupts() {
-    // SAFETY: `on_sigint` is an `extern "C"` function that only stores into
-    // an `AtomicBool`, which is async-signal-safe. Installing a handler is
-    // sound as long as the handler itself is, and this one does nothing
-    // else. Called from `main` before any thread is spawned.
-    //
     // The expectation sits on the block rather than the function so that it
     // is compiled away with the block: on Windows there is no unsafe code
     // here to expect, and a function-level `#[expect]` was firing
     // `unfulfilled_lint_expectations` on that target.
     #[cfg(unix)]
     #[expect(unsafe_code, reason = "libc::signal has no safe equivalent in std")]
-    unsafe {
-        extern "C" fn on_sigint(_: libc::c_int) {
-            INTERRUPTED.store(true, Ordering::SeqCst);
+    {
+        extern "C" fn on_stop(sig: libc::c_int) {
+            STOP_SIGNAL.store(sig, Ordering::SeqCst);
         }
-        libc::signal(libc::SIGINT, on_sigint as *const () as libc::sighandler_t);
+        let handler = on_stop as *const () as libc::sighandler_t;
+
+        // SAFETY: `on_stop` is an `extern "C"` function that only stores into
+        // an `AtomicI32`, which is async-signal-safe. Installing a handler is
+        // sound as long as the handler itself is, and this one does nothing
+        // else. Called from `main` before any thread is spawned.
+        unsafe {
+            libc::signal(libc::SIGINT, handler);
+        }
+        // SAFETY: as above — the same handler, the same argument shapes.
+        //
+        // Spec §10 and D19: a CI runner cancelling a job sends TERM, and so
+        // does systemd stopping a unit. Without this, provision dies where it
+        // stands and the step's process group outlives it — which defeats the
+        // whole reason every child gets a group of its own, three lines up in
+        // this file's own header.
+        unsafe {
+            libc::signal(libc::SIGTERM, handler);
+        }
     }
 }
 
@@ -152,9 +181,12 @@ fn run_raw(s: &Spawn<'_>) -> std::io::Result<Raw> {
     let rc = match how {
         How::Exited => exit_code(&mut child),
         // A killed child has no exit status worth reporting. 124 is what
-        // timeout(1) uses; 130 is the shell's convention for SIGINT.
+        // timeout(1) uses; the other is the shell's `128 + signal`, so a step
+        // killed because the runner cancelled the job reports 143 and one
+        // killed by Ctrl-C reports 130 — the same number the run itself exits
+        // with, rather than a second convention for the same event.
         How::TimedOut => 124,
-        How::Interrupted => 130,
+        How::Interrupted => i32::from(stop_code()),
     };
 
     Ok(Raw {

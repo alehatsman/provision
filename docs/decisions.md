@@ -454,3 +454,55 @@ fails before it writes anything.
 against them — then the rule can name the producing step instead of any
 command at all. Not worth building for `shell`, which would still declare
 nothing.
+
+## D19 — provision owns one job's clock and its own death; the runner owns the rest
+
+**Decision.** As a CI execution engine provision takes on exactly three
+obligations beyond what it already had: die cleanly when told to (SIGTERM,
+exit 143), bound the whole walk when asked to (`--deadline`, exit 124), and
+say what a component takes (`list <component.yml>`). Nothing else moves in
+from the runner's side of the line.
+
+The line, written down so it can be pointed at:
+
+| moongit owns | provision owns |
+|---|---|
+| checkout, environment, secret delivery | one job, one process, one machine |
+| scheduling, queueing, concurrency across jobs | ordering, fail-fast, timeouts, the interrupt |
+| log storage, retention, UI | the `--json` stream, one object per step |
+| cancellation policy | dying cleanly when cancelled |
+| CI facts — commit, branch, PR — passed as `--var` | machine facts only (§5) |
+
+**Why.** D17 settled that provisioning, tasks and CI share one executor, and
+reading provision as moongit's runner then found three things the fleet never
+would. SIGTERM was unhandled — `exec/process.rs` caught SIGINT only, so a
+cancelled job killed provision where it stood and orphaned the step's process
+group, defeating the whole reason every child gets its own group. `timeout`
+bounds a step and nothing bounded a run, so a twenty-step job had a
+three-hour worst case and the runner's only recourse was a SIGKILL from
+outside, which loses the summary event that is the thing it came for. And
+`list <dir>/` said what could be run without saying what any of it took,
+which is fine for the author and useless for a caller.
+
+Each is a flag or a signal handler. None is a new noun. That is the test this
+decision exists to impose: **the noun budget is closed** — plan, component,
+step, fact, and no fifth. A CI request that cannot be spelled as a step
+modifier, an action, or a flag on the existing five verbs belongs in moongit.
+`job`, `pipeline`, `stage`, `matrix`, `artifact`, `cache` and `needs:` are
+all fifth nouns, and each one is the road back to mooncake.
+
+**What this deliberately does not buy.** Parallel steps: sequential execution
+is a semantic guarantee — `register` chaining and "step N+1 sees step N's
+effects" both rest on it — and a runner that wants concurrency splits the job
+into two `provision apply` invocations. `use` deduplication: running a
+component twice is a performance question, not a correctness one, the fix
+would be a graph, and a graph is `needs:`. Secret masking: provision prints
+what a step printed, and a promise to redact that cannot survive a step
+base64-ing a token is worse than no promise — the runner masks at the
+log-write boundary, where it knows what the secrets are. Spec §6.3's
+"secrets are the operator's problem" is unchanged and is still the position.
+
+**Overturned by.** Parallelism, when a real gate's wall time is dominated by
+independent steps *and* splitting it runner-side is measured worse. Masking,
+when a real secret reaches a real log through provision and the runner could
+not have caught it. Neither has happened.

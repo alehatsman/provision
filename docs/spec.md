@@ -25,7 +25,8 @@ and a dry-run a person can trust.
 - Facts about the local machine.
 - Four commands: `validate`, `plan`, `apply`, `list`. The first three take
   a plan or a component as the root; a component's props come from `--prop`
-  (§8, D17). `list` names the components in a directory.
+  (§8, D17). `list` names the components in a directory, or describes one
+  component's props.
 - TTY and non-TTY output, `--json` event stream.
 
 **Out** (see README non-goals and decisions.md)
@@ -736,15 +737,16 @@ defaults:
 
 ```
 provision validate <file.yml> [--strict] [--prop k=v]... [--var k=v]... [--vars-file f]...
-provision plan     <file.yml> [--prop k=v]... [--tags t,u] [--skip-tags t] [--var k=v]... [--vars-file f]... [--plan-no-probe] [--no-diff] [--json] [--hide-skipped] [--color when]
+provision plan     <file.yml> [--prop k=v]... [--tags t,u] [--skip-tags t] [--var k=v]... [--vars-file f]... [--plan-no-probe] [--no-diff] [--json] [--hide-skipped] [--color when] [--deadline 30m]
 provision apply    <file.yml> [same as plan] [--ask-sudo-pass] [--verbose] [--stream] [--keep-going]
-provision list     <dir>/
+provision list     <dir>/ | <component.yml>
 provision facts    [--json]
 provision --version
 ```
 
-`--hide-skipped` and `--color` are shared by `plan` and `apply`, not
-`apply`-only: a plan is the output most worth quieting. There is no
+`--hide-skipped`, `--color` and `--deadline` are shared by `plan` and `apply`,
+not `apply`-only: a plan is the output most worth quieting, and a plan runs
+gates, so it has a wall clock worth bounding too. There is no
 `provision version` subcommand — the flag is the whole of it.
 
 - `validate`: parse, schema, template syntax, prop schemas, file existence
@@ -792,6 +794,27 @@ provision --version
   them. It earns its keep on a bare machine, where the point of the first
   run is the list.
 
+- `--deadline <duration>` (`plan` and `apply`): a wall clock for the whole
+  walk. `timeout` (§4) bounds one step, and twenty steps of ten minutes is
+  three hours; a CI runner needs a bound it can state in advance on the run
+  itself (D19).
+
+  Two effects, and no third. Before each step, a clock that has run out stops
+  the walk — the step does not run, and neither does anything after it, the
+  same stop the first failure makes. And each step's effective `timeout` is
+  the lesser of its own and the time left, so no step can run past the
+  deadline it was admitted under. A step killed that way fails with
+  `deadline exceeded after N`, naming the run's clock rather than a step
+  timeout that is not in the file: the whole point of §4's per-step number is
+  that a reader can find it, and a message pointing at one that was never
+  written would send them hunting.
+
+  The summary prints `deadline exceeded` and the run exits **124**, which is
+  `timeout(1)`'s code and already what a killed child reports internally.
+  `--keep-going` does not override it, for the reason it does not override
+  Ctrl-C: the clock running out is not a step saying it could not do its
+  work. `validate` takes no deadline — it runs nothing.
+
 - **The root file** (D17, phase 5b): every one of `validate`, `plan` and
   `apply` takes a plan or a component. A file whose root is a sequence is a
   plan; one whose root is a mapping is a component — the distinction both
@@ -837,6 +860,26 @@ provision --version
   required only while the listing shared a verb with something else. This is
   the task runner's "what can I run here", and the only thing `list` does.
 
+- `list <component.yml>`: the other half of that question — what one takes.
+  The component's `description`, then its props, one line each: the name,
+  the type, and either `required` or the default **as written** (§3.2: a
+  default is data in the file and is never rendered, so the listing prints
+  the four braces if that is what is there). A prop's own `description`
+  follows on its own indented line, because descriptions are sentences. A
+  component with no props says so.
+
+  Nothing below the root keys is parsed and nothing runs, exactly as the
+  directory form promises. Exit 0; exit 3 when the path is not there, when
+  the file will not load, or when its root is a **plan** — a plan declares
+  no props, `--prop` on one is already a usage error below, and asking one
+  for its props is that same mistake and gets that same answer.
+
+  This is `list` doing one thing at two granularities, not a second verb: it
+  answers "what can I run, and how", and the directory form answered only
+  the first half. Before it, the only way to learn a task's arguments was to
+  open the file — which is fine for the author and useless for everyone
+  else, including a runner.
+
 - **A CI runner** wanting one result per step does not get a per-step entry
   point. It writes the job's steps to a file and runs one process,
   `provision apply job.yml --json`: the stream carries every step's status,
@@ -844,6 +887,23 @@ provision --version
   (§9.3), and provision owns ordering, fail-fast, timeouts and the
   interrupt. Steps a runner generates from plain command lines carry
   `changed_when: false` so they read `ok` (§6.1).
+
+  The rest of that contract is three things and is fixed by D19. **Cancel**
+  by sending SIGTERM to the process: the current step's process group dies,
+  the summary is still printed, and the exit code is `143`. **Bound** the
+  job with `--deadline`, so the runner does not have to police a clock from
+  outside with a SIGKILL that would lose the summary. And **check the job
+  before spending a machine on it**: `provision validate job.yml` parses it,
+  renders every template and resolves every path while running nothing, and
+  `provision plan job.yml` says which steps would run — the same walk at
+  three depths of commitment (§2), which is a pipeline linter no other step
+  runner in this family ships.
+
+  Everything else stays the runner's: what to check out, what to put in the
+  environment, when to cancel, where the log goes, how long it is kept. Job
+  facts — commit, branch, ref — arrive as `--var`, and are **not** facts
+  (§5): facts are what the machine reports about itself, and a CI variable
+  is not that.
 
 Tag selection (Ansible semantics, deliberately):
 
@@ -864,7 +924,16 @@ Tag selection (Ansible semantics, deliberately):
   or `use` still propagates to the steps inside it, which is the point.
 
 Exit codes: `0` ok / nothing to do · `1` failure · `2` plan found changes ·
-`3` usage or validation error.
+`3` usage or validation error · `124` deadline exceeded · `130` interrupted
+by Ctrl-C · `143` terminated by SIGTERM.
+
+The last three are settled by **precedence**, because more than one can be
+true of a single run: a stop from outside (`130`, `143`) beats the clock
+(`124`), which beats a failed step (`1`), which beats found changes (`2`).
+Read down the list, the rule is "the reason the run ended", and a signal is
+always a better answer than whatever the walk was doing when it arrived.
+`130` and `143` are the shell's `128 + signal`, which is where `130` already
+came from.
 
 `plan` exits 2 when any step is reported `would change`, `would run`,
 `unknown`, or `would run (unprobed)` — anything that is not `ok` or `skipped`.
@@ -941,6 +1010,11 @@ so it is emitted as each step finishes, never batched:
 {"event":"summary","changed":1,"ok":1,"skipped":1,"unknown":0,"failed":0,"duration_ms":1700}
 ```
 
+The summary also carries `interrupted` and `deadline_exceeded`, both always
+present and both booleans. A runner reading only the summary has to be able
+to tell a job that finished from one that was stopped, and an absent key is
+not that answer.
+
 ## 10. Edge cases
 
 | Case | Behavior |
@@ -959,6 +1033,12 @@ so it is emitted as each step finishes, never batched:
 | Non-UTF-8 in stdout | Lossy in both the display and the `register`. Exact bytes were the earlier rule and were dropped: a `register` holding bytes breaks `result.stdout == "yes"`, which is the only thing a register is for |
 | A step is skipped by `when` or by tags | Its `register`, if it declares one, still binds — with `skipped: true`. That field exists precisely so a later `when` can read it rather than fail on an undefined name |
 | Ctrl-C mid-step | Current step killed, summary printed with `interrupted`, exit 130 |
+| SIGTERM mid-step | The same path and the same word, exit **143**. A CI runner cancelling a job sends TERM, and so does systemd stopping a unit; with no handler provision died where it stood and left the step's process group running, which is the one thing the process-group discipline of §10's timeout row exists to prevent. `--keep-going` does not apply, for the reason it does not apply to Ctrl-C (D19) |
+| SIGTERM on Windows | There is none. The handler is installed on unix only, and `130` stays the code for a stop that has no signal number to report |
+| `--deadline` runs out between steps | The walk stops before the next step, which does not run and is not reported. Summary says `deadline exceeded`, exit 124 |
+| `--deadline` runs out during a step | That step's `timeout` was already clamped to the time left, so it is killed on the run's clock and fails with `deadline exceeded after N` rather than naming a step timeout the file does not contain |
+| `--deadline` shorter than a step's own `timeout` | The deadline wins; that is the clamp. The reverse — a step whose `timeout` expires first — is an ordinary step timeout and reads as one |
+| `--deadline` and a step that already failed | Exit 124 only if the clock is why the run ended. A failure with `--keep-going` off stopped the walk first, so that run is exit 1 and the clock never ran out |
 | Windows path in `dest` | Accepted; `~` expands to `%USERPROFILE%` |
 | Two `vars_file` set the same key | Later wins. `--explain-var k` would show the chain — **spec'd, not built**: nothing in the fleet has needed it, and the owner ruled 2026-09-08 to leave it written down rather than build it or cut it |
 | `timeout` and `retry` on one step | The timeout applies per attempt, not to the step |
