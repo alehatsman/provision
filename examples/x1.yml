@@ -23,6 +23,12 @@
 - name: Base packages
   pkg:
     names: [base-devel, git, zsh, tmux, neovim, tailscale]
+    # Named, not inferred. `base-devel` is a pacman group and this plan is an
+    # Arch laptop's, but with no `manager` the host's default is picked — so
+    # reading the plan on a Mac resolves it to brew, and `sudo: true` then
+    # trips "`brew` must not run as root". The step was never portable; only
+    # the diagnostic was.
+    manager: pacman
     # The database refresh the old `Upgrade system` step was doing on the
     # side. The distro upgrade itself is gone: a full upgrade is a choice,
     # not a state (migration.md §2).
