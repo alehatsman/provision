@@ -1,0 +1,17 @@
+# Spec §6.7: `plan` runs asserts, because an assert failing at plan time is
+# the cheapest way to learn the plan is aimed at the wrong machine — and it
+# reports the failure and keeps walking, so the rest of the plan is still on
+# screen. Only `apply` stops at the first failure.
+#
+# The guard fails on every machine, deliberately. `examples/x1.yml` has a real
+# one, but it refuses a list of the author's own hostnames, so it only failed
+# on the author's own hardware — and planning that example probes the running
+# user's home directory to do it.
+- name: Refuse to run on the wrong machine
+  assert:
+    expr: hostname == "not-a-real-hostname"
+    msg: "hostname {{ hostname }} belongs to another machine"
+
+- name: After the guard
+  shell: echo reached
+  unless: "true"
