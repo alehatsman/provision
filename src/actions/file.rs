@@ -152,6 +152,7 @@ pub(crate) fn parse(
     engine: &Engine,
     ctx: &Value,
     raw: bool,
+    defer_src: bool,
 ) -> Result<Option<Spec>> {
     let body = step.body;
     let render = |src: &str| -> Option<String> {
@@ -216,6 +217,14 @@ pub(crate) fn parse(
                     return Ok(None);
                 };
                 let from = crate::config::load::resolve(s.file, &expanduser(&rel));
+                // Spec §6.3, D18: on a walk that runs nothing, a source an
+                // earlier `shell` or `cmd` step has yet to build is unresolved,
+                // not missing. The bytes are the whole reason to parse this
+                // step, so there is no half-parsed spec to hand back — the walk
+                // that executes reads them after that step has run.
+                if defer_src && !from.exists() {
+                    return Ok(None);
+                }
                 match std::fs::read(&from) {
                     Ok(bytes) => content = Some(bytes),
                     Err(e) => {

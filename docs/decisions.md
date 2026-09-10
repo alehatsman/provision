@@ -419,3 +419,38 @@ replaced by this one. "One executor" now also means one meaning per file.
 **Overturned by.** A second consumer that needs something a
 component cannot say — task dependencies, positional arguments, a registry.
 Any of those is the road back to mooncake, and the answer is still no.
+
+## D18 — a `file` src after a command is judged when the step runs
+
+**Decision.** A `file` step's `src` is checked for existence before anything
+runs, as §8 says — unless a `shell` or `cmd` step comes earlier in the same
+walk. Then the check belongs to the walk that executes: `validate` says
+nothing about it, `plan` reports the step `would run (unprobed)`, and `apply`
+reaches it after the command has run and either copies the source or fails
+naming it. Nothing else defers: `import`, `use`, `vars_file` and a `template`
+step's `src` are read by the walk itself and must be there, and a `src` with
+no command before it is missing now and missing later.
+
+**Why.** Build-then-install cannot run from a clean checkout otherwise
+(issue #3). `shell: cargo build --release` followed by a `file` step copying
+the binary out of `target/` is rejected on step two for a path step one
+produces — and it is invisible in any repo that has been built once, which is
+every repo where such a task was written, including this one's own
+`tasks/install.yml`. The rule draws the line where the tool's knowledge
+actually ends: every other step declares what it writes, and `shell` and `cmd`
+are exactly the two that do not, so after one of them provision has no basis
+for calling a path missing. The alternative rules were worse. Asking whether
+some earlier step "could plausibly" create this path is a guess dressed as an
+answer. A per-step escape hatch puts the burden on every author of a shape
+this common. Dropping the check entirely gives up the fail-fast that makes a
+typo in `src` cheap, which is the half of the behaviour worth keeping.
+
+**The cost, stated.** A typo'd `src` in a plan that builds something is now
+caught when the step is reached rather than before the run — after the build
+has already happened. That is the price of not guessing, and the step still
+fails before it writes anything.
+
+**Overturned by.** Steps declaring their outputs well enough to match a `src`
+against them — then the rule can name the producing step instead of any
+command at all. Not worth building for `shell`, which would still declare
+nothing.

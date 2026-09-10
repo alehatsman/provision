@@ -169,11 +169,19 @@ impl Action {
     /// `Ok(None)` means a field would not render. The expander's own sweep has
     /// already reported that, with a position — reporting it again here would
     /// turn one bad `{{ … }}` into two diagnostics.
+    ///
+    /// `defer_src` says a `file` step's `src` may not exist yet: an earlier
+    /// `shell` or `cmd` step in the same plan can create any path, and on a
+    /// walk that runs nothing it has not created it. Such a step parses to
+    /// `Ok(None)` — unresolved rather than broken — and the walk that executes
+    /// passes `false`, so a source that is still missing when the step runs is
+    /// the error it always was (spec §6.3, D18).
     pub(crate) fn parse(
         engine: &Engine,
         step: &Step<'_>,
         ctx: &Value,
         raw: bool,
+        defer_src: bool,
     ) -> Result<Option<Action>> {
         let body = step.body;
         // `raw: true` means the body is not a template (spec §4). It still
@@ -285,7 +293,7 @@ impl Action {
                 }
             }
 
-            "file" => match file::parse(step, engine, ctx, raw)? {
+            "file" => match file::parse(step, engine, ctx, raw, defer_src)? {
                 Some(spec) => Action::File(spec),
                 None => return Ok(None),
             },

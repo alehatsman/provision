@@ -1,0 +1,9 @@
+---
+# Nothing here runs a command, so nothing here can create the source: it is
+# missing before the plan starts and missing after it. D18 defers the check
+# past a `shell` or `cmd` step and nowhere else, so this one still fails fast.
+- name: copy a source that is not there
+  file:
+    path: /tmp/provision-never-written
+    src: ./files/not-here
+    state: file
