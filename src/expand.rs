@@ -92,6 +92,10 @@ pub(crate) struct Expander {
     /// `when` that reads one cannot be trusted — the step is reported
     /// unprobed rather than skipped.
     registers: BTreeSet<String>,
+    /// Set once a `shell` or `cmd` step has been walked. They are the only
+    /// steps whose effects provision cannot describe, so after one of them a
+    /// `file` step's missing `src` may be a path the plan itself builds (D18).
+    walked_a_command: bool,
     stack: Vec<PathBuf>,
     runner: Option<Runner>,
     sink: Box<dyn Sink>,
@@ -116,6 +120,7 @@ impl Expander {
             summary: Summary::default(),
             needs_sudo: false,
             registers: BTreeSet::new(),
+            walked_a_command: false,
             stack: Vec::new(),
             runner: None,
             sink: Box::new(crate::output::Silent),
@@ -691,6 +696,12 @@ impl Expander {
         if step.key == "file" {
             self.check_file_source(step, &ctx);
         }
+        // Set after this step's own check: the rule reads "earlier in the
+        // walk", and a step is not earlier than itself.
+        if matches!(step.key, "shell" | "cmd") {
+            self.walked_a_command = true;
+        }
+        let defer_src = self.defers_file_src();
 
         if step.mods.sudo.is_some_and(|n| n.as_bool().unwrap_or(false)) {
             self.needs_sudo = true;
@@ -710,7 +721,7 @@ impl Expander {
             // the day `pkg` landed, in this repo's own example and in the
             // fleet. §8 promises validate is the subset of plan that runs
             // nothing, not a weaker check.
-            if renderable && let Err(d) = Action::parse(&self.engine, step, &ctx, raw) {
+            if renderable && let Err(d) = Action::parse(&self.engine, step, &ctx, raw, defer_src) {
                 self.diags.push(d);
             }
             // `validate` binds the placeholder so a later `when` that reads
@@ -722,7 +733,7 @@ impl Expander {
         // A step whose fields would not render cannot be run or judged, and
         // the diagnostic already says why.
         let prepared = if renderable {
-            self.prepare(step, &ctx, raw)
+            self.prepare(step, &ctx, raw, defer_src)
         } else {
             None
         };
@@ -800,8 +811,14 @@ impl Expander {
     ///
     /// Renders are silent here on purpose: every node this touches was already
     /// rendered once above, and anything that failed was reported there.
-    fn prepare(&mut self, step: &Step<'static>, ctx: &Value, raw: bool) -> Option<Prepared> {
-        let action = match Action::parse(&self.engine, step, ctx, raw) {
+    fn prepare(
+        &mut self,
+        step: &Step<'static>,
+        ctx: &Value,
+        raw: bool,
+        defer_src: bool,
+    ) -> Option<Prepared> {
+        let action = match Action::parse(&self.engine, step, ctx, raw, defer_src) {
             Ok(Some(a)) => a,
             // A field would not render. The sweep above already said so, with
             // a position; saying it twice is one typo, two diagnostics.
@@ -973,7 +990,21 @@ impl Expander {
         }
     }
 
+    /// D18: whether a `file` step's missing `src` is unresolved rather than
+    /// wrong. True on a walk that runs nothing, once a `shell` or `cmd` step
+    /// has been walked — that step can create any path, and it has not created
+    /// it yet. The walk that executes reaches the `file` step after it has run,
+    /// so it never defers and a missing source is still an error there.
+    fn defers_file_src(&self) -> bool {
+        !self.mode.executes() && self.walked_a_command
+    }
+
+    /// Spec §8: `src` is one of the paths existence is checked for before
+    /// anything runs — unless the plan itself is what puts it there (D18).
     fn check_file_source(&mut self, step: &Step<'static>, ctx: &Value) {
+        if self.defers_file_src() {
+            return;
+        }
         let Some(src_at) = step.body.get("src") else {
             return;
         };

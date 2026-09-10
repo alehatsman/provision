@@ -347,6 +347,16 @@ files provision *reads out of the plan tree* — `src`, `import`, `use`,
 the machine being converged, and resolving one into the dotfiles repo would
 be a surprise nobody asked for.
 
+**A `src` the plan itself builds is judged when the step runs.** `src` must
+exist, and §8 checks that before anything runs — except after a `shell` or
+`cmd` step, which can create any path and has not created it yet on a walk
+that runs nothing. There the check moves to the walk that executes, which
+reaches the `file` step after that command has run: `validate` says nothing
+about the source, `plan` reports the step `would run (unprobed)`, and `apply`
+copies it or fails naming it. Build-then-install is the shape this is for — a
+`shell: cargo build --release` followed by a `file` step copying the binary
+out of `target/` cannot pass a check made on a clean checkout (D18).
+
 `mode` is a **quoted** string. Unquoted, `0644` is a number, and which number
 depends on whether the reader believes it is YAML 1.1 (octal, 420) or YAML
 1.2 (decimal, 644). Neither is what was meant, so an unquoted mode is an
@@ -742,6 +752,12 @@ provision --version
   `pkg` that names no package, a `file` with neither `content` nor `src`, a
   `mode` that is not a quoted octal string. No commands run. `--strict` also
   rejects `shell`/`cmd` steps with no idempotency gate.
+
+  One exception, and only one: a `file` step's `src` after a `shell` or `cmd`
+  step in the same walk. That command can create any path and nothing has run,
+  so a source that is not there yet is unresolved rather than missing, and the
+  check moves to the walk that executes (§6.3, D18). Every other path — and a
+  `src` with no command before it — is checked here.
 
   `validate` is the subset of `plan` that runs nothing, not a weaker check.
   Anything `plan` would reject before touching the machine, `validate`

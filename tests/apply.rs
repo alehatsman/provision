@@ -1057,6 +1057,82 @@ fn every_file_state_applies_twice_changed_then_ok() {
     assert!(second.contains("6 ok"), "{second}");
 }
 
+/// One build-then-copy plan, written into `dir`. The `src` is relative to the
+/// plan file (spec §3) and the command writes it there, which is the shape of
+/// every `install.yml` in the fleet.
+fn build_then_copy_plan(dir: &Path, builds: &str) -> PathBuf {
+    let at = dir.display();
+    let path = dir.join("install.yml");
+    // Written out in full rather than escaped onto one line: the shape of the
+    // plan is what this is testing.
+    let body = format!(
+        r#"---
+- name: build the artefact
+  shell: printf built > {at}/{builds}
+  changed_when: "false"
+- name: copy the artefact into place
+  file:
+    path: {at}/installed
+    src: ./artefact
+    state: file
+    mode: "0755"
+"#
+    );
+    std::fs::write(&path, body).expect("writing a plan into the test's own tempdir");
+    path
+}
+
+#[test]
+fn a_src_the_plan_builds_is_judged_when_the_step_runs_not_before() {
+    // Issue #3, D18. On a clean checkout the source does not exist and cannot,
+    // because the step that creates it has not run — and validation walks the
+    // whole plan before any of it. The plan is not wrong; "missing" was being
+    // decided too early.
+    let dir = tempfile::tempdir().unwrap();
+    let plan = build_then_copy_plan(dir.path(), "artefact");
+    let arg = plan.to_str().expect("tempdir paths are UTF-8");
+
+    let out = run_in(dir.path(), &["validate", arg]);
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "{text}");
+
+    // And the copy is a real `file` step either side of it: changed, then ok.
+    // That reporting is the whole reason to write one rather than a `cp`.
+    let out = run_in(dir.path(), &["apply", arg]);
+    let first =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "{first}");
+    assert_eq!(verdict(&first, "copy the artefact"), "changed", "{first}");
+
+    let installed = dir.path().join("installed");
+    assert_eq!(std::fs::read_to_string(&installed).unwrap(), "built");
+    assert_eq!(mode_of(&installed), 0o755);
+
+    let out = run_in(dir.path(), &["apply", arg]);
+    let second =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "{second}");
+    assert_eq!(verdict(&second, "copy the artefact"), "ok", "{second}");
+}
+
+#[test]
+fn a_src_the_command_did_not_build_still_fails_when_the_step_is_reached() {
+    // The other half of D18: deferring the check is not dropping it. The
+    // command runs, writes something else, and the copy is as wrong as it
+    // always was — reported at the `src` that named it, before it writes.
+    let dir = tempfile::tempdir().unwrap();
+    let plan = build_then_copy_plan(dir.path(), "something-else");
+    let arg = plan.to_str().expect("tempdir paths are UTF-8");
+
+    let out = run_in(dir.path(), &["apply", arg]);
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(3), "{text}");
+    assert!(text.contains("file src not found"), "{text}");
+    assert!(!dir.path().join("installed").exists(), "{text}");
+}
+
 #[test]
 fn a_mode_that_drifts_is_brought_back() {
     let dir = tempfile::tempdir().unwrap();

@@ -201,6 +201,22 @@ fn a_missing_import_says_where_it_looked() {
 }
 
 #[test]
+fn a_file_src_no_step_could_create_still_fails_before_anything_runs() {
+    // Spec §8, D18: the deferral is for a source the plan itself builds. A
+    // plan with no command in it builds nothing, so this is the fail-fast the
+    // deferral must not cost — and it says so twice, once for the source and
+    // once for the bytes, both at the `src` that named it.
+    let (code, out) = validate("missing_file_src.yml");
+    assert_eq!(code, EXIT_VALIDATION, "{out}");
+    assert!(out.contains("file src not found"), "{out}");
+    assert!(
+        out.contains("relative to the file that names them"),
+        "{out}"
+    );
+    assert_positioned(&out);
+}
+
+#[test]
 fn a_child_scope_does_not_leak_back_to_its_parent() {
     let (code, out) = validate("scope_isolation.yml");
     assert_eq!(code, EXIT_VALIDATION, "{out}");
