@@ -8,5 +8,8 @@
     content: "owned by root\n"
     mode: "0440"
     owner: root
-    group: root
+    # By name, because naming a group is the `install -g` path worth covering
+    # — but root's group is `root` on Linux and `wheel` on macOS, so the test
+    # supplies whichever this machine has.
+    group: "{{ env.PROVISION_ROOT_GROUP }}"
   sudo: true

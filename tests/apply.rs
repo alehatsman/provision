@@ -15,6 +15,30 @@
 //! that box joins the loop, this file splits: the platform-neutral half
 //! (parsing, tags, exit codes) loses the gate, and the half that needs a
 //! POSIX filesystem keeps it.
+//!
+//! # A test runs everywhere, or it says what it needs
+//!
+//! There is no third category, and the third category is what kept appearing.
+//! A test that quietly assumes the machine it was written on does not fail
+//! honestly — it passes for its author and fails for everyone else, and the
+//! failure looks like a bug in provision rather than in the test. Found in one
+//! sweep: a rendered `{{ os }}` asserted against the literal `linux`; a guard
+//! that only failed on three hostnames the author owns; `chown root:root`,
+//! where macOS has no `root` group; `stat -c`, which is GNU's; a `pkg` test
+//! that stubbed `dpkg-query` but let `apt-get` resolve from the host's PATH;
+//! and a `defaults` fixture that converged the real preferences of whoever ran
+//! the suite. None was a defect in the tool.
+//!
+//! So: derive the expected value from the same `cfg!` the code uses — see
+//! [`os_fact`] and [`root_group`] — or stub the dependency into the test's own
+//! tempdir, or declare the requirement with `#[ignore = "needs …"]` as the
+//! container tests below do. Reach for `#[ignore]` last: an ignored test is a
+//! test nobody runs. A `cfg` gate is right only when the behaviour under test
+//! genuinely differs by platform, not when the assertion is merely
+//! inconvenient to write portably.
+//!
+//! This is a tool for converging machines that are not each other. Its own
+//! suite running on exactly one kind of machine is how all six got in.
 #![cfg(unix)]
 
 use std::path::{Path, PathBuf};
@@ -52,6 +76,16 @@ fn os_fact() -> &'static str {
         "darwin"
     } else {
         "linux"
+    }
+}
+
+/// Root's group. `root` on Linux, `wheel` on macOS — there is no name that
+/// works on both, so anything naming it has to ask.
+fn root_group() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "wheel"
+    } else {
+        "root"
     }
 }
 
@@ -1199,9 +1233,12 @@ fn a_file_that_cannot_be_read_says_sudo_is_how() {
         let secret = dir.path().join("secret");
         std::fs::write(&secret, "x").unwrap();
         set_mode(&secret, 0o000);
+        // Owner only. `root:root` names a group that does not exist on macOS,
+        // where root's group is `wheel`, and the group is not what this test
+        // is about — an unreadable file is unreadable by its mode.
         assert!(
             Command::new("sudo")
-                .args(["-n", "chown", "root:root", secret.to_str().unwrap()])
+                .args(["-n", "chown", "root", secret.to_str().unwrap()])
                 .status()
                 .is_ok_and(|s| s.success())
         );
@@ -1249,7 +1286,9 @@ fn the_sudo_write_path_stages_outside_the_destination() {
     let root_dir = dir.path().join("etc");
     std::fs::create_dir(&root_dir).unwrap();
     let owned = root_dir.to_str().unwrap().to_string();
-    assert!(sudo(&["chown", "root:root", &owned]) && sudo(&["chmod", "0755", &owned]));
+    // Owner only — `root:root` names a group macOS does not have, and the
+    // mode below is what makes the directory unwritable either way.
+    assert!(sudo(&["chown", "root", &owned]) && sudo(&["chmod", "0755", &owned]));
 
     let run = |extra: &[&str]| {
         let path = fixture("file_sudo.yml");
@@ -1259,6 +1298,9 @@ fn the_sudo_write_path_stages_outside_the_destination() {
             .args(&args)
             .env("PROVISION_SCRATCH", dir.path())
             .env("PROVISION_ROOT_DIR", &owned)
+            // The fixture asks for a group by name, which is the `-g` path
+            // worth covering — but the name is not the same everywhere.
+            .env("PROVISION_ROOT_GROUP", root_group())
             .env("NO_COLOR", "1")
             .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")))
             .output()
@@ -1271,13 +1313,17 @@ fn the_sudo_write_path_stages_outside_the_destination() {
 
     let (code, first) = run(&[]);
     let (code2, second) = run(&[]);
-    let stat = Command::new("sudo")
-        .args([
-            "-n",
-            "stat",
-            "-c%a %U %G",
-            &format!("{owned}/provision.conf"),
-        ])
+    // `stat -c` is GNU's; BSD's is `-f`. The directory is traversable, so
+    // reading the metadata needs no sudo even though the file itself is 0440
+    // and root-owned.
+    let stat_args: &[&str] = if cfg!(target_os = "macos") {
+        &["-f", "%Lp %Su %Sg"]
+    } else {
+        &["-c", "%a %U %G"]
+    };
+    let stat = Command::new("stat")
+        .args(stat_args)
+        .arg(format!("{owned}/provision.conf"))
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_default();
@@ -1288,7 +1334,11 @@ fn the_sudo_write_path_stages_outside_the_destination() {
         line_for(&first, "root-owned config").contains("changed"),
         "{first}"
     );
-    assert_eq!(stat, "440 root root", "install did not land the metadata");
+    assert_eq!(
+        stat,
+        format!("440 root {}", root_group()),
+        "install did not land the metadata"
+    );
     assert_eq!(code2, 0, "{second}");
     assert!(
         !second.contains("changed"),
@@ -2068,6 +2118,12 @@ fn parse_dpkg_keeps_only_the_install_ok_installed_stanza() {
     let bin = dir.path().join("bin");
     std::fs::create_dir(&bin).unwrap();
     fake_manager(&bin, "dpkg-query", &cat_fixture("dpkg_query.txt"));
+    // The apt manager checks for `apt-get` before it queries `dpkg-query`,
+    // and `pkg_plan_with_path` prepends this directory to the real PATH
+    // rather than replacing it — so without a stub here the test read the
+    // host's apt, passed on Debian, and failed everywhere else. Nothing runs
+    // it: `plan` only ever queries.
+    fake_manager(&bin, "apt-get", "exit 0");
 
     let (code, out) = pkg_plan_with_path(
         dir.path(),
