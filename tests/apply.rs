@@ -779,6 +779,60 @@ fn keep_going_does_not_carry_the_run_past_ctrl_c() {
     );
 }
 
+// Spec §10, D19. The exit code is the least of it: before the handler existed
+// provision died where it stood, so the assertions that matter are that a
+// summary was printed at all and that the step's *grandchild* is gone.
+//
+// `orphan.txt` is the second one. The fixture backgrounds an `sh` that writes
+// it two seconds in; a killed process group never lets it, and an orphaned one
+// writes it well after provision has exited — which is exactly the failure a
+// correct-looking exit code would otherwise hide. 143 is `128 + SIGTERM`, and
+// the shell reports the same number for a process killed *without* a handler,
+// so the code alone cannot tell the fix from the bug. The file can.
+#[test]
+fn sigterm_kills_the_whole_step_group_and_exits_143() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture("terminate.yml");
+    let child = Command::new(env!("CARGO_BIN_EXE_provision"))
+        .args(["apply", path.to_str().expect("fixture paths are UTF-8")])
+        .env("PROVISION_SCRATCH", dir.path())
+        .env("NO_COLOR", "1")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("provision failed to start");
+
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the child's own output is the assertion"
+    )]
+    let _ = Command::new("kill")
+        .args(["-TERM", &child.id().to_string()])
+        .status();
+
+    let out = child.wait_with_output().expect("child was spawned");
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+
+    assert_eq!(out.status.code(), Some(143), "{text}");
+    assert!(
+        text.contains("interrupted"),
+        "the summary is still printed:\n{text}"
+    );
+    assert!(
+        !text.contains("Must not run after a TERM"),
+        "kept going past the TERM:\n{text}"
+    );
+
+    // Past the moment the backgrounded writer would have fired.
+    std::thread::sleep(std::time::Duration::from_millis(2500));
+    assert!(
+        !dir.path().join("orphan.txt").exists(),
+        "the step's process group outlived the run:\n{text}"
+    );
+}
+
 // Spec §8: `--deadline` bounds the whole run, and a step's own `timeout` is
 // clamped to what is left of it — without the clamp a one-second deadline on a
 // step taking the ten-minute default is a one-second promise and a ten-minute

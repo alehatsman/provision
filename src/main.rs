@@ -35,10 +35,11 @@ const EXIT_FAILED: u8 = 1;
 /// "plan found changes", which is why it is not an error (D15).
 const EXIT_CHANGES: u8 = 2;
 const EXIT_USAGE: u8 = 3;
-/// `timeout(1)`'s code, for `--deadline` (D19).
+/// `timeout(1)`'s code, for `--deadline` (D19). The code for a stop from
+/// *outside* is not a constant: it is `128 + signal`, from
+/// `exec::process::stop_code()`, because 130 and 143 are the difference
+/// between Ctrl-C and a runner cancelling the job.
 const EXIT_DEADLINE: u8 = 124;
-/// The shell's convention for a process ended by SIGINT.
-const EXIT_INTERRUPTED: u8 = 130;
 
 #[derive(Parser)]
 #[command(
@@ -440,7 +441,7 @@ fn run() -> Result<u8, Diag> {
             // reason the run ended", and a signal is always a better answer
             // than whatever the walk was doing when it arrived.
             if ex.summary.interrupted {
-                return Ok(EXIT_INTERRUPTED);
+                return Ok(exec::process::stop_code());
             }
             if ex.summary.deadline_exceeded {
                 return Ok(EXIT_DEADLINE);

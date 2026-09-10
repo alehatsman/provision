@@ -1,0 +1,19 @@
+---
+# SIGTERM lands on the first step (spec §10, D19).
+#
+# The background `sh` is the whole point of the fixture. Killing the step's
+# direct child is easy and was never the bug; what a process group buys is
+# that the child's *own* children die too, and before the TERM handler existed
+# provision was killed outright and left both of them running. So the
+# grandchild is given two seconds and a file to write: if the group was killed
+# the file never appears, and no assertion about exit codes can be fooled by a
+# process that outlived the run.
+- name: Sleeps until something stops it
+  shell: |
+    sh -c 'sleep 2; echo orphan > "$PROVISION_SCRATCH/orphan.txt"' &
+    sleep 30
+  changed_when: "false"
+
+- name: Must not run after a TERM
+  shell: "true"
+  changed_when: "false"
