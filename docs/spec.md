@@ -302,8 +302,21 @@ shell:                         # long form
   real moongit job file does not exist yet — the runner has not switched
   (plan.md). Count the lines in a real job, then decide. Three uses in
   `tasks/` is not the case. See plan.md "Deferred".
-- Streaming: stdout/stderr captured; shown in full on failure, on
-  `--verbose`, or streamed live with `--stream`.
+- Streaming: stdout/stderr captured. On failure **both** are shown, stdout
+  first, each tailed to its own last 20 lines; `--verbose` shows both in
+  full, on a failure and on a step that worked alike; `--stream` tees them
+  to the terminal live as they arrive *and* still captures them, so a
+  failure under `--stream` prints its block after the live output rather
+  than instead of it.
+  "In full on failure" was the earlier rule and only ever half held: the
+  renderer showed one stream, stderr when it had any and stdout only when
+  stderr was empty, so a step that wrote its diagnostic to stdout and its
+  verdict to stderr — the natural split for a report with a verdict — was
+  rendered as the verdict alone, with the findings it referred to dropped
+  at the one moment they existed for. Both streams now show; the 20-line
+  tail is what moved in the other direction, because it is the cap that
+  keeps a noisy step from burying the summary and `--verbose` is the
+  documented way past it (§9.1).
 - `set -euo pipefail` is **not** injected. Explicit > magic.
 
 ### 6.2 `cmd`
@@ -999,6 +1012,20 @@ One line per step, updated in place while running (spinner), then frozen:
   steps indented one level. Depth capped at display; execution is flat.
 - Skipped steps collapse to one dim line each; `--hide-skipped` drops them
   and the summary still counts them.
+- The failure block under a `✗` line is the step's own captured output:
+  stdout first, then stderr, each tailed to its last 20 lines, with a
+  parenthesised note naming the exit code and which streams it is showing
+  under what cap — the cap is announced whether or not it bit, because a
+  reader cannot tell a step that said exactly this much from one that was
+  trimmed, and the offer of `--verbose` costs nothing when it was. A
+  failure with no command behind it — a typed action, an `unless` that
+  could not run, a program that could not be spawned — has no streams to
+  show and prints the synthesized reason in that slot instead. `--verbose`
+  drops the tail and prints both streams whole. The two streams are not
+  labelled: they are printed in a fixed order, which is the same order and
+  the same `│` gutter `--verbose` uses on a step that worked, and one
+  shape for captured output is worth more than a header telling a reader
+  something the note already says.
 - Plan mode uses `would change` / `would run` in place of `changed`, and
   prints diffs under the line, indented, colored: unified, three lines of
   context. `--no-diff` suppresses them. The flag exists on `apply` too, where

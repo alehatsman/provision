@@ -1,0 +1,12 @@
+---
+source: tests/apply.rs
+expression: out
+---
+  tests/fixtures/apply/failure_both_streams.yml
+  ✗ A report on stdout and a verdict on stderr       FAILED  [t]
+    │ checked 5 things
+    │ finding: /etc/pacman.conf has no multilib section
+    │ gate failed on the findings above
+    │ (exit 1 · stdout+stderr, last 20 lines each · --verbose for all)
+
+  tests/fixtures/apply/failure_both_streams.yml · 1 step · 1 failed · [t]
