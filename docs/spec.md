@@ -200,6 +200,11 @@ failed_when: result.rc not in [0, 2]
 changed_when: result.rc == 0
 ```
 
+A literal YAML boolean is the expression it looks like: `changed_when: false`
+needs no quotes, and neither does `when: true`. The quoted form
+(`changed_when: "false"`) is the same thing and is not preferred — it reads as
+a string that happens to parse.
+
 ## 4. Step modifiers
 
 | Modifier | Type | Default | Meaning |
@@ -281,6 +286,22 @@ shell:                         # long form
   command under which an undeclared step reads anything but `unknown`.
   (Phase 5 had `run` report such a step `ok` by virtue of the verb; phase
   5b withdrew that. The same file means the same thing under every verb.)
+  This is the one place the declaration is explained; a task file that makes
+  it points here rather than repeating the reasoning.
+
+  **Known wart, deferred on purpose.** `changed_when: false` on
+  `cargo build --release` is literally false — the build rewrites `target/`
+  every run. What the author means is "do not ask me about change; the exit
+  code is the whole contract", which is a different proposition wearing the
+  first one's words. The fix, when it is earned, is to name it: a
+  `verdict: exit_code` modifier, satisfying `--strict` because it *is* a
+  declaration, with `changed_when: false` staying legal; and if the
+  per-step repetition is what hurts, a file-level default carrying it (and
+  `timeout`) once. Neither is built. The evidence for the format change
+  comes from the CI angle, where every step is this shape, and the first
+  real moongit job file does not exist yet — the runner has not switched
+  (plan.md). Count the lines in a real job, then decide. Three uses in
+  `tasks/` is not the case. See plan.md "Deferred".
 - Streaming: stdout/stderr captured; shown in full on failure, on
   `--verbose`, or streamed live with `--stream`.
 - `set -euo pipefail` is **not** injected. Explicit > magic.

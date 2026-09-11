@@ -570,6 +570,7 @@ is small enough that merge cost exceeds the gain.
 | `defaults` `array`/`dict` types | a second array key appears in the mac plans |
 | `pkg` repo/tap/PPA management | a shell recipe from migration.md fails idempotency in practice |
 | Loops | any step repeats itself more than 3 times by copy-paste |
+| `verdict: exit_code`, and a file-level default for it | a real moongit job file is written and `changed_when: false` is the boilerplate on more than 3 of its steps. The wart is real and named in spec §6.1 — the word is a lie on a build step — but the evidence for it lives on the CI side, and the runner has not switched yet. Three uses in `tasks/` is not the case; a job file is. Not a mode flag: two dialects of one language is the road back to a verb changing a file's meaning (D17, phase 5b) |
 | Windows typed actions | the PowerShell bootstrap exceeds 500 lines or breaks idempotency |
 | Run log | a real question "what did the last apply do" goes unanswered twice |
 | Remote apply (`ssh host provision apply`) | never as a feature; a shell alias suffices |
