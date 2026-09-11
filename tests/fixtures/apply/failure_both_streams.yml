@@ -1,0 +1,10 @@
+---
+# Issue #4: the natural split for a quality gate is the report on stdout and
+# the verdict on stderr. The failure block used to show the verdict alone.
+- name: A report on stdout and a verdict on stderr
+  shell: |
+    echo "checked 5 things"
+    echo "finding: /etc/pacman.conf has no multilib section"
+    echo "gate failed on the findings above" >&2
+    exit 1
+  changed_when: "false"

@@ -12,7 +12,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-/// How many stderr lines the failure block shows. Spec §9.1 says 20.
+/// How many lines of each captured stream the failure block shows. Spec §9.1
+/// says 20, and says it per stream rather than 20 shared between the two: the
+/// cap is there so a noisy step cannot bury the summary, and a shared budget,
+/// spent by whichever stream printed first, is how stdout used to vanish.
 const TAIL: usize = 20;
 const NAME_WIDTH: usize = 48;
 
@@ -199,22 +202,42 @@ impl Text {
         }
     }
 
+    /// Spec §6.1 and §9.1: both captured streams, stdout first, each tailed on
+    /// its own. A step that wrote its report to stdout and its verdict to
+    /// stderr used to render as the verdict alone — the one stream this picked
+    /// — which is the report missing at the only moment it was for.
+    ///
+    /// `Failure::stderr` is not always a stream. On the paths that never
+    /// reached a command — a typed action, an `unless` that could not run, a
+    /// program that could not be spawned — it is a synthesized reason and the
+    /// event carries no output at all, so it fills the same slot there and
+    /// nowhere else. Where a command did run it is a copy of `ev.stderr`, and
+    /// reading the event instead keeps one of those two from going stale.
     fn failure(&self, ev: &Event, f: &super::event::Failure) {
         let dim = Style::new().dimmed();
         let red = Style::new().fg_color(Some(AnsiColor::Red.into()));
-        let body = if f.stderr.trim().is_empty() {
-            &ev.stdout
-        } else {
-            &f.stderr
-        };
-        let lines = if self.verbose {
-            body.lines().collect::<Vec<_>>()
-        } else {
-            tail(body, TAIL)
-        };
-        for line in &lines {
-            self.write(format_args!("    {red}│{red:#} {line}\n"));
+        let captured = [("stdout", &ev.stdout), ("stderr", &ev.stderr)];
+        let mut streams: Vec<(&str, &String)> = captured
+            .into_iter()
+            .filter(|(_, s)| !s.trim().is_empty())
+            .collect();
+        if streams.is_empty() && !f.stderr.trim().is_empty() {
+            streams.push(("stderr", &f.stderr));
         }
+
+        // A body that survived the trim has a line with something on it, so a
+        // stream in this list always prints and the note can name the list.
+        for (_, body) in &streams {
+            let lines = if self.verbose {
+                body.lines().collect::<Vec<_>>()
+            } else {
+                tail(body, TAIL)
+            };
+            for line in lines {
+                self.write(format_args!("    {red}│{red:#} {line}\n"));
+            }
+        }
+
         let mut note = Vec::new();
         if let Some(rc) = f.rc {
             note.push(format!("exit {rc}"));
@@ -222,8 +245,15 @@ impl Text {
         if f.msg != "exit" {
             note.push(f.msg.clone());
         }
-        if !lines.is_empty() && !self.verbose {
-            note.push(format!("stderr, last {TAIL} lines · --verbose for all"));
+        if !streams.is_empty() && !self.verbose {
+            // `each` only when there were two, so the one-stream note — which
+            // is every failure that only ever had one — reads as it always did.
+            let each = if streams.len() > 1 { " each" } else { "" };
+            let names: Vec<&str> = streams.iter().map(|(n, _)| *n).collect();
+            note.push(format!(
+                "{}, last {TAIL} lines{each} · --verbose for all",
+                names.join("+")
+            ));
         }
         if !note.is_empty() {
             self.write(format_args!("    {dim}│ ({}){dim:#}\n", note.join(" · ")));

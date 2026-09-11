@@ -551,6 +551,79 @@ fn snapshot_the_failure_block() {
     snapshot!("failure", out);
 }
 
+// Issue #4, spec §6.1 and §9.1: both streams, stdout first. The renderer used
+// to pick one — stderr when it had any — so a gate that wrote its report to
+// stdout and its verdict to stderr rendered as "failed on the findings above"
+// with no findings above it.
+#[test]
+fn snapshot_a_failure_that_wrote_to_both_streams() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_, out) = apply(dir.path(), "failure_both_streams.yml", &[]);
+    snapshot!("failure_both_streams", out);
+}
+
+#[test]
+fn a_failure_shows_stdout_as_well_as_stderr() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(dir.path(), "failure_both_streams.yml", &[]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("finding: /etc/pacman.conf has no multilib section"),
+        "the stdout report is the whole diagnostic and must show:\n{out}"
+    );
+    assert!(
+        out.contains("gate failed on the findings above"),
+        "the stderr verdict must still show:\n{out}"
+    );
+    // Order is fixed and is the same order `--verbose` uses on a step that
+    // worked, so a reader never has to guess which stream a line came from.
+    let report = out.find("finding: /etc").expect("checked above");
+    let verdict = out.find("gate failed on").expect("checked above");
+    assert!(report < verdict, "stdout comes first:\n{out}");
+    assert!(
+        out.contains("stdout+stderr, last 20 lines each"),
+        "the note must name both streams:\n{out}"
+    );
+}
+
+// `--verbose` on a failure was the documented way to the full output, and it
+// dropped stdout too: the failure block took the same one-stream path.
+#[test]
+fn verbose_shows_both_streams_of_a_failed_step_in_full() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_, out) = apply(dir.path(), "failure_both_streams.yml", &["--verbose"]);
+    assert!(out.contains("checked 5 things"), "{out}");
+    assert!(
+        out.contains("finding: /etc/pacman.conf has no multilib section"),
+        "{out}"
+    );
+    assert!(out.contains("gate failed on the findings above"), "{out}");
+    assert!(
+        !out.contains("--verbose for all"),
+        "there is nothing left to offer:\n{out}"
+    );
+}
+
+// The other half of the slot. A broken `unless` never reaches the step's own
+// command, so the event carries no streams and `Failure::stderr` is a
+// synthesized reason — it still has to land in the block. This is the case
+// reading `ev` instead of `f` would have silently emptied.
+#[test]
+fn a_failure_with_no_streams_still_shows_its_reason() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(dir.path(), "broken_gate.yml", &[]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("`unless` could not run"), "{out}");
+    assert!(
+        out.contains("stderr, last 20 lines"),
+        "one stream, so the note reads as it always did:\n{out}"
+    );
+    assert!(
+        !out.contains("stdout+stderr"),
+        "there was no stdout to name:\n{out}"
+    );
+}
+
 #[test]
 fn snapshot_retry_rendering() {
     let dir = tempfile::tempdir().unwrap();
