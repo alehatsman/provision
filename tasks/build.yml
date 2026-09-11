@@ -8,9 +8,7 @@ description: build the release binary for this machine
 steps:
   - name: cargo build --release
     shell: cargo build --release
-    # Spec §6.1: this step's exit code is its whole contract -- there is no
-    # state to inspect and nothing for provision to be unsure about -- so it
-    # says so. A verb cannot make that declaration on a file's behalf (D17,
-    # phase 5b), which is why it is written here.
-    changed_when: "false"
+    # The exit code is this step's whole contract. Spec §6.1 says why the
+    # declaration is written here and not supplied by a verb.
+    changed_when: false
     timeout: 20m

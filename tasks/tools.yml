@@ -45,4 +45,4 @@ steps:
 
   - name: Verify the gate's tools
     shell: bash "{{ rq_dir }}/scripts/tools.sh" check
-    changed_when: "false"
+    changed_when: false
