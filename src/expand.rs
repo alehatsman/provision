@@ -932,6 +932,8 @@ impl Expander {
             retry: step.mods.retry.and_then(|n| model::parse_retry(n).ok()),
             has_changed_when: step.mods.changed_when.is_some(),
             deadline_bound: timeout < own_timeout,
+            own_timeout,
+            deadline: self.deadline,
         })
     }
 

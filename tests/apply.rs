@@ -1010,6 +1010,37 @@ fn a_steps_own_timeout_wins_when_it_is_the_smaller() {
     );
 }
 
+// The clamp has to hold across a retry, not just at the first attempt: a
+// step whose gate keeps failing can burn through a short `--deadline` one
+// `delay` at a time even though no single attempt ever ran long. Without a
+// recheck before each attempt, the loop would keep going on the stale
+// timeout computed once at prepare time and blow well past the deadline
+// (attempts: 20, delay: 1s — twenty seconds of retrying against a
+// one-second deadline).
+#[test]
+fn a_deadline_stops_a_retry_between_attempts() {
+    let dir = tempfile::tempdir().unwrap();
+    let started = std::time::Instant::now();
+    let (code, out) = apply(dir.path(), "deadline_retry.yml", &["--deadline", "1s"]);
+    let elapsed = started.elapsed();
+    assert_eq!(code, 124, "{out}");
+    assert!(out.contains("deadline exceeded"), "{out}");
+    assert!(
+        !out.contains("Must not run after the deadline"),
+        "the walk did not stop:\n{out}"
+    );
+    // The regression this guards: without a per-attempt recheck the loop
+    // keeps retrying on the stale prepare-time timeout and only stops
+    // between steps, burning all 20 attempts * 1s delay (~20s) against a
+    // 1s deadline before anything reports it. The between-step deadline
+    // check alone still yields exit 124, so only wall-clock time tells the
+    // two apart.
+    assert!(
+        elapsed < std::time::Duration::from_secs(5),
+        "the retry ran past the deadline instead of stopping between attempts: {elapsed:?}"
+    );
+}
+
 // Spec §8: `--keep-going` is about a step failing, not about the run's clock
 // running out. It carries on past the first and never past the second.
 #[test]
