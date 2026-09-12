@@ -358,8 +358,13 @@ Expected `plan` diffs on an already-converged machine after migration:
   bootstrap writes the identical file, so the machines it converged already
   have it. The three machine headers that prescribed the flag forever were
   fixed in dotfiles `6ff625f`.
-- **No `changed` for gate-less shell.** It shows as `unknown`, in magenta.
-  This is a feature.
+- **No `changed` for gate-less shell.** It showed as `unknown`, in magenta.
+  **Superseded 2026-09-12 (D20):** a gate-less shell step now reports `ok` on
+  exit 0 — its exit code is its whole contract (spec §6.1) — and
+  `validate --strict` is what holds a convergence plan to declaring its state.
+  The migration target below ("reports `unknown` until it gets a gate, target
+  zero") is now read off `validate --strict` rather than off a plan's verdict
+  column; it counts the same steps.
 - **Template directory mode is not a sync.** `for_each_file` re-rendered the
   tree each run and so did nothing on deletion either, but the new one-step
   form makes it look like a directory is being managed. It is not: removing

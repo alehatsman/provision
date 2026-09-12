@@ -265,16 +265,22 @@ $ provision plan main_pc.yml
 ```
 
 No `unknown` in that line, and that is the point of `validate --strict`:
-every step on this machine can say what it did. The six unprobed ones are
+every step on this machine declares what it manages. The six unprobed ones are
 gated on a register whose step has not run, which plan reports rather than
 guesses (D14). What is left is the owner's: the first real apply on each
 machine.
 
+Since 2026-09-12 an ungated `shell` step reports `ok` on exit 0 rather than
+`unknown` — its exit code is its whole contract (spec §6.1, D20), which is what
+makes `shell: cargo test` a complete step in a task or CI file. `--strict` is
+unchanged and is now the guard that keeps a *convergence* plan from quietly
+carrying one. `unknown` is plan-only and comes from `pkg latest`, a `git`
+branch ref, and `defaults` off macOS.
+
 `plan` exits 0 when there is nothing to do, 2 when there is, and 1 when a step
 failed. Anything that is not `ok` or `skipped` counts as something to do,
 `unknown` and `would run (unprobed)` included: a step provision cannot judge is
-not a step it may call converged, and `validate --strict` is how that count is
-driven to zero. `--plan-no-probe` inspects nothing, so it claims nothing, and
+not a step it may call converged. `--plan-no-probe` inspects nothing, so it claims nothing, and
 exits 0. A run stopped from outside exits `128 + signal` — 130 for Ctrl-C, 143
 for SIGTERM — and one that runs out of its `--deadline` exits 124.
 

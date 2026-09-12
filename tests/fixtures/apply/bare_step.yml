@@ -1,0 +1,10 @@
+---
+# Spec §6.1 / D20: a bare `shell` or `cmd` step declares nothing about state,
+# so its exit code is its whole contract. This is the task and CI shape — one
+# line per command, no modifier — and the reason the file exists is that the
+# shape used to cost a `changed_when: false` on every step.
+- name: A bare shell that exits zero
+  shell: "true"
+
+- name: A bare cmd that exits zero
+  cmd: ["true"]

@@ -12,7 +12,6 @@ description: cross-compile the Windows binary with mingw-w64
 steps:
   - name: cargo build --release --target x86_64-pc-windows-gnu
     shell: cargo build --release --target x86_64-pc-windows-gnu
-    # The exit code is this step's whole contract. Spec §6.1 says why the
-    # declaration is written here and not supplied by a verb.
-    changed_when: false
+    # No modifier: the exit code is this step's whole contract (spec §6.1,
+    # D20), as in tasks/build.yml.
     timeout: 20m

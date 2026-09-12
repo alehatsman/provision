@@ -237,32 +237,39 @@ fn a_directory_is_not_something_to_run() {
 
 // ── the verdict that no longer moves ──────────────────────────────────────
 
-// Spec §6.1, D17 as amended. Phase 5 made an ungated step `ok` under `run`
-// and `unknown` under `apply`; 5b withdrew that, because a verb is not a
-// declaration. The same component now reads `unknown` wherever it is entered,
-// and a step whose exit code is its whole contract says so itself.
+// Spec §6.1, D17 as amended, D20. Phase 5 made an ungated step `ok` under
+// `run` and `unknown` under `apply`; 5b withdrew that, because a verb is not
+// a declaration. D20 then moved the default itself — a bare step's exit code
+// is its whole contract — which is a change to the language, not to what any
+// verb does. So the invariant this test guards did not move, and it is the
+// whole point of it: the same file says the same thing wherever it is entered.
 #[test]
-fn an_ungated_step_is_unknown_under_every_verb() {
+fn a_bare_step_means_the_same_thing_under_every_verb() {
     let path = fixture("plain.yml");
     let p = path.to_str().unwrap();
 
+    // Apply ran it, and exit 0 is the whole of what it promised.
     let (code, out) = run(&["apply", p]);
     assert_eq!(code, 0, "{out}");
     assert!(
-        out.contains("unknown"),
-        "an ungated step is unknown under apply:\n{out}"
+        out.contains(" ok "),
+        "a bare step is ok under apply:\n{out}"
     );
+    assert!(!out.contains("unknown"), "{out}");
 
-    // §8: plan exits 2 on an `unknown`, because it is provision saying it
-    // does not know, which is not the same as nothing to do (D15).
+    // Plan has not run it, so it reports the part it does know: no gate, so
+    // it will run. §8 — not `ok` and not `skipped`, so exit 2 (D15). That is
+    // `ok`'s plan-time twin, not a second reading of the same file.
     let (code, out) = run(&["plan", p]);
     assert_eq!(code, 2, "{out}");
-    assert!(out.contains("unknown"), "{out}");
+    assert!(out.contains("would run"), "{out}");
+    assert!(!out.contains("unknown"), "{out}");
 
-    // The declaration, not the verb, is what makes it `ok`.
+    // An explicit `changed_when` still overrides the default: the
+    // declaration is what moves the verdict, exactly as it did before.
     let (code, out) = run(&["apply", fixture("declared.yml").to_str().unwrap()]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains(" ok "), "{out}");
+    assert!(out.contains("changed"), "{out}");
     assert!(!out.contains("unknown"), "{out}");
 }
 

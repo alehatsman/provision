@@ -1,0 +1,6 @@
+---
+# The other half of §6.1's contract. `failed_when` already defaulted to
+# `result.rc != 0`, so this half never moved — it is asserted so that the
+# half that did move cannot be mistaken for "a bare step always passes".
+- name: A bare shell that exits non-zero
+  shell: exit 1
