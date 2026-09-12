@@ -1,0 +1,14 @@
+# Spec §8's clamp is per-attempt, not per-step: a retry gate that keeps
+# failing has to notice the deadline between attempts, not only once at
+# prepare time. `delay` alone is enough to burn through a short `--deadline`
+# across a handful of attempts.
+- name: Keeps failing and keeps retrying
+  shell: exit 1
+  retry:
+    attempts: 20
+    delay: 1s
+  changed_when: "false"
+
+- name: Must not run after the deadline
+  shell: "true"
+  changed_when: "false"

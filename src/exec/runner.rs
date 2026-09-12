@@ -20,7 +20,7 @@ use crate::output::event::{Failure, Status};
 use crate::template::expanduser;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// One step, rendered, ready to run.
 pub(crate) struct Prepared {
@@ -37,6 +37,15 @@ pub(crate) struct Prepared {
     /// than anything the file asked for, because the deadline was the smaller
     /// of the two. Only the wording of a timeout message depends on it.
     pub deadline_bound: bool,
+    /// The step's own `timeout:`, unclamped. The retry loop needs this
+    /// alongside `deadline` to reclamp before every attempt — `timeout`
+    /// above is only ever right for the first one.
+    pub own_timeout: Duration,
+    /// Spec §8: the run's `--deadline`, as an absolute instant. `None` is no
+    /// deadline. The retry loop rechecks this before each attempt, because a
+    /// step admitted with time to spare can still run out of it between
+    /// retries — the clamp at prepare time only ever priced in attempt one.
+    pub deadline: Option<Instant>,
 }
 
 impl Prepared {
@@ -51,12 +60,16 @@ impl Prepared {
     /// hunting for a number nobody wrote, and §4's per-step number earns its
     /// keep precisely because it can be found.
     fn timed_out(&self) -> String {
-        let d = crate::output::event::human(self.timeout);
-        if self.deadline_bound {
-            format!("deadline exceeded after {d}")
-        } else {
-            format!("timed out after {d}")
-        }
+        timed_out_msg(self.timeout, self.deadline_bound)
+    }
+}
+
+fn timed_out_msg(timeout: Duration, deadline_bound: bool) -> String {
+    let d = crate::output::event::human(timeout);
+    if deadline_bound {
+        format!("deadline exceeded after {d}")
+    } else {
+        format!("timed out after {d}")
     }
 }
 
@@ -176,6 +189,13 @@ impl Runner {
     /// because `plan` runs asserts with exactly one attempt: a
     /// `retry: {attempts: 30, delay: 2s}` readiness gate is a sixty-second
     /// wait for work plan has not done and is not about to do.
+    ///
+    /// Spec §8's clamp — a step's timeout is the lesser of its own and the
+    /// run's remaining `--deadline` — is reapplied on every attempt, not just
+    /// the first. A gate admitted with time to spare can still burn through
+    /// the deadline across `delay`s and earlier attempts; without a recheck
+    /// here, a late attempt would run on a stale, too-generous timeout and
+    /// the walk could outlive `--deadline` entirely.
     fn attempt_loop(
         &self,
         p: &Prepared,
@@ -187,11 +207,26 @@ impl Runner {
             if process::interrupted() {
                 return Err(Stop::Fail(interrupted()));
             }
-            let out = self.once(p, judge)?;
+            let (timeout, deadline_bound) = match p.deadline {
+                Some(d) => {
+                    let left = d.saturating_duration_since(Instant::now());
+                    if left.is_zero() {
+                        return Err(Stop::Fail(Failure {
+                            msg: timed_out_msg(Duration::ZERO, true),
+                            rc: None,
+                            stderr: String::new(),
+                            interrupted: false,
+                        }));
+                    }
+                    (left.min(p.own_timeout), left < p.own_timeout)
+                }
+                None => (p.own_timeout, false),
+            };
+            let out = self.once(p, timeout, judge)?;
             let fatal = out.how != How::Exited;
             let failed = fatal || judge.failed(&out)?;
             if !failed || fatal || attempt == attempts {
-                return Self::verdict(p, judge, out, attempt, attempts);
+                return Self::verdict(p, judge, out, timeout, deadline_bound, attempt, attempts);
             }
             if !delay.is_zero() {
                 std::thread::sleep(delay);
@@ -224,7 +259,7 @@ impl Runner {
     /// Run the action once. `assert: {expr: …}` spawns nothing, so it gets a
     /// synthetic result rather than its own path through the retry loop —
     /// `retry` has to behave identically for both assert forms.
-    fn once(&self, p: &Prepared, judge: &dyn Judge) -> R<Output> {
+    fn once(&self, p: &Prepared, timeout: Duration, judge: &dyn Judge) -> R<Output> {
         if let Action::Assert {
             expr: Some(src), ..
         } = &p.action
@@ -241,10 +276,16 @@ impl Runner {
             .action
             .argv()
             .expect("every remaining action runs a command");
-        self.spawn(p, argv, p.sudo)
+        self.spawn(p, timeout, argv, p.sudo)
     }
 
-    fn spawn(&self, p: &Prepared, argv: Vec<String>, as_root: bool) -> R<Output> {
+    fn spawn(
+        &self,
+        p: &Prepared,
+        timeout: Duration,
+        argv: Vec<String>,
+        as_root: bool,
+    ) -> R<Output> {
         let keys: Vec<String> = p.env.keys().cloned().collect();
         let argv = if as_root {
             self.sudo.wrap(argv, &keys)
@@ -257,7 +298,7 @@ impl Runner {
             cwd: p.cwd.as_deref(),
             env: &p.env,
             stdin: stdin.as_deref(),
-            timeout: p.timeout,
+            timeout,
             stream: self.stream,
         })
         .map_err(|e| {
@@ -278,13 +319,15 @@ impl Runner {
         p: &Prepared,
         judge: &dyn Judge,
         out: Output,
+        timeout: Duration,
+        deadline_bound: bool,
         attempt: u32,
         attempts: u32,
     ) -> R<Done> {
         let status = match out.how {
             How::Interrupted => Status::Failed(interrupted()),
             How::TimedOut => Status::Failed(Failure {
-                msg: p.timed_out(),
+                msg: timed_out_msg(timeout, deadline_bound),
                 rc: None,
                 stderr: out.stderr.clone(),
                 interrupted: false,
@@ -474,7 +517,7 @@ impl Runner {
                 return Ok(Gate::NoRoot);
             }
             let argv = Interpreter::default_for_host().argv(cmd, false);
-            let out = self.spawn(&gate_context(p), argv, p.sudo)?;
+            let out = self.spawn(&gate_context(p), p.timeout, argv, p.sudo)?;
             match out.how {
                 How::Exited if out.rc == 0 => return Ok(Gate::Skip("unless".into())),
                 // Spec §10: an `unless` that cannot run is an error, not a
@@ -538,6 +581,8 @@ fn gate_context(p: &Prepared) -> Prepared {
         retry: None,
         has_changed_when: false,
         deadline_bound: p.deadline_bound,
+        own_timeout: p.own_timeout,
+        deadline: p.deadline,
     }
 }
 
