@@ -120,8 +120,9 @@ step's process group dies, the summary is still printed, exit 143.
 and lose the summary it came for.
 
 And because `validate`, `plan` and `apply` are one walk at three depths of
-commitment, the first two are a **pipeline linter** — the thing no other step
-runner in this family ships:
+commitment, the first two double as a **pipeline linter** for free — a side
+effect of one executor meaning one thing under every verb, not a feature
+built to compete on:
 
 ```
 $ provision validate job.yml   # parse, render every template, resolve every
@@ -136,6 +137,12 @@ this deliberately does not buy: parallel steps, `use` deduplication, secret
 masking.
 
 ## For Ansible users
+
+This is not a migration pitch — provision is scoped to one person's own
+machines (no inventory, no fleet, no roles-as-a-package-format), and Ansible
+remains the right tool past that scope. The table below is a vocabulary
+bridge for a reader who already thinks in Ansible's terms and wants to know
+where the same idea landed here, or where it was deliberately left out.
 
 Same words where the idea is the same, a decision number where it is not.
 The decisions are in [docs/decisions.md](docs/decisions.md).
