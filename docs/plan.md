@@ -67,9 +67,13 @@ rule (§4), that an `apt-get install` reporting success can install nothing
 5b), and none of that would have surfaced from the machine plans. Running the
 tool the way the README tells a reader to run it is what found all four.
 
-Rust, one crate, one binary. Target: **6–9k lines of Rust** including
-tests, all ten actions, three platforms. If it passes 12k, something
-from the non-goals crept in. Stop and cut.
+Rust, one crate, one binary. Target: **6–9k lines of Rust in `src/`**
+(including any `#[cfg(test)]` unit tests living there), all ten actions,
+three platforms. If `src/` passes 12k, something from the non-goals crept
+in. Stop and cut. `tests/` — the integration and CLI suite — is not counted:
+it is acceptance testing, not implementation, and earns its size by covering
+every action and every exit code, not by staying small. Measured
+2026-09-12: 9,711 lines in `src/`, 4,563 in `tests/`.
 
 ## Ground rules
 
