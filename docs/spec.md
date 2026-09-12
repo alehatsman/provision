@@ -268,9 +268,9 @@ shell:                         # long form
 - Idempotency: **declared**, via `unless`, `creates`, or `changed_when`. A
   bare `shell` step with none of these declares nothing about state, and its
   **exit code is its whole contract**: `ok` on exit 0, `failed` otherwise.
-  `validate --strict` still rejects it — a convergence plan usually does have
-  state to declare, and forgetting to declare it is the mistake that flag
-  exists to catch (§8, D3).
+  `validate --strict` still rejects it, and is on by default for a plan (§8,
+  D3, D21) — a convergence plan usually does have state to declare, and
+  forgetting to declare it is the mistake that check exists to catch.
 - The verdict of a gated step is the gate's own meaning: `unless` exited
   non-zero, or `creates` did not exist, so the work was needed — a successful
   run is `changed`. With no gate there is no claim about state to report, and
@@ -814,16 +814,21 @@ gates, so it has a wall clock worth bounding too. There is no
   for `import`/`use`/`vars_file`/`src`, **and the body of every action** — a
   `pkg` that names no package, a `file` with neither `content` nor `src`, a
   `mode` that is not a quoted octal string. No commands run. `--strict` also
-  rejects `shell`/`cmd` steps with no idempotency gate.
+  rejects `shell`/`cmd` steps with no idempotency gate, and is **on by
+  default when the root file is a plan** (a list root, D17's own test) —
+  `--strict` on the command line only ever turns it on, never off.
 
   **`--strict` is where D3 now lives.** A bare `shell` step runs and reports
   `ok` (§6.1), so nothing stops a convergence plan from carrying one that
   rewrites `/etc/pacman.conf` on every apply while `plan` reports nothing to
-  do. That is a real regression to guard against, and the guard is this flag
-  rather than a default verdict: a task or CI job file, where every step is
-  an exit code and there is no state to declare, should not have to answer
-  for a discipline it does not need. A plan that converges a machine runs
-  `validate --strict` in its own CI and gets the discipline back in full.
+  do. That is a real regression to guard against, and the guard is this
+  check rather than a default verdict: a task or CI job file, where every
+  step is an exit code and there is no state to declare, should not have to
+  answer for a discipline it does not need — there the default stays off,
+  same as always. A plan is the shape that usually does have state to
+  declare, so it gets the discipline by default rather than on request
+  (D21): a convergence plan's own CI runs plain `validate` and already has
+  it.
 
   One exception, and only one: a `file` step's `src` after a `shell` or `cmd`
   step in the same walk. That command can create any path and nothing has run,

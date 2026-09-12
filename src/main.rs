@@ -57,7 +57,9 @@ enum Command {
     /// Parse, check the schema, render every template, resolve every file.
     Validate {
         plan: PathBuf,
-        /// Also reject `shell`/`cmd` steps with no idempotency gate.
+        /// Also reject `shell`/`cmd` steps with no idempotency gate. On by
+        /// default for a plan (D3); this only ever turns it on, for a
+        /// component or task file that wants the discipline too.
         #[arg(long)]
         strict: bool,
         /// Set a prop, when the root file is a component rather than a plan.
@@ -317,6 +319,12 @@ fn run() -> Result<u8, Diag> {
                 tags: Vec::new(),
                 skip_tags: Vec::new(),
             };
+            // D3, and its reversal: a convergence plan (a list root) has
+            // state to declare and `--strict` catching a forgotten gate is
+            // the whole point, so it is on by default there. A task or
+            // component file legitimately has none, and stays opt-in. The
+            // flag only ever forces it on, never off.
+            let strict = strict || !is_component(&plan)?;
             let mut ex = expander(&vars, Mode::Validate { strict }, selection)?;
             walk_root(&mut ex, &plan, &props)?;
             let base = cwd();
