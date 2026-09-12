@@ -452,6 +452,20 @@ fn a_timeout_kills_the_children_not_only_the_shell() {
     );
 }
 
+// D22: `rc: 124` alone cannot tell provision's own kill from a step that
+// wraps its own command in `timeout(1)` and legitimately exits 124.
+#[test]
+fn timed_out_distinguishes_a_kill_from_the_steps_own_124() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(dir.path(), "timeout_register.yml", &["--keep-going"]);
+    assert_eq!(code, 1, "the killed step still fails the run:\n{out}");
+    assert_eq!(
+        verdict(&out, "Reads both registers"),
+        "ok",
+        "killed.timed_out and own_124.timed_out should have told them apart:\n{out}"
+    );
+}
+
 // ── output forms ──────────────────────────────────────────────────────────
 
 #[test]
