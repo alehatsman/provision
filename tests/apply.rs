@@ -231,8 +231,9 @@ fn each_modifier_reaches_its_own_verdict() {
     let (code, out) = apply(dir.path(), "verdicts.yml", &[]);
     assert_eq!(code, 0, "{out}");
 
-    // Spec §6.1: no gate, no verdict. `unknown` is an answer, not a failure.
-    assert_eq!(verdict(&out, "ungated shell"), "unknown", "{out}");
+    // Spec §6.1, D20: no gate means no claim about state, so the exit code is
+    // the whole contract and `true` succeeded.
+    assert_eq!(verdict(&out, "ungated shell"), "ok", "{out}");
     assert!(line_for(&out, "work is done").contains("unless"), "{out}");
     assert_eq!(verdict(&out, "changed_when decides"), "changed", "{out}");
     // The register held a real value, so `when` was answerable at apply time.
@@ -242,14 +243,19 @@ fn each_modifier_reaches_its_own_verdict() {
 }
 
 #[test]
-fn an_unknown_verdict_makes_plan_exit_two() {
-    // D15: a step provision cannot judge is not a step it may call converged.
+fn a_step_that_would_run_makes_plan_exit_two() {
+    // D15: anything that is not `ok` or `skipped` is something to do. An
+    // ungated step is `would run` since D20, which is in that same bucket, so
+    // no exit code moved — only the word. `unknown` still counts for the same
+    // reason and is asserted where it now comes from: `pkg latest`
+    // (`pkg_plan_names_what_it_would_install_and_admits_what_it_cannot_know`),
+    // a `git` branch ref, and `defaults` off macOS.
     let dir = tempfile::tempdir().unwrap();
     let path = fixture("verdicts.yml");
     let out = run_in(dir.path(), &["plan", path.to_str().unwrap()]);
     let text = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(2), "{text}");
-    assert_eq!(verdict(&text, "ungated shell"), "unknown", "{text}");
+    assert_eq!(verdict(&text, "ungated shell"), "would run", "{text}");
 }
 
 #[test]
@@ -266,6 +272,65 @@ fn plan_no_probe_claims_nothing_and_exits_zero() {
     assert!(
         !text.contains("unknown"),
         "nothing was probed, so nothing is unknown:\n{text}"
+    );
+}
+
+// ── the bare step (spec §6.1, D20) ────────────────────────────────────────
+//
+// A step with no `unless`, `creates` or `changed_when` declares nothing about
+// state, so its exit code is the whole of what it promised. That is the task
+// and CI shape, and it used to cost a `changed_when: false` per step to say.
+
+#[test]
+fn a_bare_shell_step_is_ok_on_exit_zero() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(dir.path(), "bare_step.yml", &[]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(verdict(&out, "bare shell that exits zero"), "ok", "{out}");
+}
+
+#[test]
+fn a_bare_cmd_step_is_ok_on_exit_zero() {
+    // `cmd` takes §6.1's semantics by reference (§6.2), so it has to be
+    // asserted separately or the reference is the only thing holding it.
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(dir.path(), "bare_step.yml", &[]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(verdict(&out, "bare cmd that exits zero"), "ok", "{out}");
+}
+
+#[test]
+fn a_bare_shell_step_fails_on_a_non_zero_exit() {
+    // The half of the contract that did not move: `failed_when` already
+    // defaulted to `result.rc != 0`. Asserted so that "a bare step reads ok"
+    // cannot quietly become "a bare step always passes".
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(dir.path(), "bare_step_fails.yml", &[]);
+    assert_eq!(code, 1, "{out}");
+    assert_eq!(
+        verdict(&out, "bare shell that exits non-zero"),
+        "FAILED",
+        "{out}"
+    );
+}
+
+#[test]
+fn a_bare_step_would_run_under_plan() {
+    // Plan has not run it, so it cannot claim `ok`. But it carries no gate, so
+    // plan does know it will run — which is more than `unknown` said.
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture("bare_step.yml");
+    let out = run_in(dir.path(), &["plan", path.to_str().unwrap()]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(2), "{text}");
+    assert_eq!(
+        verdict(&text, "bare shell that exits zero"),
+        "would run",
+        "{text}"
+    );
+    assert!(
+        !text.contains("unknown"),
+        "an ungated step is no longer unknown:\n{text}"
     );
 }
 
@@ -404,7 +469,7 @@ fn json_emits_one_object_per_step_and_a_summary() {
 
     let steps: Vec<&serde_json::Value> = rows.iter().filter(|r| r["event"] == "step").collect();
     assert_eq!(steps.len(), 5, "{stdout}");
-    assert_eq!(steps[0]["status"], "unknown");
+    assert_eq!(steps[0]["status"], "ok");
     assert_eq!(steps[1]["status"], "skipped");
     assert_eq!(steps[1]["reason"], "unless");
     assert_eq!(steps[2]["status"], "changed");
@@ -633,13 +698,14 @@ fn snapshot_retry_rendering() {
 
 // ── plan output, every verdict at once ──────────────────────────────────────
 //
-// plan_all_verdicts.yml carries one step per plan-mode verdict: `ok` (an
-// assert that already holds), `would change` with a diff (a `file` step
-// against the scratch dir), `would run` (a gated shell not yet done),
-// `unknown` (an ungated shell — D15, nothing to judge it by), and `skipped`
-// with its reason (a gate that says the work is done already). The same
-// file under `--plan-no-probe` collapses every line to
-// `would run (unprobed)` (spec §7), which is that verdict's own case.
+// plan_all_verdicts.yml carries one step per plan-mode verdict reachable from
+// a plain invocation: `ok` (an assert that already holds), `would change` with
+// a diff (a `file` step against the scratch dir), `would run` (a gated shell
+// not yet done, and since D20 an ungated one too), and `skipped` with its
+// reason (a gate that says the work is done already). The same file under
+// `--plan-no-probe` collapses every line to `would run (unprobed)` (spec §7),
+// which is that verdict's own case. `unknown` needs a host-dependent action
+// and is asserted from its three real sources instead — see the fixture.
 
 /// The diff under "would change" carries the scratch dir's real path
 /// (`+++ /tmp/.../hello.txt`), and that path is different every run — a
@@ -656,7 +722,7 @@ fn snapshot_plan_text_shows_every_verdict() {
     let out = run_in(dir.path(), &["plan", path.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(2));
     let text = redact_scratch(&String::from_utf8_lossy(&out.stdout), dir.path());
-    for verdict in ["ok", "would change", "would run", "unknown", "skipped"] {
+    for verdict in ["ok", "would change", "would run", "skipped"] {
         assert!(text.contains(verdict), "{verdict} missing:\n{text}");
     }
     snapshot!("plan_all_verdicts", text);
@@ -675,9 +741,8 @@ fn snapshot_plan_no_probe_is_would_run_unprobed_throughout() {
     // 6, not 5: the summary line names the verdict too ("5 would run
     // (unprobed)"), on top of one line per step. That accounts for every
     // occurrence in the text, so no line's own verdict column can be
-    // anything else — a substring check for "unknown" or "would change"
-    // would also match those words inside two of the fixture's own step
-    // names ("cannot be judged", "that would change").
+    // anything else — a substring check for "would change" would also match
+    // those words inside the fixture's own step name ("that would change").
     assert_eq!(text.matches("would run (unprobed)").count(), 6, "{text}");
     snapshot!("plan_all_verdicts_no_probe", text);
 }
@@ -700,11 +765,12 @@ fn plan_json_status_matches_spec_9_3_exactly() {
         .map(|s| s["status"].as_str().unwrap())
         .collect();
     // Spec §9.3's exact vocabulary, no others — `ok`, `would_change`,
-    // `would_run`, `unknown`, `skipped` here; `changed`, `failed` and
-    // `would_run_unprobed` belong to fixtures elsewhere.
+    // `would_run`, `skipped` here; `changed`, `failed`, `unknown` and
+    // `would_run_unprobed` belong to fixtures elsewhere. Two `would_run`:
+    // the gated shell, and the ungated one that used to be `unknown` (D20).
     assert_eq!(
         statuses,
-        vec!["ok", "would_change", "would_run", "unknown", "skipped"],
+        vec!["ok", "would_change", "would_run", "would_run", "skipped"],
         "{stdout}"
     );
     assert!(

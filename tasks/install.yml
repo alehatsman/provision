@@ -13,8 +13,8 @@ props:
 
 steps:
   # `use`, not a second copy of `build.yml`'s step. It was a copy -- the same
-  # shell, the same `changed_when`, the same `timeout` and the same four-line
-  # comment -- and plan.md's deferred table watches for exactly that: three
+  # shell, the same `timeout` and the same four-line comment -- and plan.md's
+  # deferred table watches for exactly that: three
   # copies of one step is the threshold that reopens the loop question. This
   # is the answer that does not need loops, because it already exists. A
   # component with no props is a task's dependency spelled with the one

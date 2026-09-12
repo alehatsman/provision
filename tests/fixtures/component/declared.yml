@@ -1,9 +1,11 @@
 ---
-description: the same ungated command, with its contract declared
+description: the same ungated command, with a verdict declared over the default
 steps:
-  # Spec §6.1: a step whose exit code is its whole contract says so. That is
-  # the task case, and it is the same declaration a plan would make -- there
-  # is no verb under which an undeclared step reads as anything but `unknown`.
-  - name: A step that declares what it means
+  # Spec §6.1 / D20: a bare step's exit code is its whole contract and reads
+  # `ok`. `changed_when` still overrides that — and it has to name a verdict
+  # the default would not produce, or the assertion proves nothing. This said
+  # `changed_when: "false"` until D20, when that became the default and the
+  # fixture quietly started asserting the same thing twice.
+  - name: A step that declares its own verdict
     shell: "true"
-    changed_when: "false"
+    changed_when: "true"

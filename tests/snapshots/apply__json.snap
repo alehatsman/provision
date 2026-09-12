@@ -1,10 +1,11 @@
 ---
 source: tests/apply.rs
+assertion_line: 486
 expression: stdout
 ---
-{"duration_ms":0,"event":"step","file":"tests/fixtures/apply/verdicts.yml","index":1,"line":3,"name":"An ungated shell cannot be judged","rc":0,"status":"unknown","stderr":"","stdout":""}
+{"duration_ms":0,"event":"step","file":"tests/fixtures/apply/verdicts.yml","index":1,"line":3,"name":"An ungated shell is its own exit code","rc":0,"status":"ok","stderr":"","stdout":""}
 {"duration_ms":0,"event":"step","file":"tests/fixtures/apply/verdicts.yml","index":2,"line":6,"name":"A gate that says the work is done","reason":"unless","status":"skipped"}
 {"duration_ms":0,"event":"step","file":"tests/fixtures/apply/verdicts.yml","index":3,"line":10,"name":"changed_when decides","rc":0,"status":"changed","stderr":"","stdout":"hello\n"}
 {"duration_ms":0,"event":"step","file":"tests/fixtures/apply/verdicts.yml","index":4,"line":15,"name":"A later step reads the register","rc":0,"status":"ok","stderr":"","stdout":"hello\n"}
 {"duration_ms":0,"event":"step","file":"tests/fixtures/apply/verdicts.yml","index":5,"line":20,"name":"failed_when forgives a non-zero exit","rc":3,"status":"ok","stderr":"","stdout":""}
-{"changed":1,"deadline_exceeded":false,"duration_ms":0,"event":"summary","failed":0,"interrupted":false,"ok":2,"plan":"tests/fixtures/apply/verdicts.yml","skipped":1,"total":5,"unknown":1,"would_change":0,"would_run":0,"would_run_unprobed":0}
+{"changed":1,"deadline_exceeded":false,"duration_ms":0,"event":"summary","failed":0,"interrupted":false,"ok":3,"plan":"tests/fixtures/apply/verdicts.yml","skipped":1,"total":5,"unknown":0,"would_change":0,"would_run":0,"would_run_unprobed":0}

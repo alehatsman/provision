@@ -213,12 +213,12 @@ impl Runner {
         if let Action::Assert { .. } = &p.action {
             return self.attempt_loop(p, judge, 1, Duration::ZERO);
         }
-        // A gate that said "run" is a verdict; no gate at all is not.
-        Ok(Done::one(if p.gated() {
-            Status::WouldRun
-        } else {
-            Status::Unknown
-        }))
+        // Spec §6.1: a gate that said "run" is a verdict, and no gate at all
+        // is one too — the step carries nothing that could skip it, so plan
+        // knows it will run. Whether it will exit 0 is not a question about
+        // state and is not plan's to answer. This used to split, with the
+        // ungated half reading `unknown` (D20).
+        Ok(Done::one(Status::WouldRun))
     }
 
     /// Run the action once. `assert: {expr: …}` spawns nothing, so it gets a
@@ -301,16 +301,19 @@ impl Runner {
                 interrupted: false,
             }),
             How::Exited => match judge.changed(&out)? {
+                // `changed_when` said so; or, with no `changed_when`, a gate
+                // said the work was needed and the work succeeded. An action
+                // that cannot change anything is excepted — a gate on one of
+                // those is only a reason to run, not evidence of an effect.
                 Some(true) => Status::Changed,
-                Some(false) => Status::Ok,
-                None if p.action.never_changes() => Status::Ok,
-                // The gate said the work was needed, and the work succeeded.
-                None if p.gated() => Status::Changed,
-                // Spec §6.1: nothing here can say what an ungated step did.
-                // A step whose exit code is its whole contract declares
-                // `changed_when: false` and is judged above; there is no verb
-                // under which an undeclared step reads as anything but this.
-                None => Status::Unknown,
+                None if p.gated() && !p.action.never_changes() => Status::Changed,
+                // Spec §6.1, D20: everything else declares nothing about
+                // state, so the exit code is the whole contract and it
+                // succeeded. `unknown` was the old answer here, and it was
+                // answering a question the step had never asked; `--strict`
+                // is what now holds a convergence plan to declaring what it
+                // manages.
+                Some(false) | None => Status::Ok,
             },
         };
         Ok(Done {

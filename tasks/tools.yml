@@ -43,6 +43,7 @@ steps:
     creates: "{{ home }}/.cargo/bin/cargo-machete"
     timeout: 30m
 
+  # A check, so its exit code is its whole contract and it needs no modifier
+  # to say so (spec §6.1, D20).
   - name: Verify the gate's tools
     shell: bash "{{ rq_dir }}/scripts/tools.sh" check
-    changed_when: false

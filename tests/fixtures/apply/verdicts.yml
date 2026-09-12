@@ -1,6 +1,6 @@
 ---
 # One of each verdict, so the output renderers have something to render.
-- name: An ungated shell cannot be judged
+- name: An ungated shell is its own exit code
   shell: "true"
 
 - name: A gate that says the work is done

@@ -1,10 +1,11 @@
 ---
 source: tests/apply.rs
+assertion_line: 786
 expression: stdout
 ---
-{"duration_ms":0,"event":"step","file":"tests/fixtures/apply/plan_all_verdicts.yml","index":1,"line":8,"name":"An assert that already holds","rc":0,"status":"ok","stderr":"","stdout":""}
-{"diff":"--- current\n+++ [SCRATCH]/hello.txt\n@@ -0,0 +1,2 @@\n+one\n+two\n","duration_ms":0,"event":"step","file":"tests/fixtures/apply/plan_all_verdicts.yml","index":2,"line":12,"name":"A file that would change","status":"would_change"}
-{"duration_ms":0,"event":"step","file":"tests/fixtures/apply/plan_all_verdicts.yml","index":3,"line":20,"name":"A gated shell not yet done","status":"would_run"}
-{"duration_ms":0,"event":"step","file":"tests/fixtures/apply/plan_all_verdicts.yml","index":4,"line":24,"name":"An ungated shell cannot be judged","status":"unknown"}
-{"duration_ms":0,"event":"step","file":"tests/fixtures/apply/plan_all_verdicts.yml","index":5,"line":27,"name":"A gate that says the work is done","reason":"unless","status":"skipped"}
-{"changed":0,"deadline_exceeded":false,"duration_ms":0,"event":"summary","failed":0,"interrupted":false,"ok":1,"plan":"tests/fixtures/apply/plan_all_verdicts.yml","skipped":1,"total":5,"unknown":1,"would_change":1,"would_run":1,"would_run_unprobed":0}
+{"duration_ms":0,"event":"step","file":"tests/fixtures/apply/plan_all_verdicts.yml","index":1,"line":15,"name":"An assert that already holds","rc":0,"status":"ok","stderr":"","stdout":""}
+{"diff":"--- current\n+++ [SCRATCH]/hello.txt\n@@ -0,0 +1,2 @@\n+one\n+two\n","duration_ms":0,"event":"step","file":"tests/fixtures/apply/plan_all_verdicts.yml","index":2,"line":19,"name":"A file that would change","status":"would_change"}
+{"duration_ms":0,"event":"step","file":"tests/fixtures/apply/plan_all_verdicts.yml","index":3,"line":27,"name":"A gated shell not yet done","status":"would_run"}
+{"duration_ms":0,"event":"step","file":"tests/fixtures/apply/plan_all_verdicts.yml","index":4,"line":31,"name":"An ungated shell is its own exit code","status":"would_run"}
+{"duration_ms":0,"event":"step","file":"tests/fixtures/apply/plan_all_verdicts.yml","index":5,"line":34,"name":"A gate that says the work is done","reason":"unless","status":"skipped"}
+{"changed":0,"deadline_exceeded":false,"duration_ms":0,"event":"summary","failed":0,"interrupted":false,"ok":1,"plan":"tests/fixtures/apply/plan_all_verdicts.yml","skipped":1,"total":5,"unknown":0,"would_change":1,"would_run":2,"would_run_unprobed":0}

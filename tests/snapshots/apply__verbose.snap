@@ -1,9 +1,10 @@
 ---
 source: tests/apply.rs
+assertion_line: 600
 expression: loud
 ---
   tests/fixtures/apply/verdicts.yml
-  ? An ungated shell cannot be judged                unknown  [t]
+  ✓ An ungated shell is its own exit code            ok  [t]
   - A gate that says the work is done                skipped   unless  [t]
   ~ changed_when decides                             changed  [t]
     │ hello
@@ -11,4 +12,4 @@ expression: loud
     │ hello
   ✓ failed_when forgives a non-zero exit             ok  [t]
 
-  tests/fixtures/apply/verdicts.yml · 5 steps · 1 changed · 2 ok · 1 skipped · 1 unknown · [t]
+  tests/fixtures/apply/verdicts.yml · 5 steps · 1 changed · 3 ok · 1 skipped · [t]

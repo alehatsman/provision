@@ -1,7 +1,14 @@
 ---
-# One of each plan-mode verdict, so the plan renderers (text and json) have
-# something to render. Probed and --plan-no-probe both run this file; under
-# --plan-no-probe every line collapses to `would run (unprobed)` (spec §7).
+# One of each plan-mode verdict reachable from a single plain invocation, so
+# the plan renderers (text and json) have something to render. Probed and
+# --plan-no-probe both run this file; under --plan-no-probe every line
+# collapses to `would run (unprobed)` (spec §7).
+#
+# `unknown` is not among them. Since D20 it comes only from `pkg latest`, a
+# `git` branch ref and `defaults` off macOS — one needs a package manager, one
+# needs a checkout and a prior apply, and the third answers differently on
+# macOS, so none can live in a fixture that runs unconditionally on every
+# host. Its rendering is asserted from those three sources' own tests.
 - vars:
     scratch: "{{ env.PROVISION_SCRATCH }}"
 
@@ -21,7 +28,7 @@
   shell: echo not done
   creates: "{{ scratch }}/never-there"
 
-- name: An ungated shell cannot be judged
+- name: An ungated shell is its own exit code
   shell: "true"
 
 - name: A gate that says the work is done

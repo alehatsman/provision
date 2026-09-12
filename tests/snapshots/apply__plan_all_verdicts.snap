@@ -1,5 +1,6 @@
 ---
 source: tests/apply.rs
+assertion_line: 728
 expression: text
 ---
   tests/fixtures/apply/plan_all_verdicts.yml
@@ -11,7 +12,7 @@ expression: text
     │ +one
     │ +two
   → A gated shell not yet done                       would run  [t]
-  ? An ungated shell cannot be judged                unknown  [t]
+  → An ungated shell is its own exit code            would run  [t]
   - A gate that says the work is done                skipped   unless  [t]
 
-  tests/fixtures/apply/plan_all_verdicts.yml · 5 steps · 1 would change · 1 would run · 1 ok · 1 skipped · 1 unknown · [t]
+  tests/fixtures/apply/plan_all_verdicts.yml · 5 steps · 1 would change · 2 would run · 1 ok · 1 skipped · [t]
