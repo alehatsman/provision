@@ -7,12 +7,18 @@
 
 use crate::error::Diag;
 use std::io::Write;
+use zeroize::Zeroizing;
 
 pub(crate) struct Sudo {
     /// `Some` only with `--ask-sudo-pass`. Fed to `sudo -S` for every
     /// escalated step, because sudo's own credential cache is not something
     /// to rely on across a long run.
-    password: Option<String>,
+    ///
+    /// `Zeroizing` rather than a plain `String`: this is held for the whole
+    /// run, so an unattended `apply` leaves it sitting in memory — reachable
+    /// by a core dump or a debugger attached to a long escalated run — for
+    /// as long as the process runs. Zeroed on drop closes that.
+    password: Option<Zeroizing<String>>,
 }
 
 impl Sudo {
@@ -51,7 +57,7 @@ impl Sudo {
                 return Err(Diag::file_level("sudo", "that password was not accepted"));
             }
             return Ok(Sudo {
-                password: Some(password),
+                password: Some(Zeroizing::new(password)),
             });
         }
 
@@ -99,7 +105,7 @@ impl Sudo {
 
     /// What to feed the wrapped command's stdin, if anything.
     pub(crate) fn stdin(&self) -> Option<String> {
-        self.password.as_ref().map(|p| format!("{p}\n"))
+        self.password.as_ref().map(|p| format!("{}\n", p.as_str()))
     }
 }
 

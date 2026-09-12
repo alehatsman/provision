@@ -39,6 +39,10 @@ sha2 = "0.10"
 similar = "2"
 tempfile = "3"
 which = "8.0.6"
+# Zeroes the `--ask-sudo-pass` password on drop rather than leaving it sitting
+# in memory for the run's lifetime. No-std-only default features: no OS
+# bindings, one tiny crate. Approved by the owner 2026-09-12 (issue #5).
+zeroize = "1.9.0"
 
 [target.'cfg(unix)'.dependencies]
 # Only for what std does not expose: killing a process *group*, and reading a
