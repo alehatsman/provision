@@ -334,17 +334,43 @@ fn skip_tags_wins_over_everything() {
 
 // ── strict ────────────────────────────────────────────────────────────────
 
+// `strict_gate.yml` is a plan (list root), so `--strict` is on by default
+// there (D3's reversal, issue #5) — the whole point is that an operator
+// never had to remember the flag on the file that most needs it.
 #[test]
 fn strict_rejects_only_the_ungated_shell_step() {
     let path = fixture_arg("strict_gate.yml");
-    let (code, _) = validate("strict_gate.yml");
-    assert_eq!(code, 0, "plain validate must accept an ungated shell step");
+    let (code, text) = validate("strict_gate.yml");
+    assert_eq!(code, EXIT_VALIDATION, "a plan defaults to --strict: {text}");
+    assert_eq!(text.matches("no idempotency gate").count(), 1, "{text}");
+    assert!(text.contains("strict_gate.yml:7:3"), "{text}");
 
+    // The flag still works, redundantly, on a plan.
     let out = run(&["validate", "--strict", &path]);
     assert_eq!(out.status.code(), Some(EXIT_VALIDATION));
     let text = String::from_utf8_lossy(&out.stderr);
     assert_eq!(text.matches("no idempotency gate").count(), 1, "{text}");
     assert!(text.contains("strict_gate.yml:7:3"), "{text}");
+}
+
+// A task or component file legitimately has no state to declare (D3's
+// carve-out survives), so it stays opt-in there — `--strict` only ever
+// turns the check on, never off.
+#[test]
+fn strict_defaults_off_for_a_task_or_component() {
+    let path = fixture_arg("component/task.yml");
+    let out = run(&["validate", "--prop", "target=x", &path]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "a task file must not default to --strict: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let out = run(&["validate", "--strict", "--prop", "target=x", &path]);
+    assert_eq!(out.status.code(), Some(EXIT_VALIDATION));
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert!(text.contains("no idempotency gate"), "{text}");
 }
 
 // ── the documented example ────────────────────────────────────────────────
@@ -450,14 +476,11 @@ fn help_and_version_are_not_usage_errors() {
 
 // ── `defaults` (spec §6.10) ───────────────────────────────────────────────
 
+// `defaults_strict.yml` is a plan too, so this is on by default now.
 #[test]
 fn strict_asks_a_defaults_step_where_it_runs() {
-    let (code, _) = validate("defaults_strict.yml");
-    assert_eq!(code, 0, "plain validate accepts a `defaults` step as it is");
-
-    let out = run(&["validate", "--strict", &fixture_arg("defaults_strict.yml")]);
-    assert_eq!(out.status.code(), Some(EXIT_VALIDATION));
-    let text = String::from_utf8_lossy(&out.stderr);
+    let (code, text) = validate("defaults_strict.yml");
+    assert_eq!(code, EXIT_VALIDATION, "a plan defaults to --strict: {text}");
     // Exactly one: the guarded step above it says where it runs.
     assert_eq!(text.matches("naming the os").count(), 1, "{text}");
     assert!(text.contains("defaults_strict.yml:9:3"), "{text}");

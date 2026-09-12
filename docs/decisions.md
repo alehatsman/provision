@@ -576,3 +576,26 @@ does not need.
 `--strict` would have caught and nobody ran `--strict` on. The fix then is not
 this default coming back — it is `--strict` becoming the default for a plan,
 which is a different and smaller change.
+
+**Triggered 2026-09-12** (structured multi-persona review, issue #5, before any
+plan shipped one). See D21.
+
+## D21 — `validate --strict` defaults on for a plan
+
+**Decision.** `--strict` (D3, D20) is on by default when the root file is a
+plan — a list root, the same shape test `is_component` already uses for D17.
+A task or component root keeps the old default, off. The flag itself only
+ever turns strict *on*; there is no way to turn it off for a plan, because
+there is no case for wanting D20's cost without the guard D20 named for it.
+
+**Why.** D20's own "Overturned by" clause named this exactly: nothing stops a
+convergence plan from carrying an ungated `sed -i /etc/pacman.conf` that
+rewrites a file on every `apply` while `plan` reports nothing to do, and the
+only guard was a flag an operator had to remember to type. A review pass
+caught the gap before a plan shipped the bug it describes, rather than after —
+the fix D20 already specified, applied on schedule instead of waited out.
+
+**What this does not overturn.** D20 itself: a bare `shell` step's exit code
+is still its whole contract, `ok` on exit 0, and a task or CI file still pays
+nothing for a discipline it has no state to need. Only the plan case's
+default moved, exactly as D20 said it would.
