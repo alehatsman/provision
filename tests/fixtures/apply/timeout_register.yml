@@ -1,0 +1,19 @@
+---
+# D22: `rc: 124` alone cannot tell provision's own kill from a step that
+# wraps its own command in `timeout(1)` and legitimately exits 124. Both
+# steps here report `rc == 124`; only `timed_out` tells them apart.
+- name: Provision kills this one
+  shell: sleep 5
+  timeout: 1s
+  register: killed
+  changed_when: "false"
+
+- name: This one exits 124 on its own
+  shell: "exit 124"
+  register: own_124
+  changed_when: "false"
+
+- name: Reads both registers
+  shell: "true"
+  when: killed.rc == 124 and killed.timed_out and own_124.rc == 124 and not own_124.timed_out
+  changed_when: "false"

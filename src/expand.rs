@@ -11,7 +11,7 @@ use crate::actions::Action;
 use crate::config::load::{self, Component, Loader};
 use crate::config::model::{self, Step};
 use crate::error::{Diag, Diags, Result};
-use crate::exec::process::Output;
+use crate::exec::process::{How, Output};
 use crate::exec::runner::{Judge, Prepared, Runner};
 use crate::output::Sink;
 use crate::output::event::{Event, Status, Summary};
@@ -1260,6 +1260,13 @@ fn result_value(out: Option<&Output>, status: &Status) -> Value {
     m.insert(
         "skipped".to_string(),
         Value::from(matches!(status, Status::Skipped(_))),
+    );
+    // D22: `rc: 124` alone cannot tell a step's own `timeout(1)` from
+    // provision killing it for exceeding its own `timeout` or `--deadline`.
+    // This is the field that can.
+    m.insert(
+        "timed_out".to_string(),
+        Value::from(out.is_some_and(|o| o.how == How::TimedOut)),
     );
     Value::from(m)
 }

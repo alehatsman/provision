@@ -599,3 +599,42 @@ the fix D20 already specified, applied on schedule instead of waited out.
 is still its whole contract, `ok` on exit 0, and a task or CI file still pays
 nothing for a discipline it has no state to need. Only the plan case's
 default moved, exactly as D20 said it would.
+
+## D22 — `register.timed_out` names who killed the step
+
+**Decision.** `register` binds a sixth field, `timed_out: bool`, alongside
+`rc`, `stdout`, `stderr`, `changed`, `skipped`. It is `true` exactly when the
+step's own process was killed — by its own `timeout`, or by `--deadline` —
+rather than exited on its own. `rc` for a killed step stays `124`, unchanged
+from before this decision. `timed_out` is the discriminator; `rc` is not.
+
+**Why.** `rc: 124` already meant two different things, and nothing in
+`register` said which. A step whose own command wraps something in
+`timeout(1)` and legitimately exits 124 reads identically, in
+`failed_when`/`register`, to a step provision itself killed for exceeding its
+`timeout` or the run's `--deadline` — both report `rc: 124`, because both
+*are* `timeout(1)`'s convention (spec, `--deadline`), and that convention is
+not being overturned here: a killed child's `rc` staying `124` is still the
+right answer to "what does a shell reader expect a killed process to
+report." The gap was narrower than "fix the exit code" — it was "give the one
+consumer who needs to tell the two apart, `register`, a field for it,"
+without touching the process-level exit code (`main.rs`'s `124` on
+`--deadline`, spec `--deadline` entry) or `timeout(1)`'s own convention at
+all.
+
+**What this does not overturn.** The spec's `--deadline` entry, unchanged: the
+run's own exit code is still `124`, still `timeout(1)`'s code, still what a
+killed child already reports. Nothing about `rc`'s value changed for any
+step, killed or not — a reader who already wrote `failed_when: result.rc ==
+124` keeps reading the same thing. `timed_out` is additive: an old plan that
+never reads it behaves exactly as before.
+
+**The cost, stated plainly.** A seventh word in a fixed five-field shape that
+spec §4 called fixed. The field earns it: the alternative — making `rc` carry
+`None`/absent for a killed step — would change what every existing
+`failed_when: result.rc == 124` plan reads, silently, for the case D19 exists
+to guard.
+
+**Triggered 2026-09-12**, issue #5's "Later" queue, item "namespace exit
+codes so a step's own internal `timeout` call is distinguishable from
+provision's own deadline-kill."
