@@ -558,8 +558,11 @@ is small enough that merge cost exceeds the gain.
 - Lines of Rust per phase, against the budget.
 - `provision apply` wall time on x1 versus `mooncake apply`. Should be equal
   or better; the shell steps dominate both.
-- Number of `unknown` verdicts on a converged machine. Target: zero after
-  migration. Each one is a shell step missing its gate.
+- Number of `validate --strict` errors on a converged machine. Target: zero
+  after migration. Each one is a shell step missing its gate. This used to
+  count `unknown` verdicts on a plan, which measured the same thing only
+  while an ungated shell step produced one; since 2026-09-12 it does not
+  (spec §6.1), and `--strict` is where that count now lives.
 
 ## Deferred, with the condition that reopens each
 
@@ -570,7 +573,7 @@ is small enough that merge cost exceeds the gain.
 | `defaults` `array`/`dict` types | a second array key appears in the mac plans |
 | `pkg` repo/tap/PPA management | a shell recipe from migration.md fails idempotency in practice |
 | Loops | any step repeats itself more than 3 times by copy-paste |
-| `verdict: exit_code`, and a file-level default for it | a real moongit job file is written and `changed_when: false` is the boilerplate on more than 3 of its steps. The wart is real and named in spec §6.1 — the word is a lie on a build step — but the evidence for it lives on the CI side, and the runner has not switched yet. Three uses in `tasks/` is not the case; a job file is. Not a mode flag: two dialects of one language is the road back to a verb changing a file's meaning (D17, phase 5b) |
+| ~~`verdict: exit_code`, and a file-level default for it~~ | **Closed 2026-09-12, not built — superseded.** The condition tripped: `mgitci.yml` exists, ten steps, every one a bare command, and written in moongit's own schema because provision's surface could not carry that shape without ten lines of ceremony. But a `verdict:` modifier is that same ceremony under a truer name, and a file-level default is a second place to look for a step's meaning. The census that closed it also priced the thing `verdict:` was protecting: `validate --strict` over all five machine plans found **one** ungated shell step in the whole fleet, a `killall` that reads better as `ok` than as `unknown`. So the default moved instead — a bare `shell` step's exit code is its whole contract (spec §6.1) — and `--strict` keeps D3 as an opt-in lint. No mode flag, no second dialect: nothing about a file changed, only one default verdict, in the language, under every verb |
 | Windows typed actions | the PowerShell bootstrap exceeds 500 lines or breaks idempotency |
 | Run log | a real question "what did the last apply do" goes unanswered twice |
 | Remote apply (`ssh host provision apply`) | never as a feature; a shell alias suffices |

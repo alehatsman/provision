@@ -46,16 +46,22 @@ ten.
 
 **Decision.** `shell` and `cmd` are primary actions. Their idempotency comes
 from `unless`, `creates`, or `changed_when` on the step. A shell step
-without a gate reports `unknown`, and `validate --strict` rejects it.
+without a gate is rejected by `validate --strict`.
 
 **Why.** 57% of real steps are shell today, and the real configs already
 gate them with `unless_command` (39 uses) and `creates`. Pretending 64 typed
 actions cover the world produced 19 actions with no diff, no reverse, no
 permissions, and a `changed: true` lie on every Windows step. Making the
-gate explicit and visible in output ("`unknown`") is honest; auto-detecting
-change from shell is not possible.
+gate explicit is honest; auto-detecting change from shell is not possible.
 
-**Overturned by.** Nothing. This is the core idea.
+**Amended 2026-09-12 (D20).** An ungated step used to *report* `unknown` as
+well as being rejected by `--strict`. The verdict is gone; the rejection
+stays. D3's claim was that idempotency must be declared rather than guessed,
+and that is untouched — provision still never infers change from a shell
+step. What changed is the answer for a step that declares no state at all,
+where `unknown` was answering a question the step had not asked.
+
+**Overturned by.** Nothing. The core idea — declared, never guessed — stands.
 
 ## D4 — Seven typed actions, chosen by state inspection need
 
@@ -258,12 +264,22 @@ will actually run. D11 already says plan is best-effort and must say so;
 validation failed.
 
 **Why.** Spec §8 said "0 if nothing would change, 2 if something would" and
-never said which side `unknown` falls on. It has to be 2. An ungated `shell`
-step is `unknown` forever, so counting it as 0 makes a converged machine and
-a machine full of ungated shell steps report identically — and `plan` stops
-being a drift check on exactly the steps most likely to drift. Counting it as
-2 gives `--strict` (D3) something to be *for*: driving the unknown count to
-zero is what makes exit 0 mean something. plan.md already measures it.
+never said which side `unknown` falls on. It has to be 2. A step provision
+cannot judge is not a step it may call converged, so counting it as 0 would
+make a converged machine and a machine full of unjudgeable steps report
+identically — and `plan` stops being a drift check on exactly the steps most
+likely to drift.
+
+**Amended 2026-09-12 (D20).** The original argument was carried by the
+ungated `shell` step, which was `unknown` forever, and it read "driving the
+unknown count to zero is what `--strict` is for". An ungated shell step now
+reports `would run` under plan, which is in the same exit-2 bucket, so no
+exit code moves. What changes is the *source* of `unknown`: it is now
+plan-only and comes from `pkg` `latest`, a `git` branch ref, and `defaults`
+off macOS — three cases where plan declines a network call or a mutation and
+apply answers by doing the work. `--strict` is still what drives ungated
+shell steps to zero; it just does it as a validation error rather than
+through an exit code.
 
 `unprobed` counts for the same reason `unknown` does. In a probed plan it
 means an action whose runner does not exist yet, or a root gate this run could
@@ -506,3 +522,57 @@ log-write boundary, where it knows what the secrets are. Spec §6.3's
 independent steps *and* splitting it runner-side is measured worse. Masking,
 when a real secret reaches a real log through provision and the runner could
 not have caught it. Neither has happened.
+
+## D20 — a bare `shell` step's exit code is its whole contract
+
+**Decision.** A `shell` or `cmd` step with no `unless`, `creates` or
+`changed_when` reports `ok` on exit 0 and `failed` otherwise, and under `plan`
+reports `would run`. It no longer reports `unknown`. `validate --strict` still
+rejects it (D3 as amended). `changed_when: false` stays legal and unchanged.
+
+**Why.** The word was a lie, and the spec had said so since phase 5b: a build,
+a test or a lint wrote `changed_when: false` in order to read `ok`, and on
+`cargo build --release` that is literally false — the build rewrites `target/`
+every run. What the author meant was "do not ask me about change", a different
+proposition wearing the first one's words. The fix was deferred behind a
+reopen condition: a real job file where the boilerplate lands on more than
+three steps.
+
+It arrived, and it arrived as evidence against the fix that had been sketched.
+`mgitci.yml` in the dotfiles repo is ten steps, each a bare command — and it is
+written in **moongit's own schema**, not provision's, because provision's
+surface could not carry that shape without ten lines of ceremony. Against
+that, the sketched `verdict: exit_code` modifier is the same ceremony under a
+truer name, and the sketched file-level default is a second place a reader
+must look to learn what a step means. Neither gets `- shell: cargo test` down
+to one line, which is the thing the runner actually wanted.
+
+The census that settled it also priced what `unknown` was protecting.
+`validate --strict` across all five machine plans found **one** ungated shell
+step in the entire fleet: a `killall cfprefsd Finder SystemUIServer` whose own
+comment says it is a no-op to gate on. That step reads *better* as `ok` than as
+`unknown`. `--strict` had already done its teaching; the fleet gates its
+convergence steps, and the default was collecting a toll from the task case to
+guard a door nobody was walking through.
+
+**What this does not overturn.** Phase 5b withdrew a `run` verb that made an
+ungated step `ok` *by virtue of the verb*, on the rule that the same file must
+mean the same thing under every verb. That rule is intact and was the binding
+constraint on the design: there is no mode, flag or verb here that makes a bare
+step mean the other thing. A file means one thing, and one default verdict
+moved in the language for every reader of it. D3's "declared, never guessed" is
+also intact — provision still infers nothing about change from a shell step;
+it stopped *asking* about change on a step that declares no state.
+
+**The cost, stated plainly.** Nothing now stops a convergence plan from
+carrying an ungated `sed -i /etc/pacman.conf` that rewrites the file on every
+apply while `plan` reports nothing to do. That is a real regression and the
+guard is `validate --strict`, which a plan that converges a machine runs in its
+own CI. The trade is deliberate: a task or CI job file, where every step is an
+exit code and there is no state to declare, should not pay for a discipline it
+does not need.
+
+**Overturned by.** A convergence plan shipping a silent drift bug that
+`--strict` would have caught and nobody ran `--strict` on. The fix then is not
+this default coming back — it is `--strict` becoming the default for a plan,
+which is a different and smaller change.

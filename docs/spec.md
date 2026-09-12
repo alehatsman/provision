@@ -1,6 +1,6 @@
 # provision — specification
 
-Status: v0.7 · 2026-09-08 · owner: aleh
+Status: v0.8 · 2026-09-12 · owner: aleh
 
 This is the contract. Code that disagrees with it is wrong, or this file is.
 Fix one.
@@ -127,7 +127,7 @@ Call site:
 - A component is also a **task**: `provision apply <component.yml>` runs it
   as the root scope with props supplied by `--prop`, and `plan` and
   `validate` take it the same way (§8). A task step whose exit code is its
-  whole contract says `changed_when: false` and reads `ok` (§6.1).
+  whole contract is written bare and needs no modifier to read `ok` (§6.1).
 
 ### 3.3 Variables and precedence
 
@@ -266,42 +266,66 @@ shell:                         # long form
 ```
 
 - Idempotency: **declared**, via `unless`, `creates`, or `changed_when`. A
-  bare `shell` step with none of these is reported `changed: unknown`.
-  `validate --strict` fails on it.
+  bare `shell` step with none of these declares nothing about state, and its
+  **exit code is its whole contract**: `ok` on exit 0, `failed` otherwise.
+  `validate --strict` still rejects it — a convergence plan usually does have
+  state to declare, and forgetting to declare it is the mistake that flag
+  exists to catch (§8, D3).
 - The verdict of a gated step is the gate's own meaning: `unless` exited
   non-zero, or `creates` did not exist, so the work was needed — a successful
-  run is `changed`. With no gate the verdict is `unknown`: the step ran, and
-  nothing here can say what it did. `changed_when` overrides either.
+  run is `changed`. With no gate there is no claim about state to report, and
+  the exit code is read as the whole of what the step promised.
+  `changed_when` overrides either.
 - Plan: a gated step prints `skip` or `would run` — plan evaluates `unless`
   or `creates` and the gate's answer is a verdict. An ungated step prints
-  `unknown`, the same verdict apply gives it and for the same reason: it
-  will run, and nothing here can say what it would do. (This used to promise "plus the first
+  `would run`: it carries no gate, so plan knows it will run, and the one
+  thing plan cannot know about it — whether it will exit 0 — is not a
+  question about state and is not plan's to answer. (This used to promise "plus the first
   line of the script". The renderer never printed one and nothing has wanted
   it: the step's name is what carries the meaning, and a script's first line
   is usually `set -euo pipefail`.)
   `--plan-no-probe` skips `unless` evaluation (for CI without the target).
 - A step whose exit code is its whole contract — a test run, a build, a
-  lint — says `changed_when: false` and is `ok` on exit 0. That is the task
-  case (D17), and it is the same declaration a plan makes: there is no
-  command under which an undeclared step reads anything but `unknown`.
-  (Phase 5 had `run` report such a step `ok` by virtue of the verb; phase
-  5b withdrew that. The same file means the same thing under every verb.)
-  This is the one place the declaration is explained; a task file that makes
-  it points here rather than repeating the reasoning.
+  lint — is **written bare and needs no modifier**. That is the task case
+  (D17) and it is the whole of the CI shape: `shell: cargo test` and nothing
+  else. `changed_when: false` says the same thing explicitly, stays legal,
+  and is the right thing to write where a reader would otherwise wonder
+  whether the gate was forgotten.
 
-  **Known wart, deferred on purpose.** `changed_when: false` on
-  `cargo build --release` is literally false — the build rewrites `target/`
-  every run. What the author means is "do not ask me about change; the exit
-  code is the whole contract", which is a different proposition wearing the
-  first one's words. The fix, when it is earned, is to name it: a
-  `verdict: exit_code` modifier, satisfying `--strict` because it *is* a
-  declaration, with `changed_when: false` staying legal; and if the
-  per-step repetition is what hurts, a file-level default carrying it (and
-  `timeout`) once. Neither is built. The evidence for the format change
-  comes from the CI angle, where every step is this shape, and the first
-  real moongit job file does not exist yet — the runner has not switched
-  (plan.md). Count the lines in a real job, then decide. Three uses in
-  `tasks/` is not the case. See plan.md "Deferred".
+  **This used to read `unknown`, and the word had become a lie.** An ungated
+  step reported `changed: unknown` and `--strict` demanded a gate, so a
+  build, a test or a lint said `changed_when: false` to read `ok` — which on
+  `cargo build --release` is literally false, because the build rewrites
+  `target/` every run. What the author meant was "do not ask me about
+  change; the exit code is the whole contract", a different proposition
+  wearing the first one's words. The wart was named here and the fix
+  deferred behind a reopen condition (plan.md): a real job file where the
+  boilerplate lands on more than three steps.
+
+  **2026-09-12, the condition was met, and the fix was not the one that had
+  been sketched.** The job file exists — `mgitci.yml` in the dotfiles repo,
+  ten steps, each a bare command — and it is written in moongit's own
+  schema, not provision's, because provision's surface could not carry that
+  shape without ten lines of ceremony. Against that, a `verdict: exit_code`
+  modifier is the same ceremony under a truer name, and a file-level default
+  is a second place to look for a step's meaning. The census that settled it
+  also found the `unknown` default was protecting almost nothing:
+  `validate --strict` over all five machine plans reported exactly one
+  ungated shell step in the fleet, a `killall` to refresh preference caches
+  whose own comment says it is a no-op to gate on — a step that reads
+  *better* as `ok` than as `unknown`. So the default moved and the modifier
+  was dropped.
+
+  **Phase 5b's rule survives this intact.** It withdrew a `run` verb that
+  made an ungated step `ok` *by virtue of the verb*, because the same file
+  must mean the same thing under every verb. Nothing about a file changed
+  here: a bare step declares the same thing under `validate`, `plan` and
+  `apply` — plan says `would run` and apply says `ok`, which are twins the
+  way `would change` and `changed` are — and there is no mode, flag or verb
+  that makes it mean the other thing. What changed is one default verdict, in the language, for every
+  reader of it. `unknown` remains a verdict and remains correct where
+  provision genuinely cannot know: `pkg` `latest` under plan (§6.5), a `git`
+  branch ref under plan (§6.8), `defaults` off macOS (§6.10).
 - Streaming: stdout/stderr captured. On failure **both** are shown, stdout
   first, each tailed to its own last 20 lines; `--verbose` shows both in
   full, on a failure and on a step that worked alike; `--stream` tees them
@@ -714,7 +738,9 @@ download:
 Ensure a macOS preference key holds a value. Phase 6, D4 as amended
 2026-09-08: the mac plans carried twenty `defaults write` lines in one
 ungated shell step, which reported `unknown` on every apply and could not
-say which key it had changed.
+say which key it had changed. (Since D20 that step would report `ok`
+instead, which is a better word for the exit code and no better an answer
+about the twenty keys — the reason this action exists is unchanged.)
 
 ```yaml
 defaults:
@@ -789,6 +815,15 @@ gates, so it has a wall clock worth bounding too. There is no
   `pkg` that names no package, a `file` with neither `content` nor `src`, a
   `mode` that is not a quoted octal string. No commands run. `--strict` also
   rejects `shell`/`cmd` steps with no idempotency gate.
+
+  **`--strict` is where D3 now lives.** A bare `shell` step runs and reports
+  `ok` (§6.1), so nothing stops a convergence plan from carrying one that
+  rewrites `/etc/pacman.conf` on every apply while `plan` reports nothing to
+  do. That is a real regression to guard against, and the guard is this flag
+  rather than a default verdict: a task or CI job file, where every step is
+  an exit code and there is no state to declare, should not have to answer
+  for a discipline it does not need. A plan that converges a machine runs
+  `validate --strict` in its own CI and gets the discipline back in full.
 
   One exception, and only one: a `file` step's `src` after a `shell` or `cmd`
   step in the same walk. That command can create any path and nothing has run,
@@ -920,8 +955,10 @@ gates, so it has a wall clock worth bounding too. There is no
   `provision apply job.yml --json`: the stream carries every step's status,
   exit code, captured output, duration and file:line as each step finishes
   (§9.3), and provision owns ordering, fail-fast, timeouts and the
-  interrupt. Steps a runner generates from plain command lines carry
-  `changed_when: false` so they read `ok` (§6.1).
+  interrupt. Steps a runner generates from plain command lines carry **no
+  modifier at all** — a bare `shell` step's exit code is its whole contract
+  and it reads `ok` on exit 0 (§6.1), so a generated job file is one line
+  per command.
 
   The rest of that contract is three things and is fixed by D19. **Cancel**
   by sending SIGTERM to the process: the current step's process group dies,
@@ -974,8 +1011,7 @@ came from.
 `unknown`, or `would run (unprobed)` — anything that is not `ok` or `skipped`.
 **`unknown` counts, and so does `unprobed`.** Both are provision saying it does
 not know, which is not the same as nothing to do; a step provision cannot judge
-is not a step it may call converged, and driving that count to zero is
-precisely what `--strict` is for. `--plan-no-probe` is the one exception: it
+is not a step it may call converged. `--plan-no-probe` is the one exception: it
 inspects nothing, so it claims nothing, and exits 0 unless validation failed.
 
 A malformed command line — an unknown flag, a missing argument, an unknown
@@ -996,18 +1032,26 @@ One line per step, updated in place while running (spinner), then frozen:
   ✓ Install zsh                                    ok        0.4s
   ~ Deploy .zshrc                                  changed   0.0s
   - Generate SSH identity                          skipped   creates exists
-  ? Add neovim PPA                                 unknown   1.2s
+  ✓ cargo test --workspace                         ok        0.9s
   ✗ Enable multilib                                FAILED    0.1s
     │ sed: can't read /etc/pacman.conf: No such file or directory
     │ (exit 2 · stderr, last 20 lines · --verbose for all)
 
-  x1.yml · 5 steps · 1 changed · 1 ok · 1 skipped · 1 unknown · 1 failed · 1.7s
+  x1.yml · 5 steps · 1 changed · 2 ok · 1 skipped · 1 failed · 1.7s
 ```
 
 - Glyphs and colors: `✓` green ok, `~` yellow changed, `-` dim skipped, `?`
   magenta unknown, `✗` red failed, `→` yellow would run. `would change` is
   the plan-time twin of `changed` and carries the same `~` and the same
   yellow. `NO_COLOR` and `--color=never` honored.
+- **`unknown` is a plan-time verdict and only that.** Every case that
+  produces it — `pkg` `latest` on an installed package (§6.5), a `git`
+  branch or unresolved ref (§6.8), `defaults` off macOS (§6.10) — is a
+  question plan declines to answer with a network call or a mutation, and
+  apply answers all three by doing the work. The fourth case, an ungated
+  `shell` step, stopped being one when its exit code became its contract
+  (§6.1). So an `apply` reports only `ok`, `changed`, `skipped` and
+  `failed`, which is the vocabulary a CI runner reads (§8).
 - Nested `import`/`use` shown as a dim header line with the file name;
   steps indented one level. Depth capped at display; execution is flat.
 - Skipped steps collapse to one dim line each; `--hide-skipped` drops them
