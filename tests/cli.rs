@@ -135,6 +135,14 @@ fn validate_rejects_what_plan_would_reject() {
         3,
         "a quoted bool was taken as false:\n{out}"
     );
+    assert!(
+        out.contains("`content` does not apply to `state: link`"),
+        "{out}"
+    );
+    assert!(
+        out.contains("`src` does not apply to `state: dir`"),
+        "{out}"
+    );
     assert_positioned(&out);
 }
 
