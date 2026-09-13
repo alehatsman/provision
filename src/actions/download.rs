@@ -16,6 +16,7 @@
 //! because being unable to write next to the destination is usually why the
 //! step said sudo.
 
+use super::file::{install_as_root, set_mode};
 use super::{Ctx, Effect};
 use crate::config::model::Step;
 use crate::error::Result;
@@ -245,16 +246,8 @@ impl Spec {
             }
             let kept = staged.into_temp_path();
             let from = kept.display().to_string();
-            let mode_arg = format!("{mode:04o}");
-            let mut argv = vec!["install", "-m", &mode_arg];
-            if let Some(o) = &self.owner {
-                argv.extend(["-o", o]);
-            }
-            if let Some(g) = &self.group {
-                argv.extend(["-g", g]);
-            }
-            argv.extend([from.as_str(), self.dest.as_str()]);
-            return ctx.perform(&argv, true);
+            let (owner, group) = (self.owner.as_deref(), self.group.as_deref());
+            return install_as_root(ctx, &from, &self.dest, mode, owner, group);
         }
         if let Err(e) = set_mode(staged.path(), mode) {
             return Some(Effect::fail(format!("cannot set the mode: {e}")));
@@ -331,17 +324,6 @@ fn parent_of(path: &str) -> PathBuf {
         Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
         _ => PathBuf::from("."),
     }
-}
-
-#[cfg(unix)]
-fn set_mode(path: &Path, mode: u32) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
-}
-
-#[cfg(not(unix))]
-fn set_mode(_path: &Path, _mode: u32) -> std::io::Result<()> {
-    Ok(())
 }
 
 #[cfg(test)]
