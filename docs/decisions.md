@@ -523,6 +523,17 @@ independent steps *and* splitting it runner-side is measured worse. Masking,
 when a real secret reaches a real log through provision and the runner could
 not have caught it. Neither has happened.
 
+**Reopen check: 2026-12-12.** Everything above was built against a runner
+that has not yet run it. moongit's runner switching to `provision apply
+job.yml --json` — reading the stream, cancelling with SIGTERM, passing
+`--deadline` — is the owner's, and was open-ended. On
+2026-12-12, look: if no moongit job has run through that contract in
+production, this decision and D17's CI-runner half are **unvalidated**, not
+settled, and are read that way — the next CI request is argued from scratch
+rather than against the line drawn here. D17's task half is not in question;
+this repo's own `tasks/` exercise it on every gate run. Set 2026-09-13 from
+issue #5.
+
 ## D20 — a bare `shell` step's exit code is its whole contract
 
 **Decision.** A `shell` or `cmd` step with no `unless`, `creates` or

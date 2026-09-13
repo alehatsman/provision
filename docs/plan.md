@@ -545,7 +545,8 @@ Gate
   is the thing that closes this. The mac it was built on has no such target.
 - **Owner's:** moongit's runner actually reading the stream, cancelling with
   TERM and passing `--deadline`. That is the real gate and it lives in that
-  repo.
+  repo. **Check on 2026-12-12**: unexercised by then means D17's CI half and
+  D19 are unvalidated, not settled (D19).
 
 ## Order and dependencies
 
