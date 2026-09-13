@@ -2900,6 +2900,37 @@ fn latest_fails_an_install_that_did_nothing() {
     );
 }
 
+// Spec §6.5: the query is where every verdict comes from, and a query that
+// failed gave no answer. Its exit code was never read, so a `dpkg-query` that
+// errored with empty output read as "nothing installed": `state: absent`
+// reported `ok` without removing anything, and `present` installed and then
+// blamed the install for what the query got wrong.
+#[test]
+fn a_failed_query_fails_the_step() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    fake_manager(
+        &bin,
+        "dpkg-query",
+        "echo 'dpkg-query: the database is locked' >&2
+exit 2
+",
+    );
+    fake_manager(
+        &bin, "apt-get", "exit 0
+",
+    );
+
+    let (code, out) = pkg_apply_with_path(
+        dir.path(),
+        "- name: Removes git\n  pkg:\n    names: [git]\n    manager: apt\n    state: absent\n",
+        &bin,
+    );
+    assert_eq!(code, 1, "a failed query read as nothing installed:\n{out}");
+    assert!(out.contains("the database is locked"), "{out}");
+}
+
 // Spec §8: each step's effective timeout is the lesser of its own and the
 // time left, so no step runs past the deadline it was admitted under. A typed
 // action took the timeout computed before its `unless` ran — so the gate's

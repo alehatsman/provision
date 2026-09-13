@@ -565,6 +565,23 @@ impl Spec {
         if let Some(bad) = ctx.stopped(&got) {
             return Err(bad);
         }
+        // Every query lists what is installed and names no package, so a
+        // non-zero exit is the query failing, not an answer. Its output was
+        // parsed anyway: an error with empty stdout read as "nothing
+        // installed", and `absent` reported `ok` without removing anything.
+        if got.rc != 0 {
+            let stderr = got.stderr_text();
+            return Err(Effect::Failed {
+                msg: format!(
+                    "`{}` exited {}: {}",
+                    argv.join(" "),
+                    got.rc,
+                    stderr.lines().next().unwrap_or("")
+                ),
+                detail: stderr,
+                interrupted: false,
+            });
+        }
         Ok((m.parse)(&String::from_utf8_lossy(&got.stdout)))
     }
 
