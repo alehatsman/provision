@@ -209,6 +209,22 @@ fn a_modifier_on_the_wrong_step_is_an_error() {
     assert_positioned(&out);
 }
 
+#[test]
+fn a_modifier_bool_given_as_a_string_is_an_error() {
+    // `sudo: "true"` read as false would run the step unprivileged.
+    let (code, out) = validate("bad_modifier_bools.yml");
+    assert_eq!(code, EXIT_VALIDATION, "{out}");
+    for line in [3, 6, 9] {
+        let at = format!("bad_modifier_bools.yml:{line}:");
+        assert!(
+            out.lines()
+                .any(|l| l.contains(&at) && l.contains("expected true or false")),
+            "{out}"
+        );
+    }
+    assert_positioned(&out);
+}
+
 // ── composition ───────────────────────────────────────────────────────────
 
 #[test]
