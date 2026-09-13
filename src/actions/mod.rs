@@ -392,6 +392,11 @@ pub(crate) struct Ctx<'a> {
     /// `apt-get install` waits forever on a dpkg lock, and §4 promises the
     /// step is killed either way.
     pub timeout: Duration,
+    /// Spec §8: `timeout` is the run's remaining `--deadline`, not the step's
+    /// own, because the deadline was the smaller. Only the wording of a kill
+    /// depends on it: a message naming a step timeout the file does not
+    /// contain sends a reader hunting for a number nobody wrote.
+    pub deadline_bound: bool,
     pub env: &'a BTreeMap<String, String>,
 }
 
@@ -474,7 +479,12 @@ impl Ctx<'_> {
             process::How::Exited => None,
             process::How::TimedOut => Some(Effect::Failed {
                 msg: format!(
-                    "timed out after {}",
+                    "{} after {}",
+                    if self.deadline_bound {
+                        "deadline exceeded"
+                    } else {
+                        "timed out"
+                    },
                     crate::output::event::human(self.timeout)
                 ),
                 detail: got.stderr_text(),

@@ -2864,6 +2864,69 @@ fn an_install_that_did_nothing_fails_instead_of_claiming_changed() {
     );
 }
 
+// Spec §8: each step's effective timeout is the lesser of its own and the
+// time left, so no step runs past the deadline it was admitted under. A typed
+// action took the timeout computed before its `unless` ran — so the gate's
+// two seconds were spent twice, and the hung query below ran to ~5s against a
+// 3s deadline and said `timed out` about a step timeout the file never wrote.
+#[test]
+fn a_typed_action_after_its_gate_gets_only_the_time_left() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    // The query is the first command a `pkg` step runs, and this one hangs.
+    // `apt-get` only has to be on PATH: the step checks for it first.
+    fake_manager(
+        &bin,
+        "dpkg-query",
+        "sleep 20
+",
+    );
+    fake_manager(
+        &bin, "apt-get", "exit 0
+",
+    );
+    let path = dir.path().join("pkg.yml");
+    std::fs::write(
+        &path,
+        "- name: A query that hangs behind a slow gate\n  pkg:\n    names: [yarn]\n    manager: apt\n  unless: \"sleep 2; exit 1\"\n",
+    )
+    .unwrap();
+
+    let started = std::time::Instant::now();
+    let out = Command::new(env!("CARGO_BIN_EXE_provision"))
+        .args([
+            "apply",
+            path.to_str().expect("temp paths are UTF-8"),
+            "--deadline",
+            "3s",
+        ])
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                bin.display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("provision failed to start");
+    let elapsed = started.elapsed();
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+
+    assert_eq!(out.status.code(), Some(124), "{text}");
+    assert!(
+        elapsed < std::time::Duration::from_millis(4500),
+        "the query ran past the deadline: {elapsed:?}\n{text}"
+    );
+    assert!(
+        text.contains("deadline exceeded after"),
+        "named a step timeout the file does not contain:\n{text}"
+    );
+}
+
 // The other half: an install that really installs is still `changed`. Without
 // this the fix above could pass by failing every install there is.
 #[test]
