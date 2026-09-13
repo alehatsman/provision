@@ -682,7 +682,11 @@ impl Expander {
         if !raw {
             collect_strings(step.body, &mut fields);
         }
+        // `name` too: `plan` and `apply` render it for the step's line, and an
+        // undefined variable there failed both while `validate` said ok —
+        // spec §8's "anything plan would reject, validate rejects too".
         for n in [
+            step.mods.name,
             step.mods.unless,
             step.mods.creates,
             step.mods.cwd,
@@ -712,7 +716,7 @@ impl Expander {
             match e.as_scalar_string() {
                 Ok(src) => {
                     let at = |m: String| e.err(m);
-                    if let Err(d) = self.engine.check_syntax(&src, &at) {
+                    if let Err(d) = self.engine.check_expression(&src, &at) {
                         self.diags.push(d);
                         renderable = false;
                     }
