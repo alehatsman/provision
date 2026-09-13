@@ -221,10 +221,12 @@ impl Action {
                     }
                     None => Interpreter::default_for_host(),
                 };
-                let login = body
-                    .get("login")
-                    .and_then(|n| n.as_bool().ok())
-                    .unwrap_or(false);
+                // A YAML boolean or an error, not a silent `false` (see `pkg`'s
+                // `cask`): `login: "true"` ran a non-login shell.
+                let login = match body.get("login") {
+                    Some(n) => n.as_bool()?,
+                    None => false,
+                };
                 Action::Shell {
                     script,
                     interpreter,

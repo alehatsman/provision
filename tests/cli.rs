@@ -129,6 +129,12 @@ fn validate_rejects_what_plan_would_reject() {
         "{out}"
     );
     assert!(out.contains("`cmd` is a list of arguments"), "{out}");
+    assert_eq!(
+        out.matches("expected true or false, found a string")
+            .count(),
+        2,
+        "a quoted bool was taken as false:\n{out}"
+    );
     assert_positioned(&out);
 }
 
