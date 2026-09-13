@@ -473,6 +473,16 @@ impl Spec {
                 {
                     return bad;
                 }
+                // Spec §6.5's "present after" applies here too. The version
+                // compare below cannot see it: a package missing before and
+                // missing after has no version that moved, so an install that
+                // did nothing read `ok` — every apply, with plan saying
+                // `install` each time.
+                if !missing.is_empty()
+                    && let Some(bad) = self.verify(ctx, &missing, true)
+                {
+                    return bad;
+                }
                 let held: Vec<String> = self
                     .names
                     .iter()

@@ -2864,6 +2864,42 @@ fn an_install_that_did_nothing_fails_instead_of_claiming_changed() {
     );
 }
 
+// The same rule under `state: latest`, which installs what is missing before
+// upgrading the rest. That path compared versions before and after and never
+// asked whether the install had installed anything: yarn missing before and
+// missing after is "no version moved", so the step read `ok` — every apply,
+// with plan saying `install yarn` each time.
+#[test]
+fn latest_fails_an_install_that_did_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    fake_manager(
+        &bin,
+        "dpkg-query",
+        "printf 'cmdtest\t0.32\tinstall ok installed\n'
+",
+    );
+    fake_manager(
+        &bin, "apt-get", "exit 0
+",
+    );
+
+    let (code, out) = pkg_apply_with_path(
+        dir.path(),
+        "- name: A virtual package, latest\n  pkg:\n    names: [yarn]\n    manager: apt\n    state: latest\n",
+        &bin,
+    );
+    assert_eq!(
+        code, 1,
+        "a no-op install under latest was not a failure:\n{out}"
+    );
+    assert!(
+        out.contains("yarn still not installed after `apt-get install`"),
+        "{out}"
+    );
+}
+
 // The other half: an install that really installs is still `changed`. Without
 // this the fix above could pass by failing every install there is.
 #[test]
