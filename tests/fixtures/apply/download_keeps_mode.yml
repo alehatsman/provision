@@ -1,0 +1,12 @@
+# A download with no `mode`, onto a `dest` that already exists (spec §6.9:
+# `mode` as `file` takes it, and §6.3 keeps an existing target's mode). The
+# test makes `dest` an executable holding other bytes, so the digest differs
+# and the step has to fetch and replace it.
+- vars:
+    scratch: "{{ env.PROVISION_SCRATCH }}"
+
+- name: The tool
+  download:
+    url: "{{ url }}"
+    dest: "{{ scratch }}/bin/tool"
+    sha256: "{{ sha }}"

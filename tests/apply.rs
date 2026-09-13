@@ -4003,6 +4003,31 @@ fn artifact_in(scratch: &Path) -> PathBuf {
     scratch.join("deep/nest/artifact.bin")
 }
 
+// Spec §6.9 takes `mode` "as `file` takes it", and §6.3 keeps an existing
+// target's mode unless `mode` says otherwise. A re-fetch placed the new file
+// at a flat 0644, so updating a tool to a new `sha256` with no `mode` left an
+// executable nobody could run.
+#[test]
+fn a_download_that_replaces_a_file_keeps_its_mode() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source.bin");
+    std::fs::write(&source, BODY).unwrap();
+    let tool = dir.path().join("bin/tool");
+    std::fs::create_dir_all(dir.path().join("bin")).unwrap();
+    std::fs::write(&tool, b"the old version\n").unwrap();
+    std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let args = dl_vars(&file_url(&source), BODY_SHA);
+    let args = as_args(&args);
+
+    let (code, out) = apply(dir.path(), "download_keeps_mode.yml", &args);
+    assert_eq!(code, 0, "{out}");
+    assert!(line_for(&out, "The tool").contains("changed"), "{out}");
+    assert_eq!(std::fs::read(&tool).unwrap(), BODY, "not replaced");
+    let mode = std::fs::metadata(&tool).unwrap().permissions().mode() & 0o7777;
+    assert_eq!(mode, 0o755, "the re-fetch reset the mode to {mode:o}");
+}
+
 #[test]
 fn download_verifies_the_hash_then_never_fetches_again() {
     let dir = tempfile::tempdir().unwrap();
