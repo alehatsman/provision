@@ -452,6 +452,87 @@ fn a_timeout_kills_the_children_not_only_the_shell() {
     );
 }
 
+/// Whether the pid a fixture wrote to `child.pid` is still running.
+fn child_alive(dir: &Path) -> bool {
+    let pid = std::fs::read_to_string(dir.join("child.pid"))
+        .expect("the step never wrote its child's pid");
+    Command::new("kill")
+        .args(["-0", pid.trim()])
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
+
+// Spec §4: `timeout` bounds the step, and a step whose shell has exited is not
+// finished while a child it started still holds the output pipe. The clock
+// used to stop at the shell's exit, and the run then waited on the pipe with
+// nothing watching it — 30s, reported `ok`.
+#[test]
+fn a_timeout_covers_a_child_still_holding_the_pipe() {
+    let dir = tempfile::tempdir().unwrap();
+    let started = std::time::Instant::now();
+    let (code, out) = apply(dir.path(), "held_pipe_timeout.yml", &[]);
+    let elapsed = started.elapsed();
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("timed out after 1"), "{out}");
+    assert!(
+        elapsed < std::time::Duration::from_secs(10),
+        "waited on the pipe past the timeout: {elapsed:?}\n{out}"
+    );
+    assert!(
+        !out.contains("Must not run after the timeout"),
+        "the walk did not stop:\n{out}"
+    );
+    assert!(
+        !child_alive(dir.path()),
+        "the child holding the pipe outlived the timeout"
+    );
+}
+
+// The same held pipe under a TERM (spec §10, D19): the signal used to go
+// unread until the pipe closed, so a cancelled job ran on for 30s and exited 0.
+#[test]
+fn sigterm_reaches_a_child_still_holding_the_pipe() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture("held_pipe_terminate.yml");
+    let started = std::time::Instant::now();
+    let child = Command::new(env!("CARGO_BIN_EXE_provision"))
+        .args(["apply", path.to_str().expect("fixture paths are UTF-8")])
+        .env("PROVISION_SCRATCH", dir.path())
+        .env("NO_COLOR", "1")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("provision failed to start");
+
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the child's own output is the assertion"
+    )]
+    let _ = Command::new("kill")
+        .args(["-TERM", &child.id().to_string()])
+        .status();
+
+    let out = child.wait_with_output().expect("child was spawned");
+    let elapsed = started.elapsed();
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+
+    assert_eq!(out.status.code(), Some(143), "{text}");
+    assert!(
+        elapsed < std::time::Duration::from_secs(10),
+        "waited on the pipe past the TERM: {elapsed:?}\n{text}"
+    );
+    assert!(
+        !text.contains("Must not run after a TERM"),
+        "kept going past the TERM:\n{text}"
+    );
+    assert!(
+        !child_alive(dir.path()),
+        "the child holding the pipe outlived the TERM"
+    );
+}
+
 // D22: `rc: 124` alone cannot tell provision's own kill from a step that
 // wraps its own command in `timeout(1)` and legitimately exits 124.
 #[test]
