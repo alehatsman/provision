@@ -14,3 +14,8 @@
 - name: A service that declares nothing
   service:
     name: nothing.service
+
+# A string answers "can I iterate" with its characters, so this parsed as the
+# argv `e c h o …` and failed at run time as `cannot run e`.
+- name: A cmd given a script instead of a list
+  cmd: "echo hi"

@@ -128,6 +128,7 @@ fn validate_rejects_what_plan_would_reject() {
         out.contains("`service` needs `state` or `enabled`"),
         "{out}"
     );
+    assert!(out.contains("`cmd` is a list of arguments"), "{out}");
     assert_positioned(&out);
 }
 
