@@ -3549,6 +3549,79 @@ fn no_ref_takes_the_remotes_default_branch() {
     );
 }
 
+impl Remote {
+    /// Advance `main` and force-move an existing tag onto the new tip — what a
+    /// project with a rolling `nightly` tag does every day.
+    fn move_tag(&self, name: &str) {
+        let work = self.root().join("retag");
+        self.clone_into(&work);
+        commit(&work, "retagged");
+        git_at(&work, &["push", "--quiet", "origin", "main"]);
+        git_at(&work, &["tag", "-f", name]);
+        let tag = format!("refs/tags/{name}");
+        git_at(&work, &["push", "--quiet", "--force", "origin", &tag]);
+        discard(&work);
+    }
+
+    /// A branch named after the one path the history tracks, so a bare
+    /// `git checkout <name>` cannot tell the branch from the file.
+    fn branch_named_like_a_path(&self) -> &'static str {
+        let work = self.root().join("branching");
+        self.clone_into(&work);
+        git_at(&work, &["checkout", "--quiet", "-b", "file.txt"]);
+        commit(&work, "on a branch named like a path");
+        git_at(&work, &["push", "--quiet", "origin", "file.txt"]);
+        discard(&work);
+        "file.txt"
+    }
+}
+
+// Spec §6.8: a branch fetches on every apply, and `fetch --tags` without
+// `--force` refuses to move a tag the checkout already has ("would clobber
+// existing tag"). One tag moved upstream broke every branch step on that
+// repository from then on.
+#[test]
+fn a_tag_moved_upstream_does_not_break_a_branch_checkout() {
+    let remote = Remote::new();
+    let dir = tempfile::tempdir().unwrap();
+    let args = git_vars(&remote, Some("main"));
+    let args = as_args(&args);
+
+    let (code, first) = apply(dir.path(), "git.yml", &args);
+    assert_eq!(code, 0, "{first}");
+
+    remote.move_tag("light");
+    let (code, moved) = apply(dir.path(), "git.yml", &args);
+    assert_eq!(code, 0, "{moved}");
+    assert!(
+        line_for(&moved, "The checkout").contains("changed"),
+        "{moved}"
+    );
+}
+
+// A bare `git checkout <name>` with a tracked path of the same name is
+// ambiguous, and git refuses rather than guess. The ref is a revision, and
+// the checkout says so.
+#[test]
+fn a_ref_named_like_a_tracked_path_checks_out() {
+    let remote = Remote::new();
+    let name = remote.branch_named_like_a_path();
+    let dir = tempfile::tempdir().unwrap();
+    let args = git_vars(&remote, Some(name));
+    let args = as_args(&args);
+
+    let (code, first) = apply(dir.path(), "git.yml", &args);
+    assert_eq!(code, 0, "{first}");
+    assert!(
+        line_for(&first, "The checkout").contains("changed"),
+        "{first}"
+    );
+
+    let (code, second) = apply(dir.path(), "git.yml", &args);
+    assert_eq!(code, 0, "{second}");
+    assert_eq!(verdict(&second, "The checkout"), "ok", "{second}");
+}
+
 // ── `defaults` (spec §6.10) ───────────────────────────────────────────────
 
 /// The non-macOS case, and now gated to say so.

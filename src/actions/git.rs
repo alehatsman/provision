@@ -376,8 +376,10 @@ impl Spec {
             .ask(ctx, &["rev-parse", "--abbrev-ref", "HEAD"])
             .as_deref()
             != Some(name.as_str())
+            // `--`: the branch is a revision, even when a tracked path shares
+            // its name (see `checkout`).
             && let Some(bad) = ctx.perform(
-                &["git", "-C", &self.dest, "checkout", "--quiet", &name],
+                &["git", "-C", &self.dest, "checkout", "--quiet", &name, "--"],
                 ctx.sudo,
             )
         {
@@ -418,10 +420,16 @@ impl Spec {
             .map(|e| Effect::fail(format!("cannot create {dir}: {e}")))
     }
 
+    /// `--force` because the remote owns its tags. Without it git refuses to
+    /// update a tag that moved upstream ("would clobber existing tag") and
+    /// exits 1, and a branch step fetches on every apply — so one rolling
+    /// `nightly` tag broke every branch checkout of that repository for good.
+    /// A tag this checkout sits on is compared by commit (§6.8), so a moved
+    /// one is reported like any other difference, never silently followed.
     fn fetch(&self, ctx: &Ctx<'_>) -> Option<Effect> {
         ctx.perform(
             &[
-                "git", "-C", &self.dest, "fetch", "--quiet", "--tags", "origin",
+                "git", "-C", &self.dest, "fetch", "--quiet", "--force", "--tags", "origin",
             ],
             ctx.sudo,
         )
@@ -429,10 +437,13 @@ impl Spec {
 
     /// Move HEAD onto the ref. A tag or sha lands detached, which §6.8 says
     /// is fine and is what a tag checkout leaves behind.
+    ///
+    /// The trailing `--` says the ref is a revision. Without it a ref with the
+    /// same name as a tracked path is ambiguous and git refuses the checkout.
     fn checkout(&self, ctx: &Ctx<'_>) -> Option<Effect> {
         let name = self.reference.as_deref()?;
         ctx.perform(
-            &["git", "-C", &self.dest, "checkout", "--quiet", name],
+            &["git", "-C", &self.dest, "checkout", "--quiet", name, "--"],
             ctx.sudo,
         )
     }
