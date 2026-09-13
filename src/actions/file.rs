@@ -372,37 +372,55 @@ fn stat(spec: &Spec, ctx: &Ctx<'_>) -> std::result::Result<Meta, String> {
     }
 }
 
+// The raw `st_mode`, not a type name and a permission string. It was
+// `%HT|%Lp` on macOS and `%F|%a` on Linux, and both lost something the
+// unprivileged path (`mode_of`) keeps: `%Lp` prints only the low nine bits,
+// so a setuid binary or a sticky directory read as changed forever under
+// sudo; and `%F` is a localized sentence, so a German locale's
+// "Verzeichnis" read as no known type, and "character special file"
+// contained "file" and read as a regular one. One number carries both the
+// type and every permission bit, in every locale. macOS prints it in octal,
+// GNU in hex.
 #[cfg(target_os = "macos")]
 fn stat_format() -> &'static str {
-    "-f%HT|%Lp|%Su|%Sg"
+    "-f%p|%Su|%Sg"
 }
+
+#[cfg(target_os = "macos")]
+const STAT_MODE_RADIX: u32 = 8;
 
 #[cfg(not(target_os = "macos"))]
 fn stat_format() -> &'static str {
-    "-c%F|%a|%U|%G"
+    "-c%f|%U|%G"
 }
 
+#[cfg(not(target_os = "macos"))]
+const STAT_MODE_RADIX: u32 = 16;
+
 fn parse_stat(text: &str) -> Meta {
+    parse_stat_in(text, STAT_MODE_RADIX)
+}
+
+/// `parse_stat` for a given radix, so both platforms' output is testable on
+/// either.
+fn parse_stat_in(text: &str, radix: u32) -> Meta {
+    const S_IFMT: u32 = 0o170_000;
     let mut parts = text.trim().split('|');
-    let ty = parts.next().unwrap_or("").to_ascii_lowercase();
-    let kind = if ty.contains("link") {
-        Kind::Link
-    } else if ty.contains("directory") {
-        Kind::Dir
-    } else if ty.contains("regular") || ty.contains("file") {
-        Kind::File
-    } else if ty.is_empty() {
-        Kind::Missing
-    } else {
-        Kind::Other
-    };
-    let mode = parts
+    let Some(raw) = parts
         .next()
-        .and_then(|m| u32::from_str_radix(m.trim(), 8).ok())
-        .unwrap_or(0);
+        .and_then(|m| u32::from_str_radix(m.trim(), radix).ok())
+    else {
+        return Meta::missing();
+    };
+    let kind = match raw & S_IFMT {
+        0o100_000 => Kind::File,
+        0o040_000 => Kind::Dir,
+        0o120_000 => Kind::Link,
+        _ => Kind::Other,
+    };
     Meta {
         kind,
-        mode,
+        mode: raw & 0o7777,
         owner: parts.next().unwrap_or("").to_string(),
         group: parts.next().unwrap_or("").to_string(),
     }
@@ -909,4 +927,48 @@ fn symlink(_target: &str, _path: &str) -> std::io::Result<()> {
     Err(std::io::Error::other(
         "symlinks are not supported on this platform",
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Captured from `stat -f '%p|%Su|%Sg'` (macOS) and `gstat -c '%f|%U|%G'`
+    // (GNU) on the same five paths, so each row is one file read both ways.
+    const ROWS: &[(&str, &str, Kind, u32)] = &[
+        // /usr/bin/sudo: setuid. `%Lp` printed 511 and dropped the 4.
+        ("104511|root|wheel", "8949|root|wheel", Kind::File, 0o4511),
+        // /private/tmp: sticky. `%Lp` printed 777 and dropped the 1.
+        ("41777|root|wheel", "43ff|root|wheel", Kind::Dir, 0o1777),
+        // /tmp on macOS is a symlink, and stat does not follow it.
+        ("120755|root|wheel", "a1ed|root|wheel", Kind::Link, 0o755),
+        // /dev/null: GNU's `%F` says "character special file", which
+        // contains "file" and used to read as a regular one.
+        ("20666|root|wheel", "21b6|root|wheel", Kind::Other, 0o666),
+        ("100644|me|staff", "81a4|me|staff", Kind::File, 0o644),
+    ];
+
+    #[test]
+    fn the_raw_mode_keeps_the_type_and_every_permission_bit() {
+        for (mac, gnu, kind, mode) in ROWS {
+            for (text, radix) in [(mac, 8), (gnu, 16)] {
+                let m = parse_stat_in(text, radix);
+                assert_eq!(m.kind, *kind, "{text}");
+                assert_eq!(m.mode, *mode, "{text}: {:o}", m.mode);
+            }
+        }
+        let m = parse_stat_in("100644|me|staff", 8);
+        assert_eq!((m.owner.as_str(), m.group.as_str()), ("me", "staff"));
+    }
+
+    // Nothing a successful stat prints fails to parse, but an empty answer
+    // is "no such file" rather than a regular file with mode 0.
+    #[test]
+    fn output_that_is_not_a_mode_reads_as_missing() {
+        assert_eq!(parse_stat_in("", 8).kind, Kind::Missing);
+        assert_eq!(
+            parse_stat_in("Verzeichnis|root|root", 16).kind,
+            Kind::Missing
+        );
+    }
 }
