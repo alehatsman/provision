@@ -1,0 +1,10 @@
+# `plan` runs gates (spec §4), and a gate is a child in its own process group
+# like any other, so the terminal's signal never reaches it. `plan` installed
+# no handler: a TERM during a hung gate killed provision where it stood and
+# left the gate running, unowned. The gate writes its shell's pid, which is
+# its group's leader, so the test can look for the orphan.
+- name: Gated on a check that hangs
+  shell: "true"
+  unless: |
+    echo $$ > "{{ env.PROVISION_SCRATCH }}/child.pid"
+    sleep 30
