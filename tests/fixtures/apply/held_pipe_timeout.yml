@@ -1,0 +1,17 @@
+# A background child that keeps the step's stdout open outlives the shell
+# (spec §4, §10).
+#
+# The shell exits at once; the `sleep` it started still holds the pipe, so the
+# output is not finished. `timeout` bounds the step, not the shell: it used to
+# stop counting when the shell exited, and the run then waited for the pipe to
+# close — the full 30s, reported `ok`.
+- name: Leaves a child holding stdout
+  shell: |
+    sleep 30 &
+    echo $! > "{{ env.PROVISION_SCRATCH }}/child.pid"
+  timeout: 1s
+  changed_when: "false"
+
+- name: Must not run after the timeout
+  shell: "true"
+  changed_when: "false"

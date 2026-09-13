@@ -1,0 +1,12 @@
+# The same held pipe, the other stop: a TERM while the shell has already
+# exited and its background child still holds stdout (spec §10, D19). No
+# `timeout:`, so only the signal can end the step early.
+- name: Leaves a child holding stdout
+  shell: |
+    sleep 30 &
+    echo $! > "{{ env.PROVISION_SCRATCH }}/child.pid"
+  changed_when: "false"
+
+- name: Must not run after a TERM
+  shell: "true"
+  changed_when: "false"

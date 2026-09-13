@@ -161,6 +161,9 @@ fn run_raw(s: &Spawn<'_>) -> std::io::Result<Raw> {
 
     let mut child = cmd.spawn()?;
     let pid = child.id();
+    // One clock for the whole step: the wait for the exit and the wait for
+    // the pipes both answer to it (see `wait_for_pipes`).
+    let limit = Instant::now() + s.timeout;
 
     if let Some(text) = s.stdin
         && let Some(mut pipe) = child.stdin.take()
@@ -177,7 +180,10 @@ fn run_raw(s: &Spawn<'_>) -> std::io::Result<Raw> {
     let out = drain(child.stdout.take(), s.stream, false);
     let err = drain(child.stderr.take(), s.stream, true);
 
-    let how = wait_for(&mut child, pid, s.timeout);
+    let how = match wait_for(&mut child, pid, limit) {
+        How::Exited => wait_for_pipes(&out, &err, pid, limit),
+        stopped => stopped,
+    };
     let rc = match how {
         How::Exited => exit_code(&mut child),
         // A killed child has no exit status worth reporting. 124 is what
@@ -189,12 +195,53 @@ fn run_raw(s: &Spawn<'_>) -> std::io::Result<Raw> {
         How::Interrupted => i32::from(stop_code()),
     };
 
+    // After a kill, a pipe still open belongs to a process that left the
+    // group — a daemon that called `setsid`. Nothing provision can signal is
+    // holding it, so its output is given up rather than the run.
+    let grace = Instant::now() + PIPE_GRACE;
     Ok(Raw {
         rc,
-        stdout: out.join().unwrap_or_default(),
-        stderr: err.join().unwrap_or_default(),
+        stdout: out.join(grace).unwrap_or_default(),
+        stderr: err.join(grace).unwrap_or_default(),
         how,
     })
+}
+
+/// How long to wait for a pipe to close once its step is over.
+const PIPE_GRACE: Duration = Duration::from_secs(2);
+
+/// Wait for both output pipes to close, on the step's own clock.
+///
+/// A shell that has exited has not finished its step while a child it started
+/// in the background still holds stdout or stderr: the output is not complete
+/// until every writer is gone, and `timeout` bounds the step, not the shell.
+/// This wait used to be an unbounded join, so `sleep 30 &` under `timeout: 1s`
+/// ran 30s and read `ok`, and a TERM went unread until the pipe closed. It now
+/// answers to the same clock and the same stop as `wait_for`, and ends the
+/// same way: killing the group closes the pipe.
+///
+/// The nap starts at a millisecond and doubles to the tick. Nearly every
+/// step's pipes are closed by the time its shell is reaped, and a flat 100ms
+/// here would be added to every one of them.
+fn wait_for_pipes(out: &Reader, err: &Reader, pid: u32, limit: Instant) -> How {
+    let tick = Duration::from_millis(100);
+    let mut nap = Duration::from_millis(1);
+    loop {
+        if out.done() && err.done() {
+            return How::Exited;
+        }
+        if interrupted() {
+            kill_group(pid);
+            return How::Interrupted;
+        }
+        let now = Instant::now();
+        if now >= limit {
+            kill_group(pid);
+            return How::TimedOut;
+        }
+        std::thread::sleep(nap.min(limit - now));
+        nap = (nap * 2).min(tick);
+    }
 }
 
 /// Wait, but wake up often enough to notice a Ctrl-C or a blown deadline.
@@ -203,8 +250,7 @@ fn run_raw(s: &Spawn<'_>) -> std::io::Result<Raw> {
 /// this thread polls a channel. 100ms of latency on a kill is invisible to a
 /// person and costs nothing; the alternative is a signal-driven wait that has
 /// to be correct under EINTR.
-fn wait_for(child: &mut Child, pid: u32, timeout: Duration) -> How {
-    let deadline = Instant::now() + timeout;
+fn wait_for(child: &mut Child, pid: u32, deadline: Instant) -> How {
     let tick = Duration::from_millis(100);
     loop {
         match child.try_wait() {
@@ -296,15 +342,24 @@ fn drain(pipe: Option<impl Read + Send + 'static>, stream: bool, is_err: bool) -
 struct Reader(Option<(std::thread::JoinHandle<()>, mpsc::Receiver<Vec<u8>>)>);
 
 impl Reader {
-    fn join(self) -> Option<Vec<u8>> {
+    /// The pipe has reached EOF, or there never was one.
+    fn done(&self) -> bool {
+        self.0.as_ref().is_none_or(|(h, _)| h.is_finished())
+    }
+
+    /// The captured bytes, waiting no later than `until` for them. A reader
+    /// still blocked then is left to its thread, which ends with the process.
+    fn join(self, until: Instant) -> Option<Vec<u8>> {
         let (h, rx) = self.0?;
-        let text = rx.recv().ok();
+        let text = rx
+            .recv_timeout(until.saturating_duration_since(Instant::now()))
+            .ok()?;
         #[expect(
             clippy::let_underscore_must_use,
             reason = "the output is already in hand"
         )]
         let _ = h.join();
-        text
+        Some(text)
     }
 }
 
