@@ -533,6 +533,124 @@ fn sigterm_reaches_a_child_still_holding_the_pipe() {
     );
 }
 
+// Spec §10: SIGTERM stops the run whether or not a child is running when it
+// arrives. The handler only records the signal, and the wait on a child was
+// the one place that read it — so a TERM during steps that spawn nothing, the
+// `file` writes here, went unread: every remaining step ran and the run exited
+// 0. The plan is generated long enough that the walk is still writing when the
+// signal lands; the marker step says the walk has started, so the handler is
+// installed before anything is sent.
+#[test]
+fn sigterm_between_steps_that_spawn_nothing_stops_the_run() {
+    use std::fmt::Write as _;
+    const FILES: usize = 20_000;
+
+    let dir = tempfile::tempdir().unwrap();
+    let written = dir.path().join("out");
+    std::fs::create_dir(&written).unwrap();
+    let started = dir.path().join("started");
+    let mut plan = String::new();
+    writeln!(
+        plan,
+        "- name: Marks the walk as started\n  shell: touch '{}'\n  changed_when: \"false\"",
+        started.display()
+    )
+    .unwrap();
+    for i in 0..FILES {
+        writeln!(
+            plan,
+            "- file: {{path: '{}/f{i}', content: x}}",
+            written.display()
+        )
+        .unwrap();
+    }
+    let path = dir.path().join("many_files.yml");
+    std::fs::write(&path, plan).unwrap();
+
+    let child = Command::new(env!("CARGO_BIN_EXE_provision"))
+        .args(["apply", path.to_str().expect("temp paths are UTF-8")])
+        .env("NO_COLOR", "1")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("provision failed to start");
+
+    let waited = std::time::Instant::now();
+    while !started.exists() {
+        assert!(
+            waited.elapsed() < std::time::Duration::from_secs(30),
+            "the walk never started"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the child's own output is the assertion"
+    )]
+    let _ = Command::new("kill")
+        .args(["-TERM", &child.id().to_string()])
+        .status();
+
+    let out = child.wait_with_output().expect("child was spawned");
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    let tail: String = text.lines().rev().take(5).collect::<Vec<_>>().join("\n");
+
+    assert_eq!(out.status.code(), Some(143), "{tail}");
+    assert!(text.contains("interrupted"), "{tail}");
+    let count = std::fs::read_dir(&written).unwrap().count();
+    assert!(
+        count < FILES,
+        "every step ran after the TERM ({count} files)"
+    );
+}
+
+// The same stop under `plan` (spec §10). A gate is a child in its own process
+// group, so the terminal's signal never reaches it, and `plan` installed no
+// handler: a TERM killed provision where it stood and left a hung gate
+// running, unowned.
+#[test]
+fn sigterm_during_plan_kills_the_gate() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture("plan_gate_terminate.yml");
+    let child = Command::new(env!("CARGO_BIN_EXE_provision"))
+        .args(["plan", path.to_str().expect("fixture paths are UTF-8")])
+        .env("PROVISION_SCRATCH", dir.path())
+        .env("NO_COLOR", "1")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("provision failed to start");
+
+    let pid_file = dir.path().join("child.pid");
+    let waited = std::time::Instant::now();
+    while !pid_file.exists() {
+        assert!(
+            waited.elapsed() < std::time::Duration::from_secs(30),
+            "the gate never started"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the child's own output is the assertion"
+    )]
+    let _ = Command::new("kill")
+        .args(["-TERM", &child.id().to_string()])
+        .status();
+
+    let out = child.wait_with_output().expect("child was spawned");
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+
+    assert_eq!(out.status.code(), Some(143), "{text}");
+    assert!(text.contains("interrupted"), "{text}");
+    assert!(
+        !child_alive(dir.path()),
+        "the gate outlived the TERM that stopped plan"
+    );
+}
+
 // D22: `rc: 124` alone cannot tell provision's own kill from a step that
 // wraps its own command in `timeout(1)` and legitimately exits 124.
 #[test]

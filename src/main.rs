@@ -362,6 +362,12 @@ fn run() -> Result<u8, Diag> {
                 .with_deadline(run.deadline()?)
                 .with_sink(run.sink(base.clone(), false, false));
 
+            // Plan runs gates (§4), and every child is put in its own process
+            // group, so the terminal's Ctrl-C never reaches one. Without a
+            // handler provision died where it stood and a hung `unless`
+            // outlived it, unowned — the orphan this handler exists to
+            // prevent under `apply`, and a gate is just as much a child.
+            exec::process::catch_interrupts();
             let started = Instant::now();
             walk_root(&mut ex, &plan, &props)?;
             ex.summarize(&plan, started.elapsed());
@@ -371,10 +377,12 @@ fn run() -> Result<u8, Diag> {
                 report(&ex, &base, None);
                 return Ok(EXIT_USAGE);
             }
-            // Spec §8, the exit-code precedence: the clock beats a failed
-            // step, because when it ran out the run stopped for that reason
-            // and whatever the last step reported is not why. `plan` installs
-            // no signal handlers, so there is no interrupt to rank above it.
+            // Spec §8, the exit-code precedence: a stop from outside beats
+            // the clock, which beats a failed step — "the reason the run
+            // ended", the same rule `apply` reads.
+            if ex.summary.interrupted {
+                return Ok(exec::process::stop_code());
+            }
             if ex.summary.deadline_exceeded {
                 return Ok(EXIT_DEADLINE);
             }

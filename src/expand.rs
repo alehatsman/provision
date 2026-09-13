@@ -221,6 +221,15 @@ impl Expander {
     ) {
         for step in steps {
             self.check_clock();
+            // Spec §10: Ctrl-C and SIGTERM stop the run. The handler only
+            // records the signal, and the wait on a child is what used to read
+            // it — so one that arrived while no child was running, during a
+            // `file` write or between two steps, was read by nobody: every
+            // remaining step ran and the run exited 0. Every step starts here.
+            if crate::exec::process::interrupted() {
+                self.summary.interrupted = true;
+                self.stopped = true;
+            }
             // Spec §8: a problem found while executing ends the walk, the same
             // as a failed step without `--keep-going` — and `--keep-going`
             // does not apply, because a plan that will not render is not a
