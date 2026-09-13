@@ -215,8 +215,10 @@ impl Spec {
             return Ok(std::env::temp_dir());
         }
         let dir = parent_of(&self.dest);
+        // `file`'s own rule (spec §6.3, §6.9): 0755 whatever the umask, as
+        // the sudo path's `install -d -m 0755` already was.
         if !dir.exists()
-            && let Err(e) = std::fs::create_dir_all(&dir)
+            && let Err(e) = super::file::create_dirs(&dir, 0o755)
         {
             return Err(Effect::fail(format!(
                 "cannot create {}: {e}",
