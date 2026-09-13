@@ -55,6 +55,21 @@ impl Prepared {
         self.unless.is_some() || self.creates.is_some() || self.has_changed_when
     }
 
+    /// Spec §8's clamp, taken now rather than at prepare time: the lesser of
+    /// the step's own `timeout` and the time left on the run's clock, and
+    /// whether the clock is the smaller. `None` once the clock has run out.
+    ///
+    /// Now, because anything that ran in between — an earlier attempt, a
+    /// retry `delay`, an `unless` — spent time the prepare-time `timeout`
+    /// still counts as left.
+    fn budget(&self) -> Option<(Duration, bool)> {
+        let Some(deadline) = self.deadline else {
+            return Some((self.own_timeout, false));
+        };
+        let left = deadline.saturating_duration_since(Instant::now());
+        (!left.is_zero()).then(|| (left.min(self.own_timeout), left < self.own_timeout))
+    }
+
     /// What to call a timeout, which depends on whose clock ran out (spec §8).
     /// Naming a step timeout the file does not contain would send a reader
     /// hunting for a number nobody wrote, and §4's per-step number earns its
@@ -215,24 +230,17 @@ impl Runner {
             if process::interrupted() {
                 return stopped_between(last, interrupted());
             }
-            let (timeout, deadline_bound) = match p.deadline {
-                Some(d) => {
-                    let left = d.saturating_duration_since(Instant::now());
-                    if left.is_zero() {
-                        let msg = format!("deadline exceeded before attempt {attempt}/{attempts}");
-                        return stopped_between(
-                            last,
-                            Failure {
-                                msg,
-                                rc: None,
-                                stderr: String::new(),
-                                interrupted: false,
-                            },
-                        );
-                    }
-                    (left.min(p.own_timeout), left < p.own_timeout)
-                }
-                None => (p.own_timeout, false),
+            let Some((timeout, deadline_bound)) = p.budget() else {
+                let msg = format!("deadline exceeded before attempt {attempt}/{attempts}");
+                return stopped_between(
+                    last,
+                    Failure {
+                        msg,
+                        rc: None,
+                        stderr: String::new(),
+                        interrupted: false,
+                    },
+                );
             };
             let out = self.once(p, timeout, judge)?;
             let fatal = out.how != How::Exited;
@@ -386,11 +394,23 @@ impl Runner {
     /// `changed_when`, `failed_when` and `register` mean the same thing on a
     /// `file` step as they do on a `shell` step.
     fn typed(&self, p: &Prepared, judge: &dyn Judge, act: bool) -> R<Done> {
+        // The clamp is taken here, after the gate, not at prepare time: an
+        // `unless` that ran for two seconds spent two seconds of the run's
+        // clock, and the action gets only what is left (spec §8).
+        let Some((timeout, deadline_bound)) = p.budget() else {
+            return Err(Stop::Fail(Failure {
+                msg: "deadline exceeded before the step ran".into(),
+                rc: None,
+                stderr: String::new(),
+                interrupted: false,
+            }));
+        };
         let ctx = actions::Ctx {
             sudo: p.sudo,
             root_available: self.root_available,
             escalate: &self.sudo,
-            timeout: p.timeout,
+            timeout,
+            deadline_bound,
             env: &p.env,
         };
         let (effect, mut note) = match &p.action {
