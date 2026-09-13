@@ -254,6 +254,15 @@ impl Action {
                         let Ok(value) = engine.render_node(body, ctx) else {
                             return Ok(None);
                         };
+                        // A string answers `try_iter` with its characters, so
+                        // `cmd: "echo hi"` became the argv `e c h o …` and
+                        // failed at run time as `cannot run e`. `pkg`'s
+                        // `names` guards the same trap the same way.
+                        if value.kind() != minijinja::value::ValueKind::Seq {
+                            return Err(body
+                                .err("`cmd` is a list of arguments")
+                                .with_note("cmd: [mv, src, dest] — use `shell` for a script"));
+                        }
                         match value.try_iter() {
                             Ok(it) => it.collect(),
                             Err(_) => {
