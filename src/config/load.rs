@@ -50,11 +50,17 @@ fn normalize(p: &Path) -> PathBuf {
     for c in p.components() {
         match c {
             std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => {
-                if !out.pop() {
-                    out.push("..");
+            // Only a real directory name is undone by `..`. `PathBuf::pop`
+            // also removes a `..` pushed a moment ago, so `../../x` collapsed
+            // to `x` whenever the plan was named by a bare relative path —
+            // and a `..` above the root is the root.
+            std::path::Component::ParentDir => match out.components().next_back() {
+                Some(std::path::Component::Normal(_)) => {
+                    out.pop();
                 }
-            }
+                Some(std::path::Component::RootDir | std::path::Component::Prefix(_)) => {}
+                _ => out.push(".."),
+            },
             other => out.push(other.as_os_str()),
         }
     }
@@ -249,6 +255,27 @@ mod tests {
             PathBuf::from("/p/components/zsh/index.yml")
         );
         assert_eq!(resolve(from, "/etc/x.yml"), PathBuf::from("/etc/x.yml"));
+    }
+
+    // `provision apply x1.yml` names the root by a bare relative path, so its
+    // directory is empty and every `..` lands on top of the one before it.
+    // `PathBuf::pop` took the second `..` as undoing the first, and
+    // `../../shared/a.yml` resolved to `shared/a.yml` under the cwd.
+    #[test]
+    fn leading_parent_dirs_stack_from_a_bare_relative_root() {
+        assert_eq!(
+            resolve(Path::new("x1.yml"), "../../shared/a.yml"),
+            PathBuf::from("../../shared/a.yml")
+        );
+        assert_eq!(
+            resolve(Path::new("machines/x1.yml"), "../../../a.yml"),
+            PathBuf::from("../../a.yml")
+        );
+        // Above the root is the root.
+        assert_eq!(
+            resolve(Path::new("/p/a.yml"), "../../../x.yml"),
+            PathBuf::from("/x.yml")
+        );
     }
 
     #[test]
