@@ -182,15 +182,7 @@ impl Action {
         defer_src: bool,
     ) -> Result<Option<Action>> {
         let body = step.body;
-        // `raw: true` means the body is not a template (spec §4). It still
-        // reaches the action; it just arrives as written.
-        let render = |src: &str| -> Option<String> {
-            if raw {
-                Some(src.to_string())
-            } else {
-                engine.render(src, ctx).ok()
-            }
-        };
+        let render = |src: &str| rendered(engine, ctx, raw, src);
 
         let action = match step.key {
             "shell" => {
@@ -345,6 +337,18 @@ impl Action {
             other => return Err(step.at.err(format!("`{other}` is not an action"))),
         };
         Ok(Some(action))
+    }
+}
+
+/// One field of an action body as the action sees it. `raw: true` means the
+/// body is not a template (spec §4): it still reaches the action, just as
+/// written. `None` is a field that would not render; the expander's sweep has
+/// already reported it.
+pub(crate) fn rendered(engine: &Engine, ctx: &Value, raw: bool, src: &str) -> Option<String> {
+    if raw {
+        Some(src.to_string())
+    } else {
+        engine.render(src, ctx).ok()
     }
 }
 
