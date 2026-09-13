@@ -66,13 +66,7 @@ pub(crate) fn parse(
     raw: bool,
 ) -> Result<Option<Spec>> {
     let body = step.body;
-    let render = |src: &str| -> Option<String> {
-        if raw {
-            Some(src.to_string())
-        } else {
-            engine.render(src, ctx).ok()
-        }
-    };
+    let render = |src: &str| super::rendered(engine, ctx, raw, src);
 
     let Some(name_at) = body.get("name") else {
         return Err(body.err("`service` requires `name`"));

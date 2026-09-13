@@ -99,13 +99,7 @@ pub(crate) fn parse_metadata(
     raw: bool,
 ) -> Result<Option<Metadata>> {
     let body = step.body;
-    let render = |src: &str| -> Option<String> {
-        if raw {
-            Some(src.to_string())
-        } else {
-            engine.render(src, ctx).ok()
-        }
-    };
+    let render = |src: &str| super::rendered(engine, ctx, raw, src);
 
     let mode = match body.get("mode") {
         Some(n) => {
@@ -155,13 +149,7 @@ pub(crate) fn parse(
     defer_src: bool,
 ) -> Result<Option<Spec>> {
     let body = step.body;
-    let render = |src: &str| -> Option<String> {
-        if raw {
-            Some(src.to_string())
-        } else {
-            engine.render(src, ctx).ok()
-        }
-    };
+    let render = |src: &str| super::rendered(engine, ctx, raw, src);
     let Some(path_at) = body.get("path") else {
         return Err(body.err("`file` requires `path`"));
     };
