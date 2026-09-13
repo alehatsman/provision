@@ -89,7 +89,8 @@ The job is small and stable. The tool should be too.
 - Not a fleet manager. No peers, no daemon, no remote apply. SSH in and run it.
 - Not an agent runtime. No MCP, no SDK, no LLM loop.
 - Not transactional. No rollback. Fail-fast and re-run; every step is
-  idempotent by construction or by declared gate.
+  idempotent by construction or by declared gate. When an `apply` fails
+  halfway: [docs/break-glass.md](docs/break-glass.md).
 - Not a task registry. A task is a component file run with `provision apply`;
   shared ones are checked out by the machine plan, never fetched by
   provision.
@@ -237,6 +238,7 @@ whole of it.
 | [docs/decisions.md](docs/decisions.md) | Why Rust, why no rollback, why shell-first, tag semantics |
 | [docs/migration.md](docs/migration.md) | Moving the existing dotfiles off mooncake |
 | [docs/audit.md](docs/audit.md) | The spec §11 gate: every construct in the real configs, mapped |
+| [docs/break-glass.md](docs/break-glass.md) | `apply` failed halfway and the machine has to work again now |
 | [examples/](examples/) | A machine plan and a component |
 | [tasks/](tasks/) | This repo's own tasks, run with `provision apply` |
 
