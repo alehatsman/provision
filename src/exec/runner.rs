@@ -203,20 +203,32 @@ impl Runner {
         attempts: u32,
         delay: Duration,
     ) -> R<Done> {
+        // The attempt before this one, once there is one. A stop between
+        // attempts reports it rather than a result with nothing in it: spec
+        // §10 says the register holds the last attempt, and the attempt that
+        // ran is the last one.
+        let mut last: Option<Done> = None;
         for attempt in 1..=attempts {
+            if attempt > 1 {
+                pause(delay, p.deadline);
+            }
             if process::interrupted() {
-                return Err(Stop::Fail(interrupted()));
+                return stopped_between(last, interrupted());
             }
             let (timeout, deadline_bound) = match p.deadline {
                 Some(d) => {
                     let left = d.saturating_duration_since(Instant::now());
                     if left.is_zero() {
-                        return Err(Stop::Fail(Failure {
-                            msg: timed_out_msg(Duration::ZERO, true),
-                            rc: None,
-                            stderr: String::new(),
-                            interrupted: false,
-                        }));
+                        let msg = format!("deadline exceeded before attempt {attempt}/{attempts}");
+                        return stopped_between(
+                            last,
+                            Failure {
+                                msg,
+                                rc: None,
+                                stderr: String::new(),
+                                interrupted: false,
+                            },
+                        );
                     }
                     (left.min(p.own_timeout), left < p.own_timeout)
                 }
@@ -225,12 +237,11 @@ impl Runner {
             let out = self.once(p, timeout, judge)?;
             let fatal = out.how != How::Exited;
             let failed = fatal || judge.failed(&out)?;
+            let done = Self::verdict(p, judge, out, timeout, deadline_bound, attempt, attempts)?;
             if !failed || fatal || attempt == attempts {
-                return Self::verdict(p, judge, out, timeout, deadline_bound, attempt, attempts);
+                return Ok(done);
             }
-            if !delay.is_zero() {
-                std::thread::sleep(delay);
-            }
+            last = Some(done);
         }
         unreachable!("the loop returns on its last attempt")
     }
@@ -602,6 +613,41 @@ fn interrupted() -> Failure {
         stderr: String::new(),
         interrupted: true,
     }
+}
+
+/// Sleep out a retry's `delay`, waking for a stop signal or the run's clock.
+///
+/// The delay is part of the step, so spec §8's "no step runs past the
+/// deadline it was admitted under" reaches into it, and so does a TERM. The
+/// caller rechecks both on the way out; this only has to stop waiting. The
+/// tick is `wait_for`'s, for the same reason: 100ms on a stop is invisible.
+fn pause(delay: Duration, deadline: Option<Instant>) {
+    let end = Instant::now() + delay;
+    let tick = Duration::from_millis(100);
+    loop {
+        let now = Instant::now();
+        if now >= end || process::interrupted() || deadline.is_some_and(|d| now >= d) {
+            return;
+        }
+        std::thread::sleep(tick.min(end - now));
+    }
+}
+
+/// A stop between retry attempts, reported against the attempt that ran.
+///
+/// That attempt failed — it is why there was a next one — so its exit code,
+/// output and attempt count stand, and only the reason the loop ended is new.
+/// Before the first attempt there is nothing to keep.
+fn stopped_between(last: Option<Done>, mut stop: Failure) -> R<Done> {
+    let Some(mut done) = last else {
+        return Err(Stop::Fail(stop));
+    };
+    if let Status::Failed(ran) = &done.status {
+        stop.rc = ran.rc;
+        stop.stderr.clone_from(&ran.stderr);
+    }
+    done.status = Status::Failed(stop);
+    Ok(done)
 }
 
 /// A `Failure` is an outcome, not an error: it lands on the step's line and
