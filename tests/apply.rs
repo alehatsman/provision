@@ -1055,6 +1055,89 @@ fn a_deadline_stops_a_retry_between_attempts() {
     );
 }
 
+// Spec §8: no step runs past the deadline it was admitted under, and a retry's
+// `delay` is part of the step. It used to be one uninterruptible sleep, so a
+// 30s delay against a 1s deadline ran the full 30s. And when the clock then
+// stopped the loop, the step reported `deadline exceeded after 0ms` with no
+// exit code — §10's "the register holds the last attempt" had nothing in it.
+#[test]
+fn a_deadline_reaches_into_a_retry_delay_and_keeps_the_last_attempt() {
+    let dir = tempfile::tempdir().unwrap();
+    let started = std::time::Instant::now();
+    let (code, out) = apply(
+        dir.path(),
+        "retry_delay_clock.yml",
+        &["--deadline", "1s", "--json"],
+    );
+    let elapsed = started.elapsed();
+    assert_eq!(code, 124, "{out}");
+    assert!(
+        elapsed < std::time::Duration::from_secs(5),
+        "slept out the delay past the deadline: {elapsed:?}\n{out}"
+    );
+    assert!(
+        !out.contains("Must not run after the stop"),
+        "the walk did not stop:\n{out}"
+    );
+    let step = out
+        .lines()
+        .find(|l| l.contains("Fails and waits to retry"))
+        .unwrap_or_default();
+    assert!(
+        step.contains(r#""rc":5"#),
+        "the last attempt's rc is gone:\n{out}"
+    );
+    assert!(
+        step.contains("boom"),
+        "the last attempt's stderr is gone:\n{out}"
+    );
+    assert!(
+        !step.contains("after 0ms"),
+        "a duration nobody waited:\n{out}"
+    );
+}
+
+// The same sleep, the other stop: a TERM during a retry's `delay` ends the run
+// now, not when the delay is over.
+#[test]
+fn sigterm_reaches_into_a_retry_delay() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture("retry_delay_clock.yml");
+    let started = std::time::Instant::now();
+    let child = Command::new(env!("CARGO_BIN_EXE_provision"))
+        .args(["apply", path.to_str().expect("fixture paths are UTF-8")])
+        .env("PROVISION_SCRATCH", dir.path())
+        .env("NO_COLOR", "1")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("provision failed to start");
+
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the child's own output is the assertion"
+    )]
+    let _ = Command::new("kill")
+        .args(["-TERM", &child.id().to_string()])
+        .status();
+
+    let out = child.wait_with_output().expect("child was spawned");
+    let elapsed = started.elapsed();
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+
+    assert_eq!(out.status.code(), Some(143), "{text}");
+    assert!(
+        elapsed < std::time::Duration::from_secs(5),
+        "slept out the delay past the TERM: {elapsed:?}\n{text}"
+    );
+    assert!(
+        !text.contains("Must not run after the stop"),
+        "kept going past the TERM:\n{text}"
+    );
+}
+
 // Spec §8: `--keep-going` is about a step failing, not about the run's clock
 // running out. It carries on past the first and never past the second.
 #[test]

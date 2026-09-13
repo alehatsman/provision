@@ -1137,6 +1137,7 @@ not that answer.
 | SIGTERM on Windows | There is none. The handler is installed on unix only, and `130` stays the code for a stop that has no signal number to report |
 | `--deadline` runs out between steps | The walk stops before the next step, which does not run and is not reported. Summary says `deadline exceeded`, exit 124 |
 | `--deadline` runs out during a step | That step's `timeout` was already clamped to the time left, so it is killed on the run's clock and fails with `deadline exceeded after N` rather than naming a step timeout the file does not contain |
+| `--deadline`, Ctrl-C or SIGTERM during a `retry` `delay` | The delay is part of the step, so it is cut short: the loop stops within one 100ms tick rather than sleeping the delay out. The step fails with `deadline exceeded before attempt N/M` (or `interrupted`), and keeps the attempt that ran — its `rc`, output and attempt count are what the line, the `--json` event and the `register` report |
 | `--deadline` shorter than a step's own `timeout` | The deadline wins; that is the clamp. The reverse — a step whose `timeout` expires first — is an ordinary step timeout and reads as one |
 | `--deadline` and a step that already failed | Exit 124 only if the clock is why the run ended. A failure with `--keep-going` off stopped the walk first, so that run is exit 1 and the clock never ran out |
 | Windows path in `dest` | Accepted; `~` expands to `%USERPROFILE%` |
