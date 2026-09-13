@@ -197,15 +197,21 @@ fn parse_space_pairs(out: &str) -> BTreeMap<String, String> {
         .collect()
 }
 
-/// `name<TAB>version<TAB>status`, keeping only `install ok installed`.
+/// `name<TAB>version<TAB>status`, keeping what is installed.
+///
+/// dpkg's status is three words: what was asked for, an error flag, and what
+/// is on disk. Installed is flag `ok` and state `installed`, whatever was
+/// asked for — a `hold`, or a `deinstall` not yet carried out, is still on
+/// disk. Matching the whole string as `install ok installed` called a held
+/// package missing on every apply.
 fn parse_dpkg(out: &str) -> BTreeMap<String, String> {
     out.lines()
         .filter_map(|l| {
             let mut it = l.split('\t');
             let name = it.next()?;
             let version = it.next().unwrap_or("");
-            let status = it.next().unwrap_or("");
-            (status.trim() == "install ok installed")
+            let status: Vec<&str> = it.next().unwrap_or("").split_whitespace().collect();
+            matches!(status.as_slice(), [_, "ok", "installed"])
                 .then(|| (name.to_string(), version.to_string()))
         })
         .collect()
@@ -607,4 +613,37 @@ impl Spec {
 /// the name as written; only the lookup is normalised.
 fn key(name: &str) -> &str {
     name.rsplit('/').next().unwrap_or(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // dpkg's status is three words: what was asked for (`install`, `hold`,
+    // `deinstall`, …), an error flag, and what is on disk. Only the last two
+    // say whether a package is installed. `apt-mark hold docker-ce` makes the
+    // first word `hold`, and reading the whole string as `install ok
+    // installed` called that package missing — so `apt-get install` ran, did
+    // nothing, and the re-query failed the step on every apply.
+    #[test]
+    fn a_held_package_is_installed() {
+        let out = "docker-ce\t5:27.0\thold ok installed\n\
+                   git\t1:2.43\tinstall ok installed\n\
+                   old\t1.0\tdeinstall ok installed\n";
+        let got = parse_dpkg(out);
+        assert_eq!(got.get("docker-ce").map(String::as_str), Some("5:27.0"));
+        assert_eq!(got.get("git").map(String::as_str), Some("1:2.43"));
+        assert_eq!(got.get("old").map(String::as_str), Some("1.0"));
+    }
+
+    // What is on disk decides it, and a package dpkg flags as broken is not
+    // one to call converged.
+    #[test]
+    fn a_package_not_fully_installed_is_missing() {
+        let out = "gone\t1.0\tdeinstall ok config-files\n\
+                   half\t1.0\tinstall ok half-configured\n\
+                   broken\t1.0\tinstall reinstreq installed\n\
+                   never\t\tunknown ok not-installed\n";
+        assert!(parse_dpkg(out).is_empty(), "{:?}", parse_dpkg(out));
+    }
 }
