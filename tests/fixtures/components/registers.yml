@@ -1,0 +1,7 @@
+# A component whose one step registers a result. The register is bound in
+# the component's own scope, which does not leak back to the caller (§3.1).
+steps:
+  - name: inner
+    shell: echo hi
+    register: inner_result
+    changed_when: "false"
