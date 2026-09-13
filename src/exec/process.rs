@@ -271,13 +271,22 @@ fn drain(pipe: Option<impl Read + Send + 'static>, stream: bool, is_err: bool) -
                 // to know that.
                 Ok(n) => {
                     let Some(got) = chunk.get(..n) else { break };
+                    // The bytes as read, not a lossy view of this one chunk:
+                    // a character split across two reads printed as two
+                    // replacement characters. And a failed write is dropped,
+                    // not a panic — `print!` panics on EPIPE, and a reader
+                    // that went away is spec §10's ordinary case, not an
+                    // error. The capture below is unaffected either way.
                     if stream {
-                        let text = String::from_utf8_lossy(got);
-                        if is_err {
-                            eprint!("{text}");
+                        #[expect(
+                            clippy::let_underscore_must_use,
+                            reason = "a closed terminal copy is the documented case above"
+                        )]
+                        let _ = if is_err {
+                            std::io::stderr().lock().write_all(got)
                         } else {
-                            print!("{text}");
-                        }
+                            std::io::stdout().lock().write_all(got)
+                        };
                     }
                     buf.extend_from_slice(got);
                 }
