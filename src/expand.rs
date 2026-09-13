@@ -984,11 +984,14 @@ impl Expander {
     /// idea than this rule pays for.
     fn check_strict_gate(&mut self, step: &Step<'static>) {
         if step.key == "defaults" {
+            // A name the expression reads, not a substring of its text:
+            // `hostname == "x1"` contains "os" and says nothing about the os.
             let names_os = step
                 .mods
                 .when
                 .and_then(|n| n.as_str().ok())
-                .is_some_and(|w| w.contains("os"));
+                .and_then(|w| self.engine.undeclared(w))
+                .is_some_and(|names| names.contains("os"));
             if !names_os {
                 self.diags.push(
                     step.at
