@@ -1,0 +1,9 @@
+- name: sudo as a string
+  shell: "true"
+  sudo: "true"
+- name: raw as a string
+  shell: "true"
+  raw: "yes"
+- name: optional as a string
+  vars_file: vars.yml
+  optional: "true"
