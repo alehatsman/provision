@@ -12,3 +12,14 @@
     key: ShowHardDrivesOnDesktop
     type: bool
     value: true
+# A variable whose name contains "os" is not the `os` fact. A substring
+# match took this `when` for a guard.
+- vars:
+    hostos: darwin
+- name: guarded by a lookalike
+  defaults:
+    domain: com.apple.finder
+    key: ShowExternalHardDrivesOnDesktop
+    type: bool
+    value: true
+  when: hostos == "darwin"

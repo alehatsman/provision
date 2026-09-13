@@ -508,9 +508,11 @@ fn help_and_version_are_not_usage_errors() {
 fn strict_asks_a_defaults_step_where_it_runs() {
     let (code, text) = validate("defaults_strict.yml");
     assert_eq!(code, EXIT_VALIDATION, "a plan defaults to --strict: {text}");
-    // Exactly one: the guarded step above it says where it runs.
-    assert_eq!(text.matches("naming the os").count(), 1, "{text}");
+    // Two: the guarded step says where it runs, and the lookalike only reads
+    // a variable whose name happens to contain "os".
+    assert_eq!(text.matches("naming the os").count(), 2, "{text}");
     assert!(text.contains("defaults_strict.yml:9:3"), "{text}");
+    assert!(text.contains("defaults_strict.yml:19:3"), "{text}");
 }
 
 #[test]
