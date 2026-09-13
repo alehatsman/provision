@@ -1,0 +1,6 @@
+- name: child
+  use: ./components/registers.yml
+- name: parent cannot read the child's register
+  shell: echo outer
+  when: inner_result.changed
+  changed_when: "false"

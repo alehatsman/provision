@@ -361,7 +361,7 @@ impl Expander {
         let expr = expr.as_str();
         // A `when` reading a registered result cannot be evaluated before the
         // step that registers it has run. Plan says so instead of guessing.
-        if self.reads_a_register(expr) {
+        if self.reads_a_register(expr, scope) {
             return Cond::Unprobed;
         }
         let at = |m: String| when.err(m);
@@ -372,7 +372,7 @@ impl Expander {
         }
     }
 
-    fn reads_a_register(&self, expr: &str) -> bool {
+    fn reads_a_register(&self, expr: &str, scope: &Scope) -> bool {
         // At apply time the registering step has actually run, so the value is
         // the real one and the condition is answerable. This guard is the
         // whole difference between D14's placeholder and a real result.
@@ -380,8 +380,18 @@ impl Expander {
             return false;
         }
         // Top-level names only: `gitcfg.changed` reads the register `gitcfg`.
+        //
+        // And only a register this scope can see. `self.registers` holds every
+        // name registered anywhere in the run, but a component's register is
+        // bound in the component's scope and does not leak back (§3.1). A
+        // parent reading one used to count as reading a result not yet run,
+        // so `validate` and `plan` skipped it as unprobed and only `apply`
+        // found the name undefined. Every registering step binds its name —
+        // a placeholder when nothing ran — so a register in reach is defined.
         match self.engine.undeclared(expr) {
-            Some(names) => names.iter().any(|n| self.registers.contains(n)),
+            Some(names) => names
+                .iter()
+                .any(|n| self.registers.contains(n) && scope.defines(n)),
             None => false,
         }
     }

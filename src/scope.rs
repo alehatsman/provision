@@ -77,6 +77,14 @@ impl Scope {
         self.own.insert(key.into(), value);
     }
 
+    /// Whether this scope, or a parent it inherited from, set `key` — a `vars`
+    /// value or a `register` result. Facts, CLI vars and props are not asked:
+    /// the question is what the plan itself has bound so far, and a child's
+    /// bindings never reach its parent (§3.1).
+    pub(crate) fn defines(&self, key: &str) -> bool {
+        self.own.contains_key(key) || self.inherited.contains_key(key)
+    }
+
     /// Precedence, resolved for one name. Expansion renders through `ctx()`;
     /// this is what the precedence tests assert against.
     #[cfg(test)]

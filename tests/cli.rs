@@ -256,6 +256,20 @@ fn a_child_scope_does_not_leak_back_to_its_parent() {
     assert_positioned(&out);
 }
 
+// The same boundary for a `register`. Registered names were tracked in one set
+// for the whole run, so a parent `when` reading a component's register looked
+// like a read of a result that has not run yet: `validate` and `plan` skipped
+// it as unprobed (D14), and only `apply` found the name undefined — after
+// every step before it had run.
+#[test]
+fn a_components_register_does_not_leak_back_to_its_parent() {
+    let (code, out) = validate("register_isolation.yml");
+    assert_eq!(code, EXIT_VALIDATION, "{out}");
+    assert!(out.contains("undefined value"), "{out}");
+    assert!(out.contains("register_isolation.yml:5:"), "{out}");
+    assert_positioned(&out);
+}
+
 // ── props ─────────────────────────────────────────────────────────────────
 
 #[test]
