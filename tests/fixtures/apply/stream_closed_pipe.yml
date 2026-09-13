@@ -1,0 +1,9 @@
+# `--stream` into a reader that goes away (spec §10's closed-stdout row).
+#
+# Two megabytes is far past the 64 KiB a pipe holds, so provision is certain
+# to be mid-write when `head` exits — the one arrangement where EPIPE is not a
+# coin flip. The step's own output is captured whole either way; only the
+# terminal copy has nowhere to go.
+- name: Writes more than a pipe holds
+  shell: yes STREAMED | head -c 2000000
+  changed_when: "false"

@@ -977,6 +977,39 @@ fn stream_writes_the_child_output_through_once() {
     assert_eq!(out.matches("STREAMED-MARKER").count(), 1, "{out}");
 }
 
+// Spec §10: the reader asking for less is not an error, and that holds for a
+// step's own output under `--stream` too. The streamed copy went through
+// `print!`, which panics on EPIPE: the drain thread died, the child took
+// SIGPIPE writing into a pipe nobody read, and the step failed with its
+// captured output gone. `set -o pipefail` is load-bearing, as in `list`'s
+// test: without it the pipeline reports `head`'s status.
+#[test]
+fn stream_into_a_closed_stdout_is_not_an_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = format!(
+        "set -o pipefail; '{}' apply '{}' --stream | head -c 20 >/dev/null",
+        env!("CARGO_BIN_EXE_provision"),
+        fixture("stream_closed_pipe.yml").display()
+    );
+    let out = Command::new("bash")
+        .args(["-c", &script])
+        .env("PROVISION_SCRATCH", dir.path())
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("bash failed to start");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+
+    assert!(
+        !stderr.contains("panicked"),
+        "--stream panicked when its reader went away:\n{stderr}"
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "the reader asking for less is not an error:\n{stderr}"
+    );
+}
+
 // Spec §8: `--keep-going` is about a step failing, not about the operator
 // stopping. Ctrl-C ends the run whatever the flag says.
 #[test]
