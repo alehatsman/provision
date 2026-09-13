@@ -19,3 +19,17 @@
 # argv `e c h o …` and failed at run time as `cannot run e`.
 - name: A cmd given a script instead of a list
   cmd: "echo hi"
+
+# A quoted "true" is a string. These were read as `false` without a word,
+# so the cask was installed as a formula and the shell was not a login one.
+- name: A pkg whose cask flag is a string
+  pkg:
+    name: firefox
+    manager: brew
+    cask: "true"
+
+- name: A shell whose login flag is a string
+  shell:
+    script: echo hi
+    login: "true"
+  changed_when: "false"

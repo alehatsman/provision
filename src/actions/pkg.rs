@@ -329,14 +329,18 @@ pub(crate) fn parse(
         None => State::Present,
     };
 
-    let cask = body
-        .get("cask")
-        .and_then(|n| n.as_bool().ok())
-        .unwrap_or(false);
-    let update_cache = body
-        .get("update_cache")
-        .and_then(|n| n.as_bool().ok())
-        .unwrap_or(false);
+    // A YAML boolean or an error. `.ok()` used to swallow the type error, so
+    // `cask: "true"` quietly installed the formula instead of the cask and
+    // `update_cache: "yes"` quietly skipped the refresh. `service` and
+    // `defaults` already refuse the same input.
+    let cask = match body.get("cask") {
+        Some(n) => n.as_bool()?,
+        None => false,
+    };
+    let update_cache = match body.get("update_cache") {
+        Some(n) => n.as_bool()?,
+        None => false,
+    };
     let sudo = step.mods.sudo.is_some_and(|n| n.as_bool().unwrap_or(false));
 
     let manager = match body.get("manager") {
