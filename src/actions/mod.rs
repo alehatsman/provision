@@ -1,10 +1,10 @@
-//! The rendered actions. Phase 1 ships the three that reduce to "run a
-//! command and judge it by its exit code": `shell`, `cmd`, `assert`.
+//! The rendered actions. Three reduce to "run a command and judge it by its
+//! exit code": `shell`, `cmd`, `assert`.
 //!
-//! They share one implementation because they genuinely are one — the
-//! differences are which argv gets built and what a success means. Phase 2's
-//! actions (`file`, `template`, `pkg`, `service`) each need real state
-//! inspection and get their own modules then.
+//! Those share one implementation because they genuinely are one — the
+//! differences are which argv gets built and what a success means. The typed
+//! actions (`file`, `template`, `pkg`, `service`, `git`, `defaults`,
+//! `download`) each need real state inspection and have their own modules.
 
 pub(crate) mod defaults;
 pub(crate) mod download;
@@ -44,8 +44,6 @@ pub(crate) enum Action {
     Template(template::Spec),
     Service(service::Spec),
     Pkg(pkg::Spec),
-    /// Parsed and validated, but with no runner until phase 2. `plan` reports
-    /// it unprobed; `apply` refuses rather than pretending it converged.
     /// The stand-in a gate's spawn context carries. `unless` runs an argv
     /// the runner builds itself, so `gate_context` needs an `Action` it will
     /// never look at — and naming that honestly beats reusing a real variant.
@@ -125,7 +123,7 @@ impl Interpreter {
 
 impl Action {
     /// The command to run, if this action runs one. `assert` with an `expr`
-    /// and every phase 2 action return `None`.
+    /// and every typed action return `None`.
     pub(crate) fn argv(&self) -> Option<Vec<String>> {
         match self {
             Action::Shell {
@@ -354,9 +352,9 @@ impl Action {
 
 /// What a typed action did, or would do.
 ///
-/// Phase 1's three actions report through an exit code, which is why they run
-/// through the runner's argv path. These four do their own work and have to
-/// say what they did in their own words.
+/// `shell`, `cmd` and `assert` report through an exit code, which is why they
+/// run through the runner's argv path. Typed actions do their own work and
+/// have to say what they did in their own words.
 pub(crate) enum Effect {
     /// Already as declared.
     Ok,

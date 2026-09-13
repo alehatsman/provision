@@ -244,9 +244,8 @@ impl Runner {
             };
             let out = self.once(p, timeout, judge)?;
             let fatal = out.how != How::Exited;
-            let failed = fatal || judge.failed(&out)?;
             let done = Self::verdict(p, judge, out, timeout, deadline_bound, attempt, attempts)?;
-            if !failed || fatal || attempt == attempts {
+            if !done.status.failed() || fatal || attempt == attempts {
                 return Ok(done);
             }
             last = Some(done);

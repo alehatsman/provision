@@ -425,8 +425,8 @@ fn kill_group(pid: u32) {
 
 #[cfg(windows)]
 fn kill_group(pid: u32) {
-    // Windows is phase 3. `taskkill /T` is the documented way to end a tree
-    // and is present on every supported version.
+    // `taskkill /T` is the documented way to end a tree and is present on
+    // every supported version.
     let _ = Command::new("taskkill")
         .args(["/T", "/F", "/PID", &pid.to_string()])
         .stdout(Stdio::null())
