@@ -17,6 +17,7 @@ use crate::output::Sink;
 use crate::output::event::{Event, Status, Summary};
 use crate::scope::{Globals, Map, Scope};
 use crate::template::{Engine, expanduser};
+use crate::yaml::Doc;
 use crate::yaml::N;
 use minijinja::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -478,21 +479,7 @@ impl Expander {
         depth: usize,
         tags: &BTreeSet<String>,
     ) {
-        let ctx = scope.ctx();
-        let Some(rel) = self.diags.absorb(self.render_str(step.body, &ctx)) else {
-            return;
-        };
-        let path = load::resolve(step.body.file, &rel);
-        if !path.exists() {
-            self.diags.push(load::missing(step.body, &path, "import"));
-            return;
-        }
-        let Some(_guard) = self.enter(&path, step.body) else {
-            return;
-        };
-
-        let Some(doc) = self.diags.absorb(self.loader.load(&path)) else {
-            self.stack.pop();
+        let Some(doc) = self.open(step, scope, "import") else {
             return;
         };
         match model::parse_steps(doc.node()) {
@@ -516,21 +503,7 @@ impl Expander {
         depth: usize,
         tags: &BTreeSet<String>,
     ) {
-        let ctx = scope.ctx();
-        let Some(rel) = self.diags.absorb(self.render_str(step.body, &ctx)) else {
-            return;
-        };
-        let path = load::resolve(step.body.file, &rel);
-        if !path.exists() {
-            self.diags.push(load::missing(step.body, &path, "use"));
-            return;
-        }
-        let Some(_guard) = self.enter(&path, step.body) else {
-            return;
-        };
-
-        let Some(doc) = self.diags.absorb(self.loader.load(&path)) else {
-            self.stack.pop();
+        let Some(doc) = self.open(step, scope, "use") else {
             return;
         };
         let Some(component) = self.diags.absorb(load::parse_component(doc)) else {
@@ -555,6 +528,25 @@ impl Expander {
             }
         }
         self.stack.pop();
+    }
+
+    /// Find, enter and load the file an `import` or `use` names. `Some` means
+    /// it is on the include stack and the caller pops it when done; `None`
+    /// has reported why and left the stack as it was.
+    fn open(&mut self, step: &Step<'static>, scope: &Scope, key: &str) -> Option<&'static Doc> {
+        let ctx = scope.ctx();
+        let rel = self.diags.absorb(self.render_str(step.body, &ctx))?;
+        let path = load::resolve(step.body.file, &rel);
+        if !path.exists() {
+            self.diags.push(load::missing(step.body, &path, key));
+            return None;
+        }
+        self.enter(&path, step.body)?;
+        let doc = self.diags.absorb(self.loader.load(&path));
+        if doc.is_none() {
+            self.stack.pop();
+        }
+        doc
     }
 
     /// Spec §3.2: unknown prop, missing required prop, and wrong type after
@@ -1377,7 +1369,7 @@ fn typed_prop(schema: &load::PropSchema, text: &str) -> std::result::Result<Valu
         clippy::map_err_ignore,
         reason = "the replacement diagnostic restates the cause"
     )]
-    let parsed = crate::yaml::Doc::from_str("--prop", text)
+    let parsed = Doc::from_str("--prop", text)
         .and_then(|d| d.node().to_value())
         .map_err(|_| bad());
     let value = parsed?;
