@@ -141,12 +141,18 @@ impl Engine {
 }
 
 /// `"{{ x }}"` → `Some("x")`. `"a{{ x }}"`, `"{{ x }}{{ y }}"` → `None`.
+///
+/// A `-` directly inside the braces is Jinja's whitespace control and belongs
+/// to them, not to the expression — `{{- x -}}` → `Some("x")`. Kept, it left
+/// `- x -`, which does not compile.
 fn sole_expression(src: &str) -> Option<&str> {
     let s = src.trim();
     let inner = s.strip_prefix("{{")?.strip_suffix("}}")?;
     if inner.contains("}}") || inner.contains("{{") || inner.contains("{%") {
         return None;
     }
+    let inner = inner.strip_prefix('-').unwrap_or(inner);
+    let inner = inner.strip_suffix('-').unwrap_or(inner);
     Some(inner.trim())
 }
 
@@ -382,6 +388,19 @@ mod tests {
         let v = e.render_field("{{ home }}/.zshrc", &c).unwrap();
         assert_eq!(v.kind(), Kind::String);
         assert_eq!(v.to_string(), "/home/a/.zshrc");
+    }
+
+    // Jinja's whitespace-control markers belong to the braces, not to the
+    // expression: `{{- apps -}}` means what `{{ apps }}` means. The sole-
+    // expression rule stripped the braces and kept `- apps -`, which does not
+    // compile, so a field written that way was a syntax error.
+    #[test]
+    fn whitespace_control_markers_are_not_part_of_the_expression() {
+        let e = Engine::new();
+        let c = ctx(&[("apps", Value::from(vec!["git", "curl"]))]);
+        let v = e.render_field("{{- apps -}}", &c).unwrap();
+        assert_eq!(v.kind(), Kind::Seq);
+        assert_eq!(v.len(), Some(2));
     }
 
     #[test]
