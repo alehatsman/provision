@@ -124,13 +124,19 @@ impl Engine {
         }
     }
 
-    /// Check template syntax without a context. Used by `validate`.
-    pub(crate) fn check_syntax(&self, src: &str, at: &dyn Fn(String) -> Diag) -> Result<()> {
-        match sole_expression(src) {
-            Some(expr) => self.env.compile_expression(expr).map(|_| ()),
-            None => self.env.template_from_str(src).map(|_| ()),
-        }
-        .map_err(|e| at(describe(&e)))
+    /// Check an expression modifier's syntax without a context. Used by
+    /// `validate`, for `when`, `changed_when` and `failed_when`.
+    ///
+    /// Compiled exactly as `eval_bool` will compile it — the raw text, as an
+    /// expression. This used to accept template text too, where
+    /// `result.rc ==` is valid: it has no `{{`, so it is one literal string.
+    /// `validate` said ok, and `apply` found the syntax error only after the
+    /// step's command had run.
+    pub(crate) fn check_expression(&self, src: &str, at: &dyn Fn(String) -> Diag) -> Result<()> {
+        self.env
+            .compile_expression(src)
+            .map(|_| ())
+            .map_err(|e| at(describe(&e)))
     }
 }
 

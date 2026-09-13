@@ -133,6 +133,26 @@ fn validate_rejects_what_plan_would_reject() {
 }
 
 #[test]
+fn validate_rejects_what_only_plan_or_apply_used_to() {
+    // The same rule, three more holes: an undefined variable in `name`
+    // failed `plan`, and a `changed_when` or `failed_when` that does not
+    // parse failed `apply` — after the step's command had already run.
+    let (code, out) = validate("apply_only_errors.yml");
+    assert_eq!(code, EXIT_VALIDATION, "{out}");
+    assert!(out.contains("undefined variable `pkgname`"), "{out}");
+    assert!(
+        out.contains("apply_only_errors.yml:14:"),
+        "changed_when:\n{out}"
+    );
+    assert!(
+        out.contains("apply_only_errors.yml:19:"),
+        "failed_when:\n{out}"
+    );
+    assert!(out.contains("3 problems"), "{out}");
+    assert_positioned(&out);
+}
+
+#[test]
 fn snapshot_three_problems_across_two_files() {
     // Spec §8: validate collects every problem in one pass rather than
     // stopping at the first, across an import too. The trailer counts them

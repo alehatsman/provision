@@ -1,0 +1,19 @@
+# Three problems `plan` or `apply` rejected while `validate` said ok (spec §8:
+# validate is the subset of plan that runs nothing, not a weaker check).
+#
+# A step's `name` is rendered for its line, so an undefined variable in it
+# failed `plan`. And `changed_when` / `failed_when` are expressions, but their
+# syntax was checked as template text — where `result.rc ==` is valid — so a
+# broken one surfaced only after `apply` had already run the command.
+- name: "Install {{ pkgname }}"
+  shell: echo hi
+  changed_when: "false"
+
+- name: A changed_when that does not parse
+  shell: echo hi
+  changed_when: "result.rc =="
+
+- name: A failed_when that does not parse
+  shell: echo hi
+  changed_when: "false"
+  failed_when: "result.rc !="
