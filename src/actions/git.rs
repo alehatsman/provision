@@ -415,7 +415,9 @@ impl Spec {
         if ctx.sudo {
             return ctx.perform(&["install", "-d", "-m", "0755", &dir], true);
         }
-        std::fs::create_dir_all(parent)
+        // `file`'s own rule (spec §6.3, §6.8): 0755 whatever the umask, as
+        // the sudo path's `install -d -m 0755` already was.
+        super::file::create_dirs(parent, 0o755)
             .err()
             .map(|e| Effect::fail(format!("cannot create {dir}: {e}")))
     }

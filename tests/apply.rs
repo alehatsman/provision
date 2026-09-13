@@ -4059,6 +4059,71 @@ fn a_download_that_replaces_a_file_keeps_its_mode() {
     assert_eq!(mode, 0o755, "the re-fetch reset the mode to {mode:o}");
 }
 
+/// Apply a fixture under `umask 077`, the one setting that tells a directory
+/// created at 0755 from one created at whatever the umask leaves.
+fn apply_under_umask_077(scratch: &Path, plan: &str, extra: &[&str]) -> (i32, String) {
+    let path = fixture(plan);
+    let out = Command::new("sh")
+        .args(["-c", "umask 077; exec \"$0\" \"$@\""])
+        .arg(env!("CARGO_BIN_EXE_provision"))
+        .args(["apply", path.to_str().expect("fixture paths are UTF-8")])
+        .args(extra)
+        .env("PROVISION_SCRATCH", scratch)
+        .env("NO_COLOR", "1")
+        .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")))
+        .output()
+        .expect("sh failed to start");
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr),
+    )
+}
+
+fn dir_mode(p: &Path) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(p)
+        .expect("the directory the step created")
+        .permissions()
+        .mode()
+        & 0o7777
+}
+
+// Spec §6.9 and §6.8: parents of `dest` are created the way `file` creates
+// them, and §6.3 makes that 0755 whatever the umask. `download` and `git`
+// used `create_dir_all`, so under `umask 077` the parents came out 0700 —
+// a directory tree no other user could enter, unlike the same tree made by a
+// `file` step.
+#[test]
+fn download_creates_parents_at_0755_under_any_umask() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source.bin");
+    std::fs::write(&source, BODY).unwrap();
+    let args = dl_vars(&file_url(&source), BODY_SHA);
+    let args = as_args(&args);
+
+    let (code, out) = apply_under_umask_077(dir.path(), "download.yml", &args);
+    assert_eq!(code, 0, "{out}");
+    for d in ["deep", "deep/nest"] {
+        let mode = dir_mode(&dir.path().join(d));
+        assert_eq!(mode, 0o755, "{d} is {mode:o}");
+    }
+}
+
+#[test]
+fn git_creates_parents_at_0755_under_any_umask() {
+    let remote = Remote::new();
+    let dir = tempfile::tempdir().unwrap();
+    let args = git_vars(&remote, Some("light"));
+    let args = as_args(&args);
+
+    let (code, out) = apply_under_umask_077(dir.path(), "git.yml", &args);
+    assert_eq!(code, 0, "{out}");
+    for d in ["deep", "deep/nest"] {
+        let mode = dir_mode(&dir.path().join(d));
+        assert_eq!(mode, 0o755, "{d} is {mode:o}");
+    }
+}
+
 #[test]
 fn download_verifies_the_hash_then_never_fetches_again() {
     let dir = tempfile::tempdir().unwrap();

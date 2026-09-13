@@ -897,7 +897,7 @@ fn diff(old: &str, new: &str, path: &str) -> String {
 /// so this is the non-sudo path matching the sudo one rather than a third
 /// rule. Only directories this creates are touched; an existing parent keeps
 /// whatever it has.
-fn create_dirs(path: &Path, leaf_mode: u32) -> std::io::Result<()> {
+pub(crate) fn create_dirs(path: &Path, leaf_mode: u32) -> std::io::Result<()> {
     let mut missing = Vec::new();
     let mut cur = Some(path);
     // `Path::new("foo").parent()` is `Some("")`, not `None`, and `""` never
