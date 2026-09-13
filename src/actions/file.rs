@@ -734,17 +734,10 @@ impl Spec {
             set_mode(tmp.path(), 0o600).map_err(|x| e("secure the temp file", x))?;
             let staged = tmp.into_temp_path();
 
-            let mode_arg = format!("{mode:04o}");
             let staged_str = staged.display().to_string();
-            let mut argv = vec!["install", "-m", &mode_arg];
-            if let Some(o) = &self.owner {
-                argv.extend(["-o", o]);
-            }
-            if let Some(g) = &self.group {
-                argv.extend(["-g", g]);
-            }
-            argv.extend([staged_str.as_str(), self.path.as_str()]);
-            if let Some(bad) = ctx.perform(&argv, true) {
+            let owner = self.owner.as_deref();
+            let group = self.group.as_deref();
+            if let Some(bad) = install_as_root(ctx, &staged_str, &self.path, mode, owner, group) {
                 return Err(describe(bad));
             }
             return Ok(());
@@ -928,14 +921,37 @@ pub(crate) fn create_dirs(path: &Path, leaf_mode: u32) -> std::io::Result<()> {
 }
 
 #[cfg(unix)]
-fn set_mode(path: &Path, mode: u32) -> std::io::Result<()> {
+pub(crate) fn set_mode(path: &Path, mode: u32) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
 }
 
 #[cfg(not(unix))]
-fn set_mode(_path: &Path, _mode: u32) -> std::io::Result<()> {
+pub(crate) fn set_mode(_path: &Path, _mode: u32) -> std::io::Result<()> {
     Ok(())
+}
+
+/// Spec §6.3 under sudo: copy a staged file into place as root with its mode,
+/// owner and group in one call. `install` copies, so the staged file need not
+/// share a filesystem with `to`.
+pub(crate) fn install_as_root(
+    ctx: &Ctx<'_>,
+    from: &str,
+    to: &str,
+    mode: u32,
+    owner: Option<&str>,
+    group: Option<&str>,
+) -> Option<Effect> {
+    let mode_arg = format!("{mode:04o}");
+    let mut argv = vec!["install", "-m", &mode_arg];
+    if let Some(o) = owner {
+        argv.extend(["-o", o]);
+    }
+    if let Some(g) = group {
+        argv.extend(["-g", g]);
+    }
+    argv.extend([from, to]);
+    ctx.perform(&argv, true)
 }
 
 #[cfg(unix)]
