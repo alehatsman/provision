@@ -36,8 +36,16 @@ impl Sudo {
         if ask {
             let password = read_password()?;
             // Prove it before the first step, exactly as the -n path does.
+            //
+            // `-k` is what makes this a proof. With a command, it tells sudo
+            // to ignore a cached credential for this one call, so the password
+            // is actually checked. Without it a warm cache — a `sudo` run a
+            // minute earlier — let any password through, and the mistake
+            // surfaced at the first sudo step instead, because every step
+            // runs `-k -S` (see `wrap`) and does check it. Spec §7: fail
+            // before the first step.
             let ok = std::process::Command::new("sudo")
-                .args(["-S", "-p", "", "--", "true"])
+                .args(["-k", "-S", "-p", "", "--", "true"])
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
