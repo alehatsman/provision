@@ -186,10 +186,12 @@ pub(crate) fn parse(
 
     let src_at = body.get("src");
     let content_at = body.get("content");
-    let force = body
-        .get("force")
-        .and_then(|n| n.as_bool().ok())
-        .unwrap_or(false);
+    // A YAML boolean or an error, like `pkg`'s `cask` and `shell`'s `login`:
+    // `.ok()` swallowed the type error, so `force: "true"` read as false.
+    let force = match body.get("force") {
+        Some(n) => n.as_bool()?,
+        None => false,
+    };
 
     let mut link_to = None;
     let mut content = None;
