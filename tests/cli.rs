@@ -132,7 +132,7 @@ fn validate_rejects_what_plan_would_reject() {
     assert_eq!(
         out.matches("expected true or false, found a string")
             .count(),
-        2,
+        3,
         "a quoted bool was taken as false:\n{out}"
     );
     assert_positioned(&out);

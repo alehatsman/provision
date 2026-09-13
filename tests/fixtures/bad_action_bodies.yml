@@ -33,3 +33,11 @@
     script: echo hi
     login: "true"
   changed_when: "false"
+
+# The same for `file`: `force: "true"` read as false, so a step meant to
+# replace what is at `path` refused to.
+- name: A file whose force flag is a string
+  file:
+    path: /tmp/provision-never-written
+    content: x
+    force: "true"
