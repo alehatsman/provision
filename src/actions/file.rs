@@ -339,13 +339,26 @@ impl Meta {
     }
 }
 
+/// The mode of an existing regular file at `path`, read the way `file` reads
+/// one — as root when the step said sudo. `None` when there is no such file or
+/// it cannot be read.
+///
+/// For another action that writes a file and, like `file` (spec §6.3), keeps
+/// an existing target's mode when the step does not declare one.
+pub(crate) fn existing_mode(path: &str, ctx: &Ctx<'_>) -> Option<u32> {
+    stat(path, ctx)
+        .ok()
+        .filter(|m| m.kind == Kind::File)
+        .map(|m| m.mode)
+}
+
 /// Read the target's type, mode, owner and group — as root when the step said
 /// sudo. `stat` does not follow symlinks by default on either platform, which
 /// is what `state: link` needs.
-fn stat(spec: &Spec, ctx: &Ctx<'_>) -> std::result::Result<Meta, String> {
+fn stat(path: &str, ctx: &Ctx<'_>) -> std::result::Result<Meta, String> {
     if ctx.reads_as_root() {
         let got = ctx
-            .as_root(&["stat", stat_format(), &spec.path])
+            .as_root(&["stat", stat_format(), path])
             .map_err(|e| format!("cannot run stat: {e}"))?;
         if got.rc != 0 {
             // stat fails the same way for "not there" and "cannot look", and
@@ -356,7 +369,7 @@ fn stat(spec: &Spec, ctx: &Ctx<'_>) -> std::result::Result<Meta, String> {
         return Ok(parse_stat(&String::from_utf8_lossy(&got.stdout)));
     }
 
-    match std::fs::symlink_metadata(&spec.path) {
+    match std::fs::symlink_metadata(path) {
         Ok(m) => Ok(Meta {
             kind: kind_of(&m),
             mode: mode_of(&m),
@@ -365,10 +378,9 @@ fn stat(spec: &Spec, ctx: &Ctx<'_>) -> std::result::Result<Meta, String> {
         }),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Meta::missing()),
         Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => Err(format!(
-            "cannot read {} ({e}); add `sudo: true` to read it as root",
-            spec.path
+            "cannot read {path} ({e}); add `sudo: true` to read it as root"
         )),
-        Err(e) => Err(format!("cannot read {}: {e}", spec.path)),
+        Err(e) => Err(format!("cannot read {path}: {e}")),
     }
 }
 
@@ -468,7 +480,7 @@ impl Spec {
         if ctx.sudo && !ctx.root_available {
             return Effect::Unprobed;
         }
-        let meta = match stat(self, ctx) {
+        let meta = match stat(&self.path, ctx) {
             Ok(m) => m,
             Err(msg) => return failed(msg),
         };

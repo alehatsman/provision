@@ -235,7 +235,14 @@ impl Spec {
     /// copies and so does not need a shared filesystem; a rename otherwise,
     /// which is atomic because the temp file is in the same directory.
     fn place(&self, ctx: &Ctx<'_>, staged: tempfile::NamedTempFile) -> Option<Effect> {
-        let mode = self.mode.unwrap_or(0o644);
+        // Spec §6.9 takes `mode` "as `file` takes it", and §6.3 keeps an
+        // existing target's mode unless `mode` says otherwise. This was a flat
+        // `0644`, so re-fetching a tool on a new `sha256` with no `mode`
+        // turned an executable `0755` binary into a file nobody could run.
+        let mode = self
+            .mode
+            .or_else(|| super::file::existing_mode(&self.dest, ctx))
+            .unwrap_or(0o644);
         if ctx.sudo {
             if let Err(e) = set_mode(staged.path(), 0o600) {
                 return Some(Effect::fail(format!("cannot secure the temp file: {e}")));
