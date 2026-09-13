@@ -221,7 +221,14 @@ impl Expander {
     ) {
         for step in steps {
             self.check_clock();
-            if self.stopped {
+            // Spec §8: a problem found while executing ends the walk, the same
+            // as a failed step without `--keep-going` — and `--keep-going`
+            // does not apply, because a plan that will not render is not a
+            // plan to keep going with. The pre-walk finds nearly all of them
+            // before step one; what reaches here reads a register, and a
+            // `when` or a field that cannot be answered must not let the next
+            // step run on its way to exit 3.
+            if self.stopped || (self.mode.executes() && !self.diags.is_empty()) {
                 return;
             }
             if let Err(d) = model::check_modifiers(step) {

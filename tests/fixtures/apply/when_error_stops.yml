@@ -1,0 +1,19 @@
+# A `when` that cannot be answered at apply time stops the walk (spec §8).
+#
+# The pre-walk cannot see this: the condition reads a register, so it is only
+# evaluated once the registering step has run. `r.stdout` is a string, not a
+# boolean — an error, and the step after it must not run. It used to: the
+# error was reported and the walk carried on to the next step.
+- name: Registers a string
+  shell: echo yes
+  register: r
+  changed_when: "false"
+
+- name: Asks a string whether it is true
+  shell: "true"
+  when: r.stdout
+  changed_when: "false"
+
+- name: Must not run after the error
+  shell: touch "{{ env.PROVISION_SCRATCH }}/ran"
+  creates: "{{ env.PROVISION_SCRATCH }}/ran"
