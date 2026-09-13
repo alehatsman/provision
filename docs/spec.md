@@ -1147,6 +1147,7 @@ not that answer.
 | `assert` fails | `rc: 1` in `register`; the run stops like any other failure |
 | `--keep-going` and a step whose `register` a later step reads | The register holds the failed step's own result — `rc`, output, and `failed: true` — so a `when` reading it sees what happened. Nothing is invented to stand in for work that did not happen |
 | `--keep-going` and Ctrl-C | The run stops anyway, exit 130. The flag is about a step failing, not about the operator stopping |
+| A problem found mid-`apply` — a `when` reading a register that is not a boolean, a field rendered from one that is undefined | The walk stops there, exit 3; no later step runs. The pre-walk cannot see it, because the register holds a result only once its step has run. `--keep-going` does not apply: a plan that will not render is not a plan to keep going with |
 | `--keep-going` on `plan` or `validate` | Not accepted: neither ever stopped at a failure to begin with |
 | A step's `env` names a key `sudo` must preserve | `sudo --preserve-env` is given exactly the step's own `env` keys, nothing more |
 | `--ask-sudo-pass` and a step that reads stdin | The wrapped command is `sudo -k -S`, so the timestamp is invalidated and sudo consumes the password line before the child is started. The child sees EOF, never the password |

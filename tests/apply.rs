@@ -1072,6 +1072,29 @@ fn keep_going_does_not_carry_the_run_past_the_deadline() {
     );
 }
 
+// Spec §8: a plan that will not render is not a plan to keep going with. The
+// pre-walk catches most of that before the first step, but a `when` reading a
+// register can only be evaluated once the register holds a result — and an
+// error there used to be reported while the walk carried on executing.
+#[test]
+fn an_error_mid_apply_stops_the_walk() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(dir.path(), "when_error_stops.yml", &[]);
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("not true or false"), "{out}");
+    assert!(
+        !dir.path().join("ran").exists(),
+        "a step after the error ran:\n{out}"
+    );
+    // `--keep-going` is about a step failing, and this is not one.
+    let (code, out) = apply(dir.path(), "when_error_stops.yml", &["--keep-going"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(
+        !dir.path().join("ran").exists(),
+        "--keep-going walked past the error:\n{out}"
+    );
+}
+
 // §4's grammar through §4's parser, reported before anything is walked. A
 // `--deadline 5m` that meant something other than a step's `timeout: 5m` would
 // be a trap laid for the one reader who noticed.
