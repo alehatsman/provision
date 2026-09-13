@@ -41,3 +41,18 @@
     path: /tmp/provision-never-written
     content: x
     force: "true"
+
+# Fields that belong to another state were accepted and did nothing, which is
+# how a plan grows a line that means nothing for a year (spec §6.3).
+- name: A link given content
+  file:
+    path: /tmp/provision-never-written
+    state: link
+    src: /tmp/elsewhere
+    content: x
+
+- name: A directory given a src
+  file:
+    path: /tmp/provision-never-written-dir
+    state: dir
+    src: /tmp/elsewhere

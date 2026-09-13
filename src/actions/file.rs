@@ -251,6 +251,13 @@ pub(crate) fn parse(
             // `~/.local/bin/moongit` never matches the absolute target on
             // disk and the step reports changed forever.
             link_to = Some(expanduser(&target));
+            // Spec §6.3: `content` is `state: file` only. On a link it was
+            // accepted and did nothing.
+            if let Some(n) = content_at {
+                return Err(n
+                    .err("`content` does not apply to `state: link`")
+                    .with_note("a link has no bytes of its own; `src` is what it points at"));
+            }
             // Spec §6.3: a symlink has no mode of its own worth setting, and
             // silently ignoring one is how a plan grows a line that does
             // nothing for a year.
@@ -272,6 +279,18 @@ pub(crate) fn parse(
                     "`content` does not apply to `state: {}`",
                     state_name(state)
                 )));
+            }
+            // The same for `src`, which is a file to copy or a link target and
+            // nothing else. On a directory or an absence it did nothing.
+            if let Some(n) = src_at {
+                return Err(n
+                    .err(format!(
+                        "`src` does not apply to `state: {}`",
+                        state_name(state)
+                    ))
+                    .with_note(
+                        "src is a file to copy for `state: file`, or the target of `state: link`",
+                    ));
             }
         }
     }
