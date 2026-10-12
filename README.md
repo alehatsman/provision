@@ -248,7 +248,7 @@ whole of it.
 | File | What |
 |---|---|
 | [docs/spec.md](docs/spec.md) | The contract: config model, actions, execution, output, edge cases |
-| [docs/plan.md](docs/plan.md) | Build plan: phases, gates, crates, LOC budget |
+| [docs/plan.md](docs/plan.md) | Build plan: phases, gates, crates, what is deferred |
 | [docs/decisions.md](docs/decisions.md) | Why Rust, why no rollback, why shell-first, tag semantics |
 | [docs/migration.md](docs/migration.md) | Moving the existing dotfiles off mooncake |
 | [docs/audit.md](docs/audit.md) | The spec §11 gate: every construct in the real configs, mapped |

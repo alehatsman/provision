@@ -67,13 +67,18 @@ rule (§4), that an `apt-get install` reporting success can install nothing
 5b), and none of that would have surfaced from the machine plans. Running the
 tool the way the README tells a reader to run it is what found all four.
 
-Rust, one crate, one binary. Target: **6–9k lines of Rust in `src/`**
-(including any `#[cfg(test)]` unit tests living there), all ten actions,
-three platforms. If `src/` passes 12k, something from the non-goals crept
-in. Stop and cut. `tests/` — the integration and CLI suite — is not counted:
-it is acceptance testing, not implementation, and earns its size by covering
-every action and every exit code, not by staying small. Measured
-2026-09-12: 9,711 lines in `src/`, 4,563 in `tests/`.
+Rust, one crate, one binary, all ten actions, three platforms. **There is no
+line budget.** There was one — 6–9k lines in `src/`, stop and cut at 12k —
+and it was dropped 2026-10-12, because it measured the wrong thing. A line
+count cannot tell a `pkg` backend rule moving to the host where it is true
+from a non-goal creeping in, and by the time it reads 12k whatever it was
+supposed to catch has been in for months.
+
+What keeps this small is qualitative and already written down: the non-goals
+(spec §2), the deferred list at the end of this file with the condition that
+reopens each, and D19's closed noun budget — plan, component, step, fact, and
+no fifth. Those have overruled shipped code twice. The number never overruled
+anything.
 
 ## Ground rules
 
@@ -560,7 +565,6 @@ is small enough that merge cost exceeds the gain.
 
 ## What to measure
 
-- Lines of Rust per phase, against the budget.
 - `provision apply` wall time on x1 versus `mooncake apply`. Should be equal
   or better; the shell steps dominate both.
 - Number of `validate --strict` errors on a converged machine. Target: zero
