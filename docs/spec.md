@@ -175,7 +175,13 @@ body of `shell` **when** `raw: true` is set on that step. Templates in
 
 - Undefined variable: error at plan time, with file:line and the variable name.
 - Filters available: minijinja built-ins plus `expanduser`, `basename`,
-  `dirname`, `quote` (shell-quote), `to_yaml`, `to_json`.
+  `dirname`, `quote` (shell-quote), `to_yaml`, `to_json`, `crc32`.
+- `crc32` hashes a string's UTF-8 bytes to an integer (CRC-32 as zlib and
+  gzip compute it, not `cksum`'s). It derives a stable number from a path —
+  `{{ component_dir | crc32 % 100 + 55432 }}` is a port per checkout, so
+  parallel worktrees do not share one. There is no checkout-path fact:
+  `component_dir` already names the task's own directory, and a plan that is
+  not a component names its paths itself.
 - Tests available: minijinja built-ins plus `exists` (path).
 - `{% raw %}` blocks are honored; needed for shell scripts with `{{`. This is
   Jinja2's tag. `{% verbatim %}` is Twig's and is **not** supported.
