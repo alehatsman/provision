@@ -31,6 +31,12 @@ self-contained as the musl target would have been. musl and
 and macOS machines each have a Rust toolchain, and a cross-built artifact
 nobody installs is a build we would maintain for nothing.
 
+**Amended by the owner 2026-10-12. See D24.** Both dropped targets come back,
+joined by `aarch64-linux-android`, because the condition this paragraph set is
+met: a phone running Termux and a CI image both install a binary and neither
+should carry a Rust toolchain to get one. The machines that have toolchains
+still build their own; the releases are for the ones that do not.
+
 ## D2 — No fleet, no daemon, no remote
 
 **Decision.** The tool runs on the machine it converges. Period.
@@ -534,6 +540,14 @@ rather than against the line drawn here. D17's task half is not in question;
 this repo's own `tasks/` exercise it on every gate run. Set 2026-09-13 from
 issue #5.
 
+**Partial credit from 2026-10-12, D24.** This repo's own gate runs as
+`provision apply job.yml --json --deadline <N>m` on GitHub Actions, with a
+cancellation case, so the contract is exercised by *a* runner before the
+check fires. That is evidence that the stream, the deadline and the signal
+work against something which is not a test harness. It is not evidence about
+moongit, the consumer this decision's line was drawn for, so the December
+reading is "partial" and not "settled".
+
 ## D20 — a bare `shell` step's exit code is its whole contract
 
 **Decision.** A `shell` or `cmd` step with no `unless`, `creates` or
@@ -649,3 +663,102 @@ to guard.
 **Triggered 2026-09-12**, issue #5's "Later" queue, item "namespace exit
 codes so a step's own internal `timeout` call is distinguishable from
 provision's own deadline-kill."
+
+## D23 — one person's tool, published
+
+**Decided by the owner 2026-10-12**, when the question "who is this for"
+turned out to be unanswered after the repo had been public for a month.
+
+**Decision.** provision is the owner's tool for the owner's machines. It is
+public so it can be linked, read and copied, not because it is looking for
+users. There is no stability promise, no support, no triage obligation. The
+issue tracker is the owner's own friction log, which strangers may read and
+may file into; nothing in it is a commitment. A tag is a tag, not a product
+release, and `1.0` — if it ever happens — will mean the spec stopped moving,
+not that anyone is being asked to adopt this.
+
+**Why.** Every decision in this file is argued from a fleet of five machines
+and one person's dotfiles. That is the whole source of the tool's
+discipline: the non-goals hold because there is no second user whose case
+reopens them. A published repo with an Ansible vocabulary table and release
+binaries can be misread as a pitch, and a pitch would be the first real
+pressure on D19's noun budget — every adopter arrives with a fifth noun and a
+reason. Saying the scope out loud costs one paragraph and keeps the argument
+honest.
+
+**What this does not mean.** Not abandonment, not a closed tracker, and not
+an excuse for bad documentation — the README is written for a reader because
+a tool one person maintains for years has one reader who forgets, and that
+reader is the owner. Issue #5's review found the positioning was the main
+thing reviewers split on while nobody objected to the engineering; this is
+the positioning being written down rather than inferred.
+
+**Consequences.** The release artifacts D24 adds exist to get the binary onto
+the owner's machines — a phone that cannot comfortably build Rust, a CI image
+that should not have to — and the release notes say so. The Ansible table
+stays a vocabulary bridge, as issue #5 already reframed it. A feature request
+from a stranger is evidence about the world, read with interest, and is still
+answered by the deferred list's reopen conditions like any other.
+
+**Overturned by.** The owner deciding to want users, which is a different
+project and should be named as one.
+
+## D24 — a second runner: released binaries and the repo's own gate
+
+**Decided by the owner 2026-10-12.** Two gaps closed by one piece of
+infrastructure, and each would have been hard to justify alone.
+
+**Decision.** GitHub Actions builds release binaries on a tag for four
+targets — `x86_64-unknown-linux-musl`, `aarch64-apple-darwin`,
+`x86_64-pc-windows-gnu`, `aarch64-linux-android` — and runs this repo's
+quality gate on Linux and Windows on every push. The gate is written as a
+component and run as `provision apply job.yml --json --deadline <N>m`, with a
+cancellation case, so the contract D19 specified is exercised by a runner
+that is not moongit.
+
+**Why, half one: the binary has to reach the machine.** D1's amendment
+dropped musl and `aarch64-apple-darwin` "until something consumes them",
+which was correct when every machine in the fleet had a Rust toolchain. Two
+things now consume them. A phone running Termux (issue #9) can only get
+provision by `cargo build` inside Termux, which is the kind of install nobody
+does twice. A CI image that runs `provision apply job.yml` should not carry a
+Rust toolchain to get one 3 MB binary. D1's test was "a cross-built artifact
+nobody installs is a build we would maintain for nothing"; the artifacts now
+have installers, so the test passes and the targets come back.
+
+**Why, half two: D19 was built against a runner that never ran it.** Phase 7
+shipped SIGTERM handling, `--deadline` and `list <component.yml>` for a
+contract moongit has not yet used, and D19's own reopen check — 2026-12-12 —
+says that if nothing has exercised it by then, D17's CI half and D19 are
+**unvalidated**, not settled. A gate running the stream, the deadline and a
+cancel on every push is the evidence that check is asking for, available
+before the date rather than after it.
+
+**What this costs, stated plainly.** A second runner exists, and D19's table
+says moongit owns scheduling, log retention and cancellation policy. That
+line is unchanged: GitHub Actions is a consumer of the same contract, not a
+new owner of anything, and it schedules and retains for this one repo exactly
+as moongit will for its own. What it must not become is a place where CI
+features accrete that provision then grows nouns to serve — the gate is one
+job file and one process, and if it ever needs a second, the second belongs
+in the workflow and not in the language. And the evidence it produces is
+evidence about *a* runner, not about moongit: a moongit job still has to run
+before D17's CI half is settled on its own terms. The December check reads
+this decision as partial credit, not a pass.
+
+**Bootstrapping.** The gate builds provision from source and then runs the
+job with the binary it just built. There is no released-binary dependency in
+the gate, and no gate dependency in the release: a tag that fails to build
+fails loudly, and the gate never runs a provision older than the commit it is
+gating.
+
+**The matrix is Linux and Windows.** Linux is where the fleet lives. Windows
+is the platform README Status names as cross-compiled and natively untested —
+`pkg` against winget, `service`, and Ctrl-C — which is the standing item from
+issue #5's "Later" queue. macOS is covered by the owner running the gate on a
+Mac, which happens, and `defaults` stays unit-tested against captured
+`defaults read` output until a probed run on a mac says otherwise.
+
+**Overturned by.** GitHub Actions becoming a thing the language has to serve.
+Then the gate goes back to local and D19's check reads unvalidated, which is
+a worse answer honestly stated rather than a better one bought with nouns.

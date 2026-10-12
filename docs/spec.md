@@ -268,7 +268,8 @@ gate silently and reads as a broken plan rather than an unnamed platform.
 Naming it says what the machine is; it does not make Android a supported
 target. Nothing else in this document bends for it: a plan that wants the
 phone gates on `is_termux` and writes its own steps, and whether `pkg` and
-`sudo` grow Termux rules is a separate decision nobody has made.
+`sudo` grow Termux rules is deferred with the condition that reopens it
+(plan.md, "Deferred").
 
 ## 6. Actions
 
