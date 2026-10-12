@@ -1523,6 +1523,22 @@ fn cwd_defaults_to_the_invocation_directory_and_can_be_overridden() {
 }
 
 #[test]
+fn an_assert_command_runs_with_the_step_env_and_cwd() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("marker"), "").unwrap();
+    let (code, out) = apply(dir.path(), "assert_env_cwd.yml", &[]);
+    assert_eq!(code, 1, "{out}");
+    assert_eq!(
+        verdict(&out, "An assert command sees the step env and cwd"),
+        "ok"
+    );
+    assert_eq!(
+        verdict(&out, "A wrong env value fails the assert"),
+        "FAILED"
+    );
+}
+
+#[test]
 fn a_bare_plan_filename_runs_from_its_own_directory() {
     // Regression test for d531060: `Path::new("x1.yml").parent()` is
     // `Some("")`, not `None`, and `Command::current_dir("")` is ENOENT — so

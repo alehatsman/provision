@@ -1,0 +1,18 @@
+---
+# Spec §4 and §6.7: an assert's `command` runs with the step's `env` and
+# `cwd`, as a `shell` step does. A readiness check reads the same DSN the
+# steps around it were given (#17). The second step must fail: if `env` were
+# ignored, a check that cannot see its variable would pass for the wrong
+# reason.
+- name: An assert command sees the step env and cwd
+  assert:
+    command: test "$PROBE" = here && test -f ./marker
+  env:
+    PROBE: here
+  cwd: "{{ env.PROVISION_SCRATCH }}"
+
+- name: A wrong env value fails the assert
+  assert:
+    command: test "$PROBE" = here
+  env:
+    PROBE: elsewhere

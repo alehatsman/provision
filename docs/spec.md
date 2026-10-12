@@ -230,8 +230,8 @@ a string that happens to parse.
 | `sudo` | bool | false | Run the action as root (§7). Windows: error; use `shell` from an elevated prompt. |
 | `timeout` | duration | 10m | Kill the step and fail. `30s`, `5m`, `1h`. |
 | `retry` | `{attempts, delay}` | none | Re-run on failure. `delay` is a duration. Output shows attempt N/M. |
-| `env` | mapping | {} | Extra environment for `shell`, `cmd`, `unless`. Templated. |
-| `cwd` | path | the invocation directory | Working directory for `shell`, `cmd`, `unless`, under every command and for every step, including one inside a `use`d component. A command runs where the operator is standing; a shared gate checked out elsewhere must not gate its own checkout. An explicit `cwd:` resolves against the step's own file, like every other path a plan names, and `component_dir` (§3.2) names a component's own directory for a path inside a shell string. Phase 5b, 2026-09-08: this used to be the step's file directory under `apply` and the invocation directory under `run`. Measured against the fleet, no step depended on the old default — zero `cwd:` modifiers, zero relative paths in shell strings — and one rule beats two. |
+| `env` | mapping | {} | Extra environment for every command the step runs: `shell`, `cmd`, `assert`'s `command`, `unless`, and the commands a typed action spawns (`pkg`, `service`, `git`, …). Templated. |
+| `cwd` | path | the invocation directory | Working directory for `shell`, `cmd`, `assert`'s `command`, `unless`, under every command and for every step, including one inside a `use`d component. A command runs where the operator is standing; a shared gate checked out elsewhere must not gate its own checkout. An explicit `cwd:` resolves against the step's own file, like every other path a plan names, and `component_dir` (§3.2) names a component's own directory for a path inside a shell string. Phase 5b, 2026-09-08: this used to be the step's file directory under `apply` and the invocation directory under `run`. Measured against the fleet, no step depended on the old default — zero `cwd:` modifiers, zero relative paths in shell strings — and one rule beats two. |
 | `tags` | list | [] | For `--tags` selection (§8). |
 | `register` | identifier | — | Store the step result as a variable: `{rc, stdout, stderr, changed, skipped, timed_out}`. |
 | `changed_when` | expr | action-defined | Override the changed verdict. `result` is in scope. |
@@ -673,6 +673,9 @@ assert:
 ```
 
 - Always reports `ok` or `failed`. Plan runs asserts unless `--plan-no-probe`.
+- `command` runs like a `shell` script, with the step's `env`, `cwd` and
+  `sudo` (§4): a readiness check reaches the same service the step around it
+  is configuring. `expr` spawns nothing and reads only the scope.
 - **A failing assert does not stop a `plan` walk.** Apply stops at the first
   failure; plan never does. Plan has not done the work, so an assert about
   work not yet done — "verify the key is present", before the step that
