@@ -660,6 +660,7 @@ git:
   repo: https://github.com/tmux-plugins/tpm
   dest: ~/.config/tmux/plugins/tpm
   ref: v3.1.0                  # tag, sha, or branch; default: the remote's default branch
+  depth: 1                     # shallow; requires a `ref` naming a tag or a commit
 ```
 
 - **State is "HEAD of `dest` is `ref`."** `dest` missing: clone, check out
@@ -684,9 +685,29 @@ git:
   `origin` is a different URL, or one with a dirty working tree. Provision
   does not throw away work it did not do. Detached HEAD at the right commit
   is fine and is what a tag checkout leaves behind.
-- Full clones, no `depth`: a shallow clone breaks `describe` and tag
-  comparison, and the fleet's repositories are small. A plan that needs
-  shallow says so in shell.
+- **Full clones by default. `depth: N` asks for a shallow one, and only for
+  a pinned `ref`.** Amended 2026-10-12: "the fleet's repositories are small"
+  stopped being true when a plan pinned a benchmark corpus — a repository
+  whose whole history is fetched to read one tree.
+  - A shallow checkout is built by `init` + `remote add` + `fetch --depth N
+    origin +<ref>:refs/provision/pin` + a detached checkout of that commit,
+    not by `clone --depth`, because that is the only form that fetches a bare
+    commit sha.
+  - **`depth` needs a `ref`.** Omitting it means the remote's default branch,
+    which is a branch. A `ref` that turns out to name a **branch** fails the
+    step naming it, asked of the remote before anything is written to disk.
+    This is the part a shallow clone genuinely cannot do: a branch moves, and
+    a shallow history has nothing to fast-forward from, so the honest
+    convergence would be the reset §6.8 refuses to perform.
+  - A pinned ref needs no such thing. The commit is on disk, `HEAD ==
+    ref^{commit}` is the same offline comparison a full clone makes, and the
+    second apply is `ok` without a network call — for a tag too, because the
+    refspec lands `refs/tags/<ref>` with the commit.
+  - What the plan gives up is what it asked to give up: `git describe`,
+    history, and any tag the fetch did not name. Nothing provision needs.
+  - A fetch into an existing shallow checkout stays shallow — the same
+    `--depth N` — so a step that pins a new sha does not quietly deepen the
+    repository it was asked to keep small.
 - Plan: `clone <repo> at <ref>` when missing; `<sha> → <sha>` when a tag or
   sha differs; `unknown` for a branch as above.
 - Runs `git` from PATH and fails with a clear message when it is absent.

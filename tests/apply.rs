@@ -3666,12 +3666,33 @@ fn discard(work: &Path) {
 
 /// `git rev-parse` in a checkout the test made, for asserting where HEAD went.
 fn head_of(dir: &Path) -> String {
+    rev_of(dir, "HEAD")
+}
+
+/// Any revision, so a test can pin something that is not the tip. Empty when
+/// git could not answer, which every caller asserts against.
+fn rev_of(dir: &Path, rev: &str) -> String {
     let at = dir.display().to_string();
     let out = Command::new("git")
-        .args(["-C", &at, "rev-parse", "HEAD"])
+        .args(["-C", &at, "rev-parse", rev])
         .output()
         .expect("git failed to start");
     String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+/// Is this checkout shallow, and how much history did it take?
+fn shallow_depth(dir: &Path) -> (bool, usize) {
+    let shallow = rev_of(dir, "--is-shallow-repository") == "true";
+    let at = dir.display().to_string();
+    let out = Command::new("git")
+        .args(["-C", &at, "rev-list", "--count", "HEAD"])
+        .output()
+        .expect("git failed to start");
+    let count = String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse()
+        .unwrap_or(0);
+    (shallow, count)
 }
 
 fn checkout_in(scratch: &Path) -> PathBuf {
@@ -4241,6 +4262,114 @@ fn download_creates_parents_at_0755_under_any_umask() {
         let mode = dir_mode(&dir.path().join(d));
         assert_eq!(mode, 0o755, "{d} is {mode:o}");
     }
+}
+
+#[test]
+fn depth_takes_one_commit_at_a_sha_and_then_converges_offline() {
+    // Issue #6: pinning a large repository at a sha fetched its whole
+    // history. §6.8: `depth: N` fetches the pinned commit and nothing else.
+    let remote = Remote::new();
+    let dir = tempfile::tempdir().unwrap();
+    // Deliberately not the tip, and named by sha: `clone --depth` cannot
+    // fetch a bare commit at all, which is why the shallow path is
+    // `init` + `fetch` rather than a clone.
+    let sha = rev_of(&remote.path(), "main~1");
+    assert_eq!(sha.len(), 40, "the test did not get a sha");
+    let args = git_vars(&remote, Some(&sha));
+    let args = as_args(&args);
+
+    let (code, first) = apply(dir.path(), "git_depth.yml", &args);
+    assert_eq!(code, 0, "{first}");
+    assert!(
+        line_for(&first, "The checkout").contains("changed"),
+        "{first}"
+    );
+    let at = checkout_in(dir.path());
+    assert_eq!(head_of(&at), sha, "HEAD is not the pinned commit");
+    assert_eq!(
+        shallow_depth(&at),
+        (true, 1),
+        "the checkout is not one commit deep"
+    );
+
+    let (code, second) = apply(dir.path(), "git_depth.yml", &args);
+    assert_eq!(code, 0, "{second}");
+    assert_eq!(verdict(&second, "The checkout"), "ok", "{second}");
+
+    // §6.8: a pinned ref is immutable, so the answer needs no network once
+    // it is on disk — a shallow checkout included.
+    std::fs::remove_dir_all(remote.path()).unwrap();
+    let (code, offline) = apply(dir.path(), "git_depth.yml", &args);
+    assert_eq!(code, 0, "{offline}");
+    assert_eq!(verdict(&offline, "The checkout"), "ok", "{offline}");
+    assert_eq!(
+        shallow_depth(&at),
+        (true, 1),
+        "a later run deepened the checkout"
+    );
+}
+
+#[test]
+fn depth_at_an_annotated_tag_lands_the_tag_ref_too() {
+    // The second run has to answer `ok` offline, and that answer goes
+    // through `refs/tags/<ref>^{commit}` (§6.8). A shallow fetch of a bare
+    // name leaves no tag ref behind; the refspec the shallow path uses does.
+    let remote = Remote::new();
+    let dir = tempfile::tempdir().unwrap();
+    let args = git_vars(&remote, Some("annotated"));
+    let args = as_args(&args);
+
+    let (code, first) = apply(dir.path(), "git_depth.yml", &args);
+    assert_eq!(code, 0, "{first}");
+    let at = checkout_in(dir.path());
+    assert_eq!(
+        head_of(&at),
+        rev_of(&remote.path(), "annotated^{commit}"),
+        "HEAD is the tag object, not the commit it peels to"
+    );
+    assert_eq!(shallow_depth(&at), (true, 1));
+
+    std::fs::remove_dir_all(remote.path()).unwrap();
+    let (code, offline) = apply(dir.path(), "git_depth.yml", &args);
+    assert_eq!(code, 0, "{offline}");
+    assert_eq!(verdict(&offline, "The checkout"), "ok", "{offline}");
+}
+
+#[test]
+fn depth_refuses_a_branch_and_writes_nothing() {
+    // §6.8: a branch moves, and a shallow history has nothing to
+    // fast-forward from. The remote is asked before anything is created, so
+    // a plan that names one does not leave half a checkout behind.
+    let remote = Remote::new();
+    let dir = tempfile::tempdir().unwrap();
+    let args = git_vars(&remote, Some("main"));
+    let args = as_args(&args);
+
+    let (code, out) = apply(dir.path(), "git_depth.yml", &args);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("main is a branch in"), "{out}");
+    assert!(
+        !checkout_in(dir.path()).exists(),
+        "a refused step left a checkout behind:\n{out}"
+    );
+}
+
+#[test]
+fn depth_without_a_ref_is_a_validation_error() {
+    // No ref is the remote's default branch, and that is knowable without
+    // asking anyone (§6.8).
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("depth.yml");
+    std::fs::write(
+        &plan,
+        "- name: Shallow at nothing in particular\n  git:\n    repo: https://example.invalid/r.git\n    dest: /tmp/r\n    depth: 1\n",
+    )
+    .unwrap();
+    let out = run_in(dir.path(), &["validate", plan.to_str().unwrap()]);
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(3), "{text}");
+    assert!(text.contains("`depth` requires a `ref`"), "{text}");
 }
 
 #[test]

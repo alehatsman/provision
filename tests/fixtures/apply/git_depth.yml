@@ -1,0 +1,12 @@
+# The shallow counterpart of `git.yml` (spec §6.8): same repo and ref from the
+# command line, `depth: 1` on top. One fixture covers a sha, a tag, and the
+# branch the step has to refuse.
+- vars:
+    scratch: "{{ env.PROVISION_SCRATCH }}"
+
+- name: The checkout
+  git:
+    repo: "{{ repo }}"
+    dest: "{{ scratch }}/deep/nest/checkout"
+    ref: "{{ reference }}"
+    depth: 1
