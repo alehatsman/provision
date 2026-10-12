@@ -247,16 +247,28 @@ Computed once at startup, lazily where expensive, read-only.
 
 | Fact | Values |
 |---|---|
-| `os` | `linux`, `darwin`, `windows` |
+| `os` | `linux`, `darwin`, `windows`, `android` |
 | `arch` | `x86_64`, `aarch64` |
 | `hostname` | short hostname as the kernel reports it |
 | `username`, `home` | current user |
 | `distro`, `distro_version` | from `/etc/os-release` (`arch`, `ubuntu`, …), empty elsewhere |
 | `is_wsl` | `/proc/version` contains `microsoft` |
+| `is_termux` | `TERMUX_VERSION` is set, or `PREFIX` names Termux's directory |
 | `apt_available`, `pacman_available`, `brew_available`, `winget_available`, `yay_available` | binary on PATH |
 | `systemd_available`, `launchd_available` | init detection |
 
 No user-declared facts. Anything else is a variable.
+
+**`android` is its own `os`, not `linux`.** Termux is an Android app rather
+than a distribution: no `/etc`, no sudo, and an `apt` that runs as the app
+user. A plan's `when: os == "linux"` steps are therefore exactly the ones
+that must not run there, so reporting `linux` would run them and reporting
+`unknown` — which is what a `target_os = "android"` build did — skips every
+gate silently and reads as a broken plan rather than an unnamed platform.
+Naming it says what the machine is; it does not make Android a supported
+target. Nothing else in this document bends for it: a plan that wants the
+phone gates on `is_termux` and writes its own steps, and whether `pkg` and
+`sudo` grow Termux rules is a separate decision nobody has made.
 
 ## 6. Actions
 
