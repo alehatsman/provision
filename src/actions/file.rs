@@ -54,9 +54,6 @@ pub(crate) struct Spec {
     pub owner: Option<String>,
     pub group: Option<String>,
     pub force: bool,
-    /// Create the destination's leading directories, at `0755`. `file` does
-    /// not; `template` in directory mode has to.
-    pub make_parents: bool,
     /// What to call this file in a diff header. `template` in directory mode
     /// sets the path relative to `src`, which is what §6.4 asks a per-file
     /// diff to be headed by; everything else uses the destination.
@@ -85,7 +82,6 @@ impl Metadata {
             owner: self.owner,
             group: self.group,
             force: false,
-            make_parents: true,
             label,
         }
     }
@@ -292,7 +288,6 @@ pub(crate) fn parse(
         owner,
         group,
         force,
-        make_parents: false,
         label: None,
     }))
 }
@@ -713,17 +708,7 @@ impl Spec {
         let e = |what: &str, err: std::io::Error| format!("cannot {what}: {err}");
 
         if ctx.sudo {
-            // `install -D` would do this, but BSD install has no -D. Two
-            // portable calls beat one that works on only half the fleet.
-            if self.make_parents
-                && let Some(parent) = Path::new(&self.path).parent()
-                && !parent.as_os_str().is_empty()
-            {
-                let dir = parent.display().to_string();
-                if let Some(bad) = ctx.perform(&["install", "-d", "-m", "0755", &dir], true) {
-                    return Err(describe(bad));
-                }
-            }
+            self.parents(ctx)?;
             // Not next to the destination: being unable to create a file
             // there is usually the reason the step said sudo. `install`
             // copies, so nothing here depends on a shared filesystem.
@@ -752,9 +737,7 @@ impl Spec {
             // current directory said the long way.
             _ => Path::new("."),
         };
-        if self.make_parents && !dir.exists() {
-            create_dirs(dir, 0o755).map_err(|x| e(&format!("create {}", dir.display()), x))?;
-        }
+        self.parents(ctx)?;
         let mut tmp = tempfile::NamedTempFile::new_in(dir)
             .map_err(|x| e(&format!("make a temp file in {}", dir.display()), x))?;
         tmp.write_all(bytes)
@@ -766,6 +749,29 @@ impl Spec {
             .persist(&self.path)
             .map_err(|x| format!("cannot place {}: {x}", self.path))?;
         Ok(())
+    }
+
+    /// Create the directories leading to `path`, at `0755` (spec §6.3).
+    /// `install -D` would do this on the sudo path, but BSD install has no
+    /// -D: two portable calls beat one that works on only half the fleet.
+    fn parents(&self, ctx: &Ctx<'_>) -> std::result::Result<(), String> {
+        let Some(parent) = Path::new(&self.path).parent() else {
+            return Ok(());
+        };
+        if parent.as_os_str().is_empty() {
+            return Ok(());
+        }
+        if ctx.sudo {
+            let dir = parent.display().to_string();
+            return match ctx.perform(&["install", "-d", "-m", "0755", &dir], true) {
+                Some(bad) => Err(describe(bad)),
+                None => Ok(()),
+            };
+        }
+        if parent.exists() {
+            return Ok(());
+        }
+        create_dirs(parent, 0o755).map_err(|e| format!("cannot create {}: {e}", parent.display()))
     }
 
     fn make_dir(&self, ctx: &Ctx<'_>, mode: u32) -> std::result::Result<(), String> {
@@ -789,6 +795,7 @@ impl Spec {
     }
 
     fn make_link(&self, ctx: &Ctx<'_>, target: &str) -> std::result::Result<(), String> {
+        self.parents(ctx)?;
         if ctx.sudo {
             if let Some(bad) = ctx.perform(&["ln", "-sfn", target, &self.path], true) {
                 return Err(describe(bad));

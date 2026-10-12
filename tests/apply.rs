@@ -2013,6 +2013,63 @@ fn set_mode(p: &Path, mode: u32) {
 }
 
 #[test]
+fn file_creates_missing_parent_directories() {
+    // Issue #11: `file` failed with "cannot make a temp file in …: No such
+    // file or directory" where `template` into the same missing directory
+    // succeeded. §6.3: every state that creates something creates the
+    // directories leading to it, at 0755.
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("hooks-pre-commit");
+    std::fs::write(&src, "#!/bin/sh\n").unwrap();
+    let plan = dir.path().join("parents.yml");
+    std::fs::write(
+        &plan,
+        format!(
+            "- name: A file under a directory nobody made\n  \
+             file:\n    path: \"{{{{ env.PROVISION_SCRATCH }}}}/cfg/git/hooks/pre-commit\"\n    \
+             src: {}\n\
+             - name: A link under another one\n  \
+             file:\n    path: \"{{{{ env.PROVISION_SCRATCH }}}}/cfg/nvim/init.lua\"\n    \
+             state: link\n    src: \"{{{{ env.PROVISION_SCRATCH }}}}/hooks-pre-commit\"\n\
+             - name: Content under a third\n  \
+             file:\n    path: \"{{{{ env.PROVISION_SCRATCH }}}}/cfg/deep/a/b/note\"\n    \
+             content: \"hi\\n\"\n    mode: \"0600\"\n",
+            src.display()
+        ),
+    )
+    .unwrap();
+
+    let out = run_in(dir.path(), &["apply", plan.to_str().unwrap()]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("cfg/git/hooks/pre-commit")).unwrap(),
+        "#!/bin/sh\n"
+    );
+    assert!(
+        std::fs::symlink_metadata(dir.path().join("cfg/nvim/init.lua"))
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    // The leaf's mode is its own; the directories on the way are 0755
+    // whatever the umask, as §6.3 says and `state: dir` already did.
+    assert_eq!(mode_of(&dir.path().join("cfg/deep/a")), 0o755);
+    assert_eq!(mode_of(&dir.path().join("cfg/deep/a/b")), 0o755);
+    assert_eq!(mode_of(&dir.path().join("cfg/deep/a/b/note")), 0o600);
+
+    // §11: the second run changes nothing.
+    let again = run_in(dir.path(), &["apply", plan.to_str().unwrap()]);
+    let text = String::from_utf8_lossy(&again.stdout);
+    assert_eq!(again.status.code(), Some(0), "{text}");
+    assert!(!text.contains("changed"), "{text}");
+}
+
+#[test]
 fn parent_directories_are_deterministic_not_umask_derived() {
     // create_dir_all would give every level a umask-derived mode. §6.3 says
     // `mode` lands on the leaf and parents get 0755, which is what GNU

@@ -390,6 +390,14 @@ file:
   directory requires `force: true`. A path that is already gone is `ok`, not
   `changed`.
 
+Every state that creates something creates the directories leading to it.
+`dir` always did; `file` and `link` do too, so a plan does not need a
+`state: dir` step per directory before the step that says what goes in it.
+That is already how `template` (§6.4), `download` (§6.9) and `git` (§6.5)
+behave, and one rule across the five is easier to hold than four plus an
+exception. `absent` creates nothing: a parent that is missing means the
+target is already gone.
+
 **Modes are deterministic, not inherited from the umask.** A new file with no
 `mode` gets `0644` and a new directory `0755`. A target that already exists
 keeps the mode it has unless `mode` says otherwise.
