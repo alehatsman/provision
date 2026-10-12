@@ -94,6 +94,18 @@ impl Engine {
             .map(|e| e.undeclared_variables(false))
     }
 
+    /// The same question for a template string rather than an expression: the
+    /// top-level names any `{{ … }}` or `{% … %}` in it reads.
+    pub(crate) fn undeclared_in_template(
+        &self,
+        src: &str,
+    ) -> Option<std::collections::HashSet<String>> {
+        self.env
+            .template_from_str(src)
+            .ok()
+            .map(|t| t.undeclared_variables(false))
+    }
+
     /// Render a spanned node into a value: strings through the field rule of
     /// §3.4, sequences and mappings element by element, everything else as
     /// written. Errors are anchored at the node that failed, not the root.

@@ -1073,6 +1073,69 @@ fn a_when_reading_a_register_stays_unprobed_under_plan() {
     );
 }
 
+#[test]
+fn a_filter_on_a_register_is_unprobed_until_apply_computes_it() {
+    // Regression test for #16: `{{ crc.stdout | trim | int }}` failed
+    // validate, plan and apply's pre-walk on the placeholder's empty string.
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture("register_derived.yml");
+    let path = path.to_str().unwrap();
+
+    let out = run_in(dir.path(), &["validate", "--strict", path]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let out = run_in(dir.path(), &["plan", path, "--json", "--color=never"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let steps: Vec<serde_json::Value> = stdout
+        .lines()
+        .map(|l| serde_json::from_str(l).expect(l))
+        .filter(|r: &serde_json::Value| r["event"] == "step")
+        .collect();
+    let statuses: Vec<&str> = steps
+        .iter()
+        .map(|s| s["status"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        statuses,
+        [
+            "would_run",
+            "would_run_unprobed",
+            "would_run_unprobed",
+            "would_run_unprobed"
+        ],
+        "{stdout}"
+    );
+
+    let (code, out) = apply(dir.path(), "register_derived.yml", &[]);
+    assert_eq!(code, 0, "{out}");
+    let read = |f: &str| std::fs::read_to_string(dir.path().join(f)).unwrap();
+    assert_eq!(read("from-field"), "1234568");
+    assert_eq!(read("from-derived"), "55499");
+    assert_eq!(verdict(&out, "A when reads a derived var"), "ok", "{out}");
+}
+
+#[test]
+fn a_typo_beside_a_register_is_still_an_error() {
+    // The tolerance is per field: a field that reads no register keeps strict
+    // undefined (D6), even on a step whose other fields read one.
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("typo.yml");
+    std::fs::write(
+        &plan,
+        "- shell: \"true\"\n  changed_when: \"false\"\n  register: r\n\
+         - shell: echo {{ r.stdout | int }}\n  cwd: \"{{ nope }}\"\n  changed_when: \"false\"\n",
+    )
+    .unwrap();
+    let out = run_in(dir.path(), &["validate", plan.to_str().unwrap()]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(3), "{stderr}");
+    assert!(stderr.contains("undefined variable `nope`"), "{stderr}");
+}
+
 // ── context, streaming, and Ctrl-C ────────────────────────────────────────
 
 #[test]
