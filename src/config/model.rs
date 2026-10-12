@@ -61,7 +61,7 @@ pub(crate) fn action_body_keys(action: &str) -> Option<&'static [&'static str]> 
             "update_cache",
         ],
         "service" => &["name", "state", "enabled", "scope"],
-        "git" => &["repo", "dest", "ref"],
+        "git" => &["repo", "dest", "ref", "depth"],
         "defaults" => &["domain", "key", "type", "value", "current_host"],
         "download" => &["url", "dest", "sha256", "mode", "owner", "group"],
         "assert" => &["command", "expr", "msg"],

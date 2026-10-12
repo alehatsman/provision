@@ -22,6 +22,9 @@ pub(crate) struct Spec {
     pub dest: String,
     /// `None` is the remote's default branch, and is treated as a branch.
     pub reference: Option<String>,
+    /// `depth: N` — a shallow checkout of a pinned ref (spec §6.8). `None`
+    /// is a full clone, which is still what a plan gets by saying nothing.
+    pub depth: Option<u32>,
 }
 
 /// What a ref turned out to be, once the repository was asked.
@@ -81,10 +84,40 @@ pub(crate) fn parse(
         None => None,
     };
 
+    // Spec §6.8: a shallow checkout is of a pinned ref. Whether a name is a
+    // tag or a branch is a question only the repository answers (see `kind`),
+    // so that half is checked against the remote in `reach`. What parse does
+    // know is that *no* ref means the default branch, which is a branch.
+    let depth = match body.get("depth") {
+        Some(n) => {
+            let Some(text) = render(&n.as_scalar_string()?) else {
+                return Ok(None);
+            };
+            let depth: u32 = text
+                .trim()
+                .parse()
+                .map_err(|e| n.err(format!("`depth` must be a whole number: {e}")))?;
+            if depth < 1 {
+                return Err(n
+                    .err("`depth` must be at least 1")
+                    .with_note("omit it for a full clone"));
+            }
+            if reference.is_none() {
+                return Err(n.err("`depth` requires a `ref`").with_note(
+                    "no ref is the remote's default branch, and a shallow \
+                         checkout is of a tag or a commit",
+                ));
+            }
+            Some(depth)
+        }
+        None => None,
+    };
+
     Ok(Some(Spec {
         repo: repo.trim().to_string(),
         dest: expanduser(dest.trim()),
         reference,
+        depth,
     }))
 }
 
@@ -160,6 +193,10 @@ impl Spec {
         self.ask(ctx, &["rev-parse", "--abbrev-ref", "HEAD"])
     }
 }
+
+/// Where a shallow fetch puts the commit it was pinned to. A fetch refspec
+/// needs a destination ref, and a sha has no name of its own to land under.
+const PIN: &str = "refs/provision/pin";
 
 fn tag_ref(name: &str) -> String {
     format!("refs/tags/{name}")
@@ -293,14 +330,23 @@ impl Spec {
 
     fn clone_fresh(&self, ctx: &Ctx<'_>, act: bool) -> Effect {
         let at = self.reference.as_deref().unwrap_or("the default branch");
+        let line = match self.depth {
+            Some(n) => format!("clone {} at {at} (depth {n})", self.repo),
+            None => format!("clone {} at {at}", self.repo),
+        };
         if !act {
-            return Effect::Changed(Some(format!("clone {} at {at}", self.repo)));
+            return Effect::Changed(Some(line));
         }
         if let Some(bad) = self.make_parents(ctx) {
             return bad;
         }
-        // Spec §6.8: full clones, no `depth` — a shallow clone breaks
-        // `describe` and tag comparison.
+        if self.depth.is_some() {
+            if let Some(bad) = self.shallow_fresh(ctx) {
+                return bad;
+            }
+            return Effect::Changed(Some(line));
+        }
+        // Spec §6.8: a full clone is what a plan that says nothing gets.
         if let Some(bad) = ctx.perform(
             &["git", "clone", "--quiet", &self.repo, &self.dest],
             ctx.sudo,
@@ -312,7 +358,61 @@ impl Spec {
         {
             return bad;
         }
-        Effect::Changed(Some(format!("clone {} at {at}", self.repo)))
+        Effect::Changed(Some(line))
+    }
+
+    /// A shallow checkout of a pinned ref (spec §6.8).
+    ///
+    /// Not `clone --depth`: that takes a branch or a tag and refuses a bare
+    /// commit sha, which is the case this exists for. `init` + `remote add` +
+    /// a one-refspec fetch is the only form that takes all three, and it
+    /// leaves `refs/tags/<ref>` behind when the ref was a tag, so the next
+    /// run answers offline the way a full clone does.
+    fn shallow_fresh(&self, ctx: &Ctx<'_>) -> Option<Effect> {
+        if let Some(bad) = self.refuse_branch(ctx) {
+            return Some(bad);
+        }
+        if let Some(bad) = ctx.perform(&["git", "init", "--quiet", &self.dest], ctx.sudo) {
+            return Some(bad);
+        }
+        if let Some(bad) = ctx.perform(
+            &[
+                "git", "-C", &self.dest, "remote", "add", "origin", &self.repo,
+            ],
+            ctx.sudo,
+        ) {
+            return Some(bad);
+        }
+        if let Some(bad) = self.fetch(ctx) {
+            return Some(bad);
+        }
+        ctx.perform(
+            &[
+                "git", "-C", &self.dest, "checkout", "--quiet", "--detach", PIN,
+            ],
+            ctx.sudo,
+        )
+    }
+
+    /// Spec §6.8: `depth` is for a pinned ref, and the remote is the only
+    /// thing that knows whether a name is a branch. Asked before anything is
+    /// written, so a plan that names one leaves nothing half-made on disk.
+    ///
+    /// Only a clear "yes, that is a branch" fails the step. A `ls-remote`
+    /// that cannot reach the remote at all is the fetch's failure to report,
+    /// in the fetch's own words.
+    fn refuse_branch(&self, ctx: &Ctx<'_>) -> Option<Effect> {
+        let want = self.reference.as_deref()?;
+        let got = ctx
+            .exec(&["git", "ls-remote", "--heads", &self.repo, want], ctx.sudo)
+            .ok()?;
+        if got.rc != 0 || got.stdout.iter().all(u8::is_ascii_whitespace) {
+            return None;
+        }
+        Some(Effect::fail(format!(
+            "{want} is a branch in {}, and `depth` is for a tag or a commit",
+            self.repo
+        )))
     }
 
     /// A tag or a sha. Immutable, so the comparison is offline and exact.
@@ -423,6 +523,25 @@ impl Spec {
     /// A tag this checkout sits on is compared by commit (§6.8), so a moved
     /// one is reported like any other difference, never silently followed.
     fn fetch(&self, ctx: &Ctx<'_>) -> Option<Effect> {
+        // A shallow checkout fetches the one ref it is pinned to, at the same
+        // depth (spec §6.8). The full form below would deepen the repository
+        // the step asked to keep small, and `--tags` would fetch every tag in
+        // it to answer a question about one commit.
+        if let Some(n) = self.depth {
+            let want = self.reference.as_deref()?;
+            if let Some(bad) = self.refuse_branch(ctx) {
+                return Some(bad);
+            }
+            let depth = n.to_string();
+            let refspec = format!("+{want}:{PIN}");
+            return ctx.perform(
+                &[
+                    "git", "-C", &self.dest, "fetch", "--quiet", "--force", "--depth", &depth,
+                    "origin", &refspec,
+                ],
+                ctx.sudo,
+            );
+        }
         ctx.perform(
             &[
                 "git", "-C", &self.dest, "fetch", "--quiet", "--force", "--tags", "origin",
