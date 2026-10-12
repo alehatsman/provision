@@ -1,0 +1,11 @@
+---
+source: tests/list.rs
+expression: out
+---
+  git                       Ensure a checkout of a repository at a ref.
+
+  fields:
+    repo                    required            the URL to clone from
+    dest                    required            the directory the checkout lives in
+    ref                     optional            tag, sha, or branch; default: the remote's default branch
+    depth                   optional            shallow; requires a `ref` naming a tag or a commit

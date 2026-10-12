@@ -104,10 +104,12 @@ enum Command {
         #[command(flatten)]
         run: RunArgs,
     },
-    /// Name the components in a directory, or describe one component's props.
+    /// Name the components in a directory, describe one component's props,
+    /// or describe a builtin action's fields.
     List {
-        /// A directory of component files, or one component file. A trailing
-        /// separator is optional: the verb already says what the argument is.
+        /// A directory of component files, one component file, or the name of
+        /// a builtin action (`git`, `pkg`, …). A trailing separator is
+        /// optional: the verb already says what the argument is.
         path: PathBuf,
     },
     /// Print the facts this machine reports.
@@ -550,10 +552,48 @@ fn list(path: &Path, base: &Path) -> Result<u8, Diag> {
         return list_tasks(path, base);
     }
     if !path.exists() {
-        return Err(Diag::file_level(path, "no such file or directory")
-            .with_note("`list` takes a directory of components, or one component file"));
+        // Spec §8: a path that exists wins, so only a bare name matching no
+        // file is looked up as a builtin. `provision list git` is the first
+        // thing an author of a plan reaches for, and a builtin is not a file
+        // to open.
+        if let Some(name) = path.to_str()
+            && let Some(doc) = config::model::action_doc(name)
+        {
+            return Ok(describe_action(name, doc));
+        }
+        return Err(
+            Diag::file_level(path, "no such file or directory").with_note(
+                "`list` takes a directory of components, one component file, \
+             or the name of a builtin action",
+            ),
+        );
     }
     describe_component(path)
+}
+
+/// `provision list <action>`. The summary, then one line per body field:
+/// name, what it is (required, optional, or the one-of group it belongs to),
+/// and a short gloss — the same shape `list <component.yml>` prints for a
+/// prop, because it is the same question.
+///
+/// The fields come from the table the unknown-key check reads (spec §8), so
+/// a key that is listed here is a key `validate` accepts.
+fn describe_action(name: &str, doc: &config::model::ActionDoc) -> u8 {
+    output::line(format_args!("  {name:<24}  {}", doc.summary));
+    if let Some(shape) = doc.shape {
+        output::line(format_args!("\n  body: {shape}"));
+    }
+    if doc.fields.is_empty() {
+        return EXIT_OK;
+    }
+    output::line(format_args!("\n  fields:"));
+    for f in doc.fields {
+        output::line(format_args!(
+            "    {:<22}  {:<18}  {}",
+            f.name, f.need, f.note
+        ));
+    }
+    EXIT_OK
 }
 
 /// `provision list <component.yml>`. The description, then one line per prop:

@@ -743,7 +743,7 @@ impl Expander {
             && step.body.as_map().is_ok()
             && let Err(d) = step
                 .body
-                .deny_unknown_keys(allowed, &format!("`{}`", step.key))
+                .deny_unknown_keys(&allowed, &format!("`{}`", step.key))
         {
             self.diags.push(d);
             renderable = false;

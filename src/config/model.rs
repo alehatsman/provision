@@ -42,31 +42,254 @@ pub(crate) fn all_step_keys() -> Vec<&'static str> {
         .collect()
 }
 
-/// The fields each action's long form accepts (spec §6). `cmd` is a
-/// sequence, not a map, and so has no entry.
-pub(crate) fn action_body_keys(action: &str) -> Option<&'static [&'static str]> {
-    Some(match action {
-        "shell" => &["script", "interpreter", "login"],
-        "file" => &[
-            "path", "state", "content", "src", "mode", "owner", "group", "force",
-        ],
-        "template" => &["src", "dest", "mode", "owner", "group"],
-        "pkg" => &[
-            "name",
-            "names",
-            "state",
-            "manager",
-            "cask",
-            "adopt",
-            "update_cache",
-        ],
-        "service" => &["name", "state", "enabled", "scope"],
-        "git" => &["repo", "dest", "ref", "depth"],
-        "defaults" => &["domain", "key", "type", "value", "current_host"],
-        "download" => &["url", "dest", "sha256", "mode", "owner", "group"],
-        "assert" => &["command", "expr", "msg"],
-        _ => return None,
-    })
+/// One field of an action's body (spec §6).
+///
+/// `need` is the word `provision list <action>` prints and nothing branches
+/// on: "required", "optional", or the one-of group a field belongs to. The
+/// rule itself lives in the action's own `parse`, which is the only place
+/// that can enforce it; this is how it reads out loud.
+pub(crate) struct Field {
+    pub name: &'static str,
+    pub need: &'static str,
+    pub note: &'static str,
+}
+
+/// What one action is, in a line, for `provision list <action>`.
+pub(crate) struct ActionDoc {
+    pub summary: &'static str,
+    /// The body fields, or empty for an action whose body is not a mapping.
+    pub fields: &'static [Field],
+    /// What the body is when it is not a mapping. `None` where it is one.
+    pub shape: Option<&'static str>,
+}
+
+const fn f(name: &'static str, need: &'static str, note: &'static str) -> Field {
+    Field { name, need, note }
+}
+
+/// Every builtin action's body, in one table (spec §6, §8).
+///
+/// The unknown-key check and `provision list <action>` both read it, because
+/// a printed key list kept by hand beside the one the validator enforces is
+/// how a tool grows a help text that lies. The summaries and glosses are §6's
+/// own words.
+static ACTIONS: &[(&str, ActionDoc)] = &[
+    (
+        "shell",
+        ActionDoc {
+            summary: "Run a script through an interpreter.",
+            fields: &[
+                f("script", "required", "the script to run"),
+                f(
+                    "interpreter",
+                    "optional",
+                    "bash (default on unix) | sh | zsh | powershell (default on windows) | pwsh",
+                ),
+                f("login", "optional", "run the interpreter as a login shell"),
+            ],
+            shape: Some("a script string: `shell: |`, with the long form below"),
+        },
+    ),
+    (
+        "cmd",
+        ActionDoc {
+            summary: "Run an argv without a shell.",
+            fields: &[],
+            shape: Some("a list of arguments: `cmd: [mv, src, dest]`"),
+        },
+    ),
+    (
+        "file",
+        ActionDoc {
+            summary: "Ensure a filesystem entry.",
+            fields: &[
+                f("path", "required", "the entry to ensure"),
+                f(
+                    "state",
+                    "optional",
+                    "file | dir | absent | link (default: file)",
+                ),
+                f(
+                    "content",
+                    "one of content/src",
+                    "state=file only: the bytes",
+                ),
+                f(
+                    "src",
+                    "one of content/src",
+                    "state=file: a file to copy; state=link: the link target",
+                ),
+                f("mode", "optional", "octal, quoted: \"0644\""),
+                f("owner", "optional", "requires sudo"),
+                f("group", "optional", "requires sudo"),
+                f(
+                    "force",
+                    "optional",
+                    "replace a file with a link, or remove a non-empty directory",
+                ),
+            ],
+            shape: None,
+        },
+    ),
+    (
+        "template",
+        ActionDoc {
+            summary: "Render a `.j2` file and ensure `dest` matches, with `file` semantics.",
+            fields: &[
+                f(
+                    "src",
+                    "required",
+                    "a file, or a directory to render as a tree",
+                ),
+                f("dest", "required", "the output file, or the tree root"),
+                f(
+                    "mode",
+                    "optional",
+                    "as `file` takes it; every rendered file",
+                ),
+                f("owner", "optional", "requires sudo"),
+                f("group", "optional", "requires sudo"),
+            ],
+            shape: None,
+        },
+    ),
+    (
+        "pkg",
+        ActionDoc {
+            summary: "Ensure packages are present or absent through one manager.",
+            fields: &[
+                f("name", "one of name/names", "a single package"),
+                f("names", "one of name/names", "a list of packages"),
+                f(
+                    "state",
+                    "optional",
+                    "present | absent | latest (default: present)",
+                ),
+                f(
+                    "manager",
+                    "optional",
+                    "apt | pacman | yay | brew | winget; default: first available",
+                ),
+                f("cask", "optional", "brew only"),
+                f(
+                    "adopt",
+                    "optional",
+                    "brew casks only; takes over an app already there",
+                ),
+                f(
+                    "update_cache",
+                    "optional",
+                    "apt update / pacman -Sy / brew update before install",
+                ),
+            ],
+            shape: None,
+        },
+    ),
+    (
+        "service",
+        ActionDoc {
+            summary: "Ensure a service state under systemd (system or user) or launchd.",
+            fields: &[
+                f("name", "required", "the unit or service name"),
+                f(
+                    "state",
+                    "one of state/enabled",
+                    "started | stopped | restarted | reloaded",
+                ),
+                f("enabled", "one of state/enabled", "start at boot"),
+                f("scope", "optional", "system | user (systemd only)"),
+            ],
+            shape: None,
+        },
+    ),
+    (
+        "assert",
+        ActionDoc {
+            summary: "Fail the run if a condition does not hold. Never changes anything.",
+            fields: &[
+                f(
+                    "command",
+                    "one of command/expr",
+                    "a shell command that exits 0",
+                ),
+                f(
+                    "expr",
+                    "one of command/expr",
+                    "an expression over the scope, evaluated not rendered",
+                ),
+                f("msg", "optional", "what to print when it does not hold"),
+            ],
+            shape: None,
+        },
+    ),
+    (
+        "git",
+        ActionDoc {
+            summary: "Ensure a checkout of a repository at a ref.",
+            fields: &[
+                f("repo", "required", "the URL to clone from"),
+                f("dest", "required", "the directory the checkout lives in"),
+                f(
+                    "ref",
+                    "optional",
+                    "tag, sha, or branch; default: the remote's default branch",
+                ),
+                f(
+                    "depth",
+                    "optional",
+                    "shallow; requires a `ref` naming a tag or a commit",
+                ),
+            ],
+            shape: None,
+        },
+    ),
+    (
+        "download",
+        ActionDoc {
+            summary: "Ensure a file fetched from a URL is at `dest`.",
+            fields: &[
+                f("url", "required", "what to fetch"),
+                f("dest", "required", "where it goes"),
+                f(
+                    "sha256",
+                    "optional",
+                    "strongly recommended; the content's digest",
+                ),
+                f("mode", "optional", "as `file` takes it"),
+                f("owner", "optional", "requires sudo"),
+                f("group", "optional", "requires sudo"),
+            ],
+            shape: None,
+        },
+    ),
+    (
+        "defaults",
+        ActionDoc {
+            summary: "Ensure a macOS preference key holds a value.",
+            fields: &[
+                f("domain", "required", "com.apple.finder, or NSGlobalDomain"),
+                f("key", "required", "the preference key"),
+                f("type", "required", "bool | int | float | string"),
+                f("value", "required", "the value, in that type"),
+                f("current_host", "optional", "`defaults -currentHost`"),
+            ],
+            shape: None,
+        },
+    ),
+];
+
+pub(crate) fn action_doc(action: &str) -> Option<&'static ActionDoc> {
+    ACTIONS.iter().find(|(n, _)| *n == action).map(|(_, d)| d)
+}
+
+/// The fields each action's long form accepts (spec §6), for the unknown-key
+/// check. `cmd` is a sequence, not a map, and so has no fields.
+pub(crate) fn action_body_keys(action: &str) -> Option<Vec<&'static str>> {
+    let doc = action_doc(action)?;
+    if doc.fields.is_empty() {
+        return None;
+    }
+    Some(doc.fields.iter().map(|f| f.name).collect())
 }
 
 #[derive(Clone, Copy)]
