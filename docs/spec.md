@@ -64,6 +64,20 @@ Rules:
 - `~` expands in every path field the tool owns (`dest`, `path`, `src`,
   `creates`, `cwd`, `vars_file`, `import`, `use`). It does **not** expand
   inside shell scripts; the shell does that.
+- **Whose home `~` is depends on which machine the path names.** A path
+  naming a location on the machine being converged — `file`'s `path` and its
+  link target, `template`/`git`/`download`'s `dest`, a step's `cwd` — and the
+  `expanduser` filter expand against the scope's **`home`**. A path provision
+  reads out of the plan tree — `src`, `import`, `use`, `vars_file` — expands
+  against the **process's** home, because those files live beside the plan on
+  the machine doing the reading, whatever the plan is for. So does `creates`
+  and the `exists` test, which ask about a file at the moment a step runs.
+
+  `home` is a fact (§3.5), so on an ordinary run both are the same home and
+  this rule is invisible. It shows when a plan shadows `home` — a tree
+  rendered on one machine for another, a phone or a container — where
+  without it the renderer's `/Users/<me>/…` was baked into the target's
+  files and repaired afterwards by a sed script.
 
 ### 3.1 Structural keywords
 
@@ -573,8 +587,19 @@ pkg:
 - Plan: lists the packages that would be installed, by actual query.
 - `sudo` is not implied. apt and pacman need `sudo: true`. brew and yay must
   **not** have it — both refuse to run as root — and both combinations are
-  validation errors. apt, pacman or yay with `sudo: false` is not a validation
-  error; the manager will say so itself.
+  errors. apt, pacman or yay with `sudo: false` is not an error; the manager
+  will say so itself.
+- **A rule about one backend is checked where that backend is named.** `brew`
+  and `yay` refusing root, and `cask` belonging to brew, are facts about a
+  manager the plan wrote down, so a step carrying `manager:` is checked at
+  `validate`, on any host. A step that names no manager has a backend that
+  belongs to the **target**, and resolving one from the reading host's PATH
+  to judge it is how a Linux plan validated from a Mac was told its
+  `sudo: true` apt steps must not run as root. Such a step meets the rule
+  where it is true instead: `plan` and `apply` resolve the manager on the
+  machine that will install the package, and fail there naming it. Amended
+  2026-10-12; before it, the only fix was to name `manager` on every `pkg`
+  step in a plan meant to validate anywhere.
 - **`plan` answers even with no reachable root.** The query reads a local
   database and never escalates, plan never installs, and `update_cache` never
   runs under plan, so there is nothing for root to protect. Only `apply` needs
@@ -882,14 +907,14 @@ gates, so it has a wall clock worth bounding too. There is no
   Anything `plan` would reject before touching the machine, `validate`
   rejects too.
 
-  It is therefore evaluated against **this host's facts and PATH**. Resolving
-  a `pkg` step's default manager asks what is on PATH, and a `service` step's
-  backend follows the `os` fact, so a plan written for another machine can be
-  rejected here for a reason that is true only here: a `service` step
-  validated with `os` reading `windows`, or a `pkg` step naming no `manager`
-  on a box that has none. This is the host-dependence a `when` gate has always
-  had, now reaching one step further. Name the `manager` on a plan meant to
-  validate anywhere.
+  It is therefore evaluated against **this host's facts and PATH**, and that
+  is kept as narrow as it can be. A rule about a *named* backend holds on
+  every host and is checked here; a rule about one this host merely happens
+  to have is not checked here at all (§6.5). What is left is genuinely
+  structural: a `service` step's backend follows the `os` fact, and a `pkg`
+  step naming no `manager` on a box with none cannot be built into a step at
+  all. This is the host-dependence a `when` gate has always had, reaching one
+  step further.
 - `plan`: everything `validate` does, plus render templates, evaluate `when`,
   probe `unless`/`creates`/`pkg`/`service`/`file` state, print what would
   change. Runs nothing that mutates. Exit 0 if nothing would change, 2 if

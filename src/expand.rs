@@ -16,7 +16,7 @@ use crate::exec::runner::{Judge, Prepared, Runner};
 use crate::output::Sink;
 use crate::output::event::{Event, Status, Summary};
 use crate::scope::{Globals, Map, Scope};
-use crate::template::{Engine, expanduser};
+use crate::template::{Engine, expanduser_in};
 use crate::yaml::Doc;
 use crate::yaml::N;
 use minijinja::Value;
@@ -928,7 +928,10 @@ impl Expander {
         //
         // An explicit `cwd:` still resolves against the step's own file, like
         // every other path a plan names.
-        let cwd = text(step.mods.cwd).map(|dir| load::resolve(step.at.file, &expanduser(&dir)));
+        // `~` here is the machine the command runs on, which is the one the
+        // scope's `home` names (spec §3).
+        let cwd =
+            text(step.mods.cwd).map(|dir| load::resolve(step.at.file, &expanduser_in(ctx, &dir)));
 
         // Spec §8: a step's effective timeout is the lesser of its own and the
         // time the run has left, so no step can outlive the deadline it was

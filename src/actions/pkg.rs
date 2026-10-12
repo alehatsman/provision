@@ -343,6 +343,12 @@ pub(crate) fn parse(
     };
     let sudo = step.mods.sudo.is_some_and(|n| n.as_bool().unwrap_or(false));
 
+    // Spec §6.5: whether the step's backend is a fact about the *plan* or
+    // about whichever host happens to be reading it. Written down, it is the
+    // plan's and every host agrees. Resolved from PATH, it is this host's,
+    // and a Linux plan validated from a Mac was told its `sudo: true` apt
+    // steps must not run as root — because `brew` was what this machine had.
+    let manager_named = body.get("manager").is_some();
     let manager = match body.get("manager") {
         Some(n) => {
             let Some(text) = render(n.as_str()?) else {
@@ -371,16 +377,24 @@ pub(crate) fn parse(
         },
     };
 
-    if manager.rejects_root && sudo {
-        return Err(step
-            .at
-            .err(format!("`{}` must not run as root", manager.name))
-            .with_note(format!("{} refuses to be run under sudo", manager.name)));
-    }
-    if cask && manager.cask_flag.is_none() {
-        return Err(body
-            .err(format!("`cask` does not apply to `{}`", manager.name))
-            .with_note("casks are a brew concept"));
+    // Both rules below are about one named backend, so they are checked only
+    // where the backend is named (spec §6.5). An unnamed one belongs to the
+    // target machine, and the step meets it there: `reach` runs on the host
+    // that will install the package, and refuses root for a manager that
+    // refuses root — so plan and apply still say it, in the one place it is
+    // true.
+    if manager_named {
+        if manager.rejects_root && sudo {
+            return Err(step
+                .at
+                .err(format!("`{}` must not run as root", manager.name))
+                .with_note(format!("{} refuses to be run under sudo", manager.name)));
+        }
+        if cask && manager.cask_flag.is_none() {
+            return Err(body
+                .err(format!("`cask` does not apply to `{}`", manager.name))
+                .with_note("casks are a brew concept"));
+        }
     }
     // Spec §6.5: `adopt` rides on the brew cask install call and nothing
     // else. Accepting it where it cannot be passed would leave a plan line
@@ -423,6 +437,16 @@ impl Spec {
         let m = self.manager;
         if which::which(m.bin).is_err() {
             return Effect::fail(format!("`{}` is not on PATH", m.bin));
+        }
+        // The backend this host actually resolved to. A plan that named it
+        // was told at validate; one that did not is told here, where the
+        // manager is no longer a guess about somebody else's machine
+        // (spec §6.5).
+        if m.rejects_root && ctx.sudo {
+            return Effect::fail(format!(
+                "`{}` must not run as root; {} refuses to be run under sudo",
+                m.name, m.name
+            ));
         }
         // No unprobed guard here, unlike `file`: the query reads a local
         // database and never escalates, plan never mutates, and

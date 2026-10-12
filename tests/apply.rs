@@ -2070,6 +2070,81 @@ fn file_creates_missing_parent_directories() {
 }
 
 #[test]
+fn tilde_follows_the_scopes_home_for_a_path_on_the_target() {
+    // Issue #10: a tree rendered on one machine for another baked the
+    // renderer's home into every `~`. §3: a path naming a location on the
+    // machine being converged, and the `expanduser` filter, expand against
+    // the scope's `home`; a path read out of the plan tree does not.
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("phone-home");
+    let src = dir.path().join("hook.txt");
+    std::fs::write(&src, "#!/bin/sh\n").unwrap();
+    let plan = dir.path().join("staged.yml");
+    std::fs::write(
+        &plan,
+        format!(
+            "- vars:\n    home: {home}\n\
+             - name: A file at the target's home\n  \
+             file:\n    path: ~/.config/git/config\n    content: \"[core]\\n\"\n\
+             - name: A link at the target's home\n  \
+             file:\n    path: ~/.config/git/hook\n    state: link\n    src: ~/.local/hook\n\
+             - name: A file copied out of the plan tree\n  \
+             file:\n    path: ~/.config/git/copied\n    src: ./hook.txt\n\
+             - name: The filter says the same thing\n  \
+             file:\n    path: ~/.config/git/rendered\n    \
+             content: \"hooksPath = {{{{ '~/.config/git/hooks' | expanduser }}}}\\n\"\n",
+            home = target.display()
+        ),
+    )
+    .unwrap();
+
+    let out = run_in(dir.path(), &["apply", plan.to_str().unwrap()]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    // The destinations went to the declared home, not this process's.
+    assert!(target.join(".config/git/config").is_file(), "no config");
+    // `src` is read out of the plan tree, on this machine, as always — the
+    // copy proves it resolved here rather than under the target's home.
+    assert_eq!(
+        std::fs::read_to_string(target.join(".config/git/copied")).unwrap(),
+        "#!/bin/sh\n"
+    );
+    // The link target is on the target machine too, so it reads as the
+    // target's home — not as a path into this one.
+    let link = std::fs::read_link(target.join(".config/git/hook")).unwrap();
+    assert_eq!(link, target.join(".local/hook"));
+    // And the filter, which is the half the issue was filed about.
+    assert_eq!(
+        std::fs::read_to_string(target.join(".config/git/rendered")).unwrap(),
+        format!("hooksPath = {}/.config/git/hooks\n", target.display())
+    );
+}
+
+#[test]
+fn tilde_is_this_machines_home_when_nothing_shadows_it() {
+    // `home` is a fact, so the rule above is invisible on an ordinary run:
+    // both homes are the same one. A plan that sets nothing gets exactly
+    // what it got before.
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("plain.yml");
+    std::fs::write(
+        &plan,
+        "- name: Where does it point\n  file:\n    path: \"{{ env.PROVISION_SCRATCH }}/where\"\n    content: \"{{ '~/x' | expanduser }}\\n\"\n",
+    )
+    .unwrap();
+    let out = run_in(dir.path(), &["apply", plan.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(0));
+    let got = std::fs::read_to_string(dir.path().join("where")).unwrap();
+    let home = std::env::var("HOME").expect("a unix test runner has HOME");
+    assert_eq!(got, format!("{home}/x\n"));
+}
+
+#[test]
 fn parent_directories_are_deterministic_not_umask_derived() {
     // create_dir_all would give every level a umask-derived mode. §6.3 says
     // `mode` lands on the leaf and parents get 0755, which is what GNU
@@ -2516,6 +2591,79 @@ fn the_managers_that_refuse_root_refuse_sudo() {
             "{out}"
         );
     }
+}
+
+/// `provision <verb>` with PATH set to exactly `bin_dir` — nothing of the
+/// host's own. The default-manager rule walks PATH (§6.5), so a test about
+/// *which* backend gets resolved is a coin flip on a machine that has a real
+/// one: apt wins on Debian, pacman on Arch, brew on a Mac. This is the only
+/// way to ask the question and get the same answer everywhere.
+fn pkg_run_with_only(dir: &Path, verb: &str, body: &str, bin_dir: &Path) -> (i32, String) {
+    let path = dir.join("pkg.yml");
+    std::fs::write(&path, body).expect("writing a plan into the test's own tempdir");
+    let out = Command::new(env!("CARGO_BIN_EXE_provision"))
+        .args([verb, path.to_str().expect("fixture paths are UTF-8")])
+        .env("PATH", bin_dir.display().to_string())
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("provision failed to start");
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr),
+    )
+}
+
+#[test]
+fn an_unnamed_manager_is_not_judged_by_the_validating_hosts_path() {
+    // Issue #8: validating a Linux plan from a Mac reported `brew` must not
+    // run as root — for `sudo: true` apt steps, on a plan with no `brew` in
+    // it. §6.5: a rule about one backend is checked where that backend is
+    // named, and an unnamed one belongs to the target machine.
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    fake_manager(&bin, "brew", "exit 0\n");
+
+    let apt_step = "- name: Install openssh-server\n  pkg:\n    name: openssh-server\n    state: present\n  sudo: true\n";
+    let (code, out) = pkg_run_with_only(dir.path(), "validate", apt_step, &bin);
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains("must not run as root"), "{out}");
+}
+
+#[test]
+fn a_named_manager_that_refuses_root_is_still_rejected_anywhere() {
+    // The other half of the same rule: written down, it is a fact about the
+    // plan, so every host agrees and `validate` says so without resolving
+    // anything.
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    // No brew on PATH at all: a named manager needs no host to confirm it.
+    let step = "- name: As root\n  pkg:\n    name: git\n    manager: brew\n  sudo: true\n";
+    let (code, out) = pkg_run_with_only(dir.path(), "validate", step, &bin);
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("`brew` must not run as root"), "{out}");
+}
+
+#[test]
+fn the_host_that_resolves_brew_still_refuses_to_run_it_as_root() {
+    // The rule moved, it did not go away (§6.5). On the machine whose PATH
+    // actually produced brew, the step fails naming it.
+    //
+    // `plan`, not `apply`: the two share one `reach` body, and `apply` would
+    // stop at the sudo preflight on a machine with no warm credential —
+    // which is a fact about the test runner, not about this rule. Plan is
+    // also the half that matters here, because a plan that promised what
+    // apply refuses is the disagreement this guard exists to prevent.
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    fake_manager(&bin, "brew", "exit 0\n");
+
+    let step = "- name: Install git\n  pkg:\n    name: git\n  sudo: true\n";
+    let (code, out) = pkg_run_with_only(dir.path(), "plan", step, &bin);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("must not run as root"), "{out}");
 }
 
 #[test]

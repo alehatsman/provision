@@ -215,18 +215,47 @@ fn kind_name(v: &Value) -> &'static str {
 
 // ── filters ───────────────────────────────────────────────────────────────
 
-fn f_expanduser(s: &str) -> String {
-    expanduser(s)
+/// The filter, which expands against the scope's `home` (spec §3).
+///
+/// `home` is a fact, so this is the process's home on every ordinary run —
+/// the difference only shows when a plan shadows it, which is how a tree
+/// rendered on one machine for another says whose home it means.
+fn f_expanduser(state: &minijinja::State<'_, '_>, s: &str) -> String {
+    expanduser_with(state.lookup("home").as_ref().and_then(Value::as_str), s)
 }
 
 /// `~` and `~/…` only. `~other` is left alone: the tool has no business
 /// guessing another account's home (D8 — root or the current user).
+///
+/// Expands against **this process's** home, which is what a path provision
+/// reads out of the plan tree means: `src`, `import`, `use`, `vars_file`
+/// name files on the machine doing the reading. For a path naming a location
+/// on the machine being converged, see [`expanduser_in`].
 pub(crate) fn expanduser(s: &str) -> String {
+    expanduser_with(None, s)
+}
+
+/// `~` in a path that names a location on the **target** (spec §3): `file`'s
+/// `path` and link target, `template`/`git`/`download`'s `dest`, a step's
+/// `cwd`. Expands against the scope's `home`, falling back to this process's.
+///
+/// Without this, a tree rendered on one host for another baked the renderer's
+/// home into every `~` — a Mac's `/Users/<me>/…` in a phone's git config,
+/// repaired afterwards by a sed script.
+pub(crate) fn expanduser_in(ctx: &Value, s: &str) -> String {
+    let home = ctx.get_attr("home").ok();
+    expanduser_with(home.as_ref().and_then(Value::as_str), s)
+}
+
+fn expanduser_with(home: Option<&str>, s: &str) -> String {
     let Some(rest) = s.strip_prefix('~') else {
         return s.to_string();
     };
     if !(rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\')) {
         return s.to_string();
+    }
+    if let Some(h) = home.filter(|h| !h.is_empty()) {
+        return format!("{h}{rest}");
     }
     match home::home_dir() {
         Some(h) => format!("{}{}", h.display(), rest),

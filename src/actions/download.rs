@@ -20,7 +20,7 @@ use super::file::{install_as_root, set_mode};
 use super::{Ctx, Effect};
 use crate::config::model::Step;
 use crate::error::Result;
-use crate::template::{Engine, expanduser};
+use crate::template::{Engine, expanduser_in};
 use minijinja::Value;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -87,7 +87,7 @@ pub(crate) fn parse(
 
     Ok(Some(Spec {
         url: url.trim().to_string(),
-        dest: expanduser(dest.trim()),
+        dest: expanduser_in(ctx, dest.trim()),
         sha256,
         mode: meta.mode,
         owner: meta.owner,
