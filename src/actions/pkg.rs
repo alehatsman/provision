@@ -260,6 +260,8 @@ pub(crate) struct Spec {
     pub state: State,
     pub manager: &'static Manager,
     pub cask: bool,
+    /// `--adopt` on the brew cask install call (spec §6.5).
+    pub adopt: bool,
     pub update_cache: bool,
 }
 
@@ -331,6 +333,10 @@ pub(crate) fn parse(
         Some(n) => n.as_bool()?,
         None => false,
     };
+    let adopt = match body.get("adopt") {
+        Some(n) => n.as_bool()?,
+        None => false,
+    };
     let update_cache = match body.get("update_cache") {
         Some(n) => n.as_bool()?,
         None => false,
@@ -376,12 +382,28 @@ pub(crate) fn parse(
             .err(format!("`cask` does not apply to `{}`", manager.name))
             .with_note("casks are a brew concept"));
     }
+    // Spec §6.5: `adopt` rides on the brew cask install call and nothing
+    // else. Accepting it where it cannot be passed would leave a plan line
+    // that reads like it does something and does not.
+    if adopt {
+        if let Some(n) = body.get("adopt").filter(|_| !cask) {
+            return Err(n
+                .err("`adopt` requires `cask: true`")
+                .with_note("--adopt is a brew cask install option"));
+        }
+        if let Some(n) = body.get("adopt").filter(|_| state == State::Absent) {
+            return Err(n
+                .err("`adopt` does not apply to `state: absent`")
+                .with_note("--adopt rides on the install call; a removal installs nothing"));
+        }
+    }
 
     Ok(Some(Spec {
         names,
         state,
         manager,
         cask,
+        adopt,
         update_cache,
     }))
 }
@@ -613,6 +635,10 @@ impl Spec {
                 && let Some(flag) = m.cask_flag
             {
                 argv.push(flag);
+                // Install only: `brew upgrade` has no `--adopt` (spec §6.5).
+                if self.adopt && verb == m.install {
+                    argv.push("--adopt");
+                }
             }
             argv.extend(batch.iter().map(String::as_str));
             Self::exec(ctx, &argv)?;

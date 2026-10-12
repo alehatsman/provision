@@ -2555,6 +2555,83 @@ fn cask_belongs_to_brew_and_nowhere_else() {
 }
 
 #[test]
+fn adopt_is_a_brew_cask_install_field() {
+    // Spec §6.5: `--adopt` is a brew cask install option, so it is rejected
+    // where it could not be passed rather than silently doing nothing.
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = pkg_plan(
+        dir.path(),
+        "- name: Adopt without a cask\n  pkg:\n    name: discord\n    manager: brew\n    adopt: true\n",
+    );
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("`adopt` requires `cask: true`"), "{out}");
+    assert!(
+        out.contains("--adopt is a brew cask install option"),
+        "{out}"
+    );
+
+    let (code, out) = pkg_plan(
+        dir.path(),
+        "- name: Adopt a removal\n  pkg:\n    name: discord\n    manager: brew\n    cask: true\n    adopt: true\n    state: absent\n",
+    );
+    assert_eq!(code, 3, "{out}");
+    assert!(
+        out.contains("`adopt` does not apply to `state: absent`"),
+        "{out}"
+    );
+}
+
+#[test]
+fn adopt_passes_adopt_to_the_brew_cask_install_call() {
+    // Issue #12: a hand-installed /Applications/Discord.app makes a plain
+    // cask install fail, and the workaround was a `shell` step with
+    // `unless`. §6.5: `adopt: true` puts `--adopt` on the install call — and
+    // on that call only, because `brew upgrade` has no such option.
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let log = dir.path().join("argv");
+    let marker = dir.path().join("installed");
+    fake_manager(
+        &bin,
+        "brew",
+        &format!(
+            "printf '%s\\n' \"$*\" >> {log}\n\
+             case \"$*\" in\n  \
+               list*) [ -f {m} ] && printf 'discord 1.0\\n'\n    exit 0 ;;\n  \
+               install*) touch {m}\n    exit 0 ;;\n\
+             esac\nexit 0\n",
+            log = log.display(),
+            m = marker.display()
+        ),
+    );
+
+    let plan = "- name: A cask already on disk\n  pkg:\n    names: [discord]\n    manager: brew\n    cask: true\n    adopt: true\n";
+    let (code, out) = pkg_apply_with_path(dir.path(), plan, &bin);
+    assert_eq!(code, 0, "{out}");
+    let calls = std::fs::read_to_string(&log).unwrap();
+    assert!(
+        calls.contains("install --cask --adopt discord"),
+        "the install call did not carry --adopt:\n{calls}"
+    );
+    // The query is `brew list --cask --versions`, and it never takes the flag.
+    assert!(
+        !calls
+            .lines()
+            .any(|l| l.starts_with("list") && l.contains("--adopt")),
+        "--adopt leaked onto the query:\n{calls}"
+    );
+
+    // §11: the second run finds it installed and calls nothing.
+    std::fs::write(&log, "").unwrap();
+    let (code, out) = pkg_apply_with_path(dir.path(), plan, &bin);
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains("changed"), "{out}");
+    let calls = std::fs::read_to_string(&log).unwrap();
+    assert!(!calls.contains("install"), "it installed again:\n{calls}");
+}
+
+#[test]
 fn pkg_wants_exactly_one_of_name_and_names() {
     let dir = tempfile::tempdir().unwrap();
     let (code, out) = pkg_plan(

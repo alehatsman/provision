@@ -511,6 +511,7 @@ pkg:
   state: present               # present | absent | latest
   manager: apt                 # apt | pacman | yay | brew | winget; default: first available
   cask: false                  # brew only
+  adopt: false                 # brew casks only; takes over an app already there
   update_cache: false          # apt update / pacman -Sy / brew update before install
 ```
 
@@ -556,6 +557,18 @@ pkg:
 - `update_cache: true` refreshes before the install call, and only when there
   is something to install. **Never under `plan`**: a dry run that mutates the
   package database is not a dry run.
+- **`adopt: true` takes over an app that is already on disk**, as
+  `brew install --cask --adopt` does: a hand-installed `/Applications/Foo.app`
+  makes a plain cask install fail, because brew will not write over an
+  artifact it does not own. Without it the only way to converge such a machine
+  is a `shell: brew install --cask --adopt foo` gated by `unless` — a second
+  way to say what the `pkg` step above it already said.
+- `adopt` is a **brew cask** field: it rides on the install call only, since
+  that is the only brew command that takes `--adopt`. Without `cask: true` it
+  is a validation error, as `cask` itself is on a manager that has no casks,
+  and so is `state: absent`, which never installs anything. Under `latest` it
+  applies to the names that are missing and are therefore installed, not to
+  the upgrade call.
 - `absent` mirrors `present` with the manager's remove command.
 - Plan: lists the packages that would be installed, by actual query.
 - `sudo` is not implied. apt and pacman need `sudo: true`. brew and yay must
