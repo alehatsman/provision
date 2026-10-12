@@ -71,15 +71,16 @@ The job is small and stable. The tool should be too.
   pretending a typed action exists for everything.
 - **Ten actions** where idempotency genuinely needs state inspection:
   `shell`, `cmd`, `file`, `template`, `pkg`, `service`, `assert`, `git`,
-  `download`, `defaults` (D4 as amended).
+  `download`, `defaults` (D4 as amended). `provision list <action>` prints
+  the fields any of them takes.
 - **Composition** with `vars`, `vars_file`, `import`, and `use` (a component
   with declared props).
 - **Jinja2 templating** (minijinja), strict undefined, the same `.j2` files
   you already have.
 - **Five commands.** `validate`, `plan`, `apply`, `list`, `facts`. The first
   three take a machine plan or a component; `list <dir>/` names the components
-  in a directory by their `description:`, and `list <component.yml>` prints
-  the props one takes.
+  in a directory by their `description:`, `list <component.yml>` prints the
+  props one takes, and `list <action>` prints the fields a builtin takes.
 - **Output a human reads.** One line per step, live, colored on a TTY, plain
   on a pipe, unified diffs for file changes in plan mode, `--json` for
   machines.
@@ -110,6 +111,19 @@ $ provision list tasks/install.yml
   props:
     dest                    string  default: ~/.local/bin/provision
                             Where the binary lands. `~` expands.
+```
+
+The same question about a builtin, which has no file to open:
+
+```
+$ provision list git
+  git                       Ensure a checkout of a repository at a ref.
+
+  fields:
+    repo                    required            the URL to clone from
+    dest                    required            the directory the checkout lives in
+    ref                     optional            tag, sha, or branch; default: the remote's default branch
+    depth                   optional            shallow; requires a `ref` naming a tag or a commit
 ```
 
 A CI runner gets no per-step entry point. It writes the job to a file and

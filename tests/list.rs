@@ -157,3 +157,77 @@ fn listing_a_plan_is_a_usage_error() {
     assert_eq!(code, EXIT_VALIDATION, "{out}");
     assert!(out.contains("is a plan, not a component"), "{out}");
 }
+
+// Spec §8: the third granularity — what a *builtin* takes. A plan's author
+// asking which keys `git` accepts has no file to open, and used to have two
+// options: read the source, or write a key and let `validate` reject it
+// (issue #7).
+#[test]
+fn a_builtin_action_lists_its_fields() {
+    let (code, out) = run(&["list", "git"]);
+    assert_eq!(code, 0, "{out}");
+    insta::assert_snapshot!("action", out);
+}
+
+// An action whose body is not a mapping has no fields to list, and an empty
+// listing would read as "it takes nothing". `cmd` takes an argv.
+#[test]
+fn an_action_with_no_body_mapping_says_what_its_body_is() {
+    let (code, out) = run(&["list", "cmd"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("a list of arguments"), "{out}");
+    assert!(!out.contains("fields:"), "{out}");
+}
+
+// Spec §8: a path that exists wins, so a file named like an action is that
+// file. Only a bare name matching nothing is looked up as a builtin.
+#[test]
+fn a_path_that_exists_wins_over_an_action_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("git");
+    std::fs::write(&path, "description: not the builtin\nsteps: []\n").unwrap();
+    let (code, out) = run(&["list", path.to_str().unwrap()]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("not the builtin"), "{out}");
+    assert!(!out.contains("the URL to clone from"), "{out}");
+}
+
+// The error has to name all three forms, because the argument that got here
+// could have been meant as any of them.
+#[test]
+fn a_name_that_is_neither_a_path_nor_an_action_names_both_forms() {
+    let (code, out) = run(&["list", "gti"]);
+    assert_eq!(code, EXIT_VALIDATION, "{out}");
+    assert!(out.contains("builtin action"), "{out}");
+}
+
+// The claim §8 makes about this listing: the names it prints are the names
+// `validate` accepts, because both read one table. A key added to an action's
+// parse and not to the table is a key the listing hides; the reverse is a
+// help text that lies.
+#[test]
+fn every_action_is_listed_and_every_listing_is_an_action() {
+    // The action keys, as `validate`'s own error prints them on an unknown
+    // step key — the one place the set is visible from outside the crate.
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("p.yml");
+    std::fs::write(&plan, "- name: A step\n  nosuchaction: x\n").unwrap();
+    let (code, out) = run(&["validate", plan.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VALIDATION, "{out}");
+
+    for action in [
+        "shell", "cmd", "file", "template", "pkg", "service", "assert", "git", "defaults",
+        "download",
+    ] {
+        assert!(
+            out.contains(action),
+            "`{action}` is not among the keys validate knows:\n{out}"
+        );
+        let (code, listed) = run(&["list", action]);
+        assert_eq!(code, 0, "`list {action}` failed:\n{listed}");
+        assert!(
+            listed.contains(action),
+            "`list {action}` named nothing:\n{listed}"
+        );
+    }
+}

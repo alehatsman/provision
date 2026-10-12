@@ -25,9 +25,9 @@ and a dry-run a person can trust.
 - Facts about the local machine.
 - Five commands: `validate`, `plan`, `apply`, `list`, `facts`. The first
   three take a plan or a component as the root; a component's props come from
-  `--prop` (§8, D17). `list` names the components in a directory, or
-  describes one component's props. `facts` prints what this machine reports
-  about itself and walks nothing.
+  `--prop` (§8, D17). `list` names the components in a directory, describes
+  one component's props, or describes a builtin action's fields. `facts`
+  prints what this machine reports about itself and walks nothing.
 - TTY and non-TTY output, `--json` event stream.
 
 **Out** (see README non-goals and decisions.md)
@@ -842,7 +842,7 @@ defaults:
 provision validate <file.yml> [--strict] [--prop k=v]... [--var k=v]... [--vars-file f]...
 provision plan     <file.yml> [--prop k=v]... [--tags t,u] [--skip-tags t] [--var k=v]... [--vars-file f]... [--plan-no-probe] [--no-diff] [--json] [--hide-skipped] [--color when] [--deadline 30m]
 provision apply    <file.yml> [same as plan] [--ask-sudo-pass] [--verbose] [--stream] [--keep-going]
-provision list     <dir>/ | <component.yml>
+provision list     <dir>/ | <component.yml> | <action>
 provision facts    [--json]
 provision --version
 ```
@@ -996,6 +996,24 @@ gates, so it has a wall clock worth bounding too. There is no
   the first half. Before it, the only way to learn a task's arguments was to
   open the file — which is fine for the author and useless for everyone
   else, including a runner.
+
+- `list <action>`: the same question asked of a **builtin** — `list git`,
+  `list pkg` — because the first thing a plan's author needs is which keys
+  an action takes, and a builtin is not a file to open. The action's
+  one-line description, then its body fields, one line each: the name,
+  `required` or `optional` or the group a one-of belongs to, and a short
+  gloss. An action whose body is not a mapping (`cmd` is an argv, `shell`
+  takes a script string) says what its body is instead.
+
+  **The listing and the validator read one table.** `validate` already
+  rejects an unknown key and suggests the nearest accepted one; printing a
+  second, hand-kept list beside it is how a tool grows a help text that
+  lies. The names come from the same place the check does, so a key that
+  exists is listed and a key that is listed exists.
+
+  A path that exists wins: `list ./git` is that file, and only a bare name
+  matching no path is looked up as an action. Exit 0; a name that is
+  neither a path nor an action exits 3 and the error names both forms.
 
 - **A CI runner** wanting one result per step does not get a per-step entry
   point. It writes the job's steps to a file and runs one process,
