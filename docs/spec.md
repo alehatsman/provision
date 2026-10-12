@@ -64,6 +64,20 @@ Rules:
 - `~` expands in every path field the tool owns (`dest`, `path`, `src`,
   `creates`, `cwd`, `vars_file`, `import`, `use`). It does **not** expand
   inside shell scripts; the shell does that.
+- **Whose home `~` is depends on which machine the path names.** A path
+  naming a location on the machine being converged — `file`'s `path` and its
+  link target, `template`/`git`/`download`'s `dest`, a step's `cwd` — and the
+  `expanduser` filter expand against the scope's **`home`**. A path provision
+  reads out of the plan tree — `src`, `import`, `use`, `vars_file` — expands
+  against the **process's** home, because those files live beside the plan on
+  the machine doing the reading, whatever the plan is for. So does `creates`
+  and the `exists` test, which ask about a file at the moment a step runs.
+
+  `home` is a fact (§3.5), so on an ordinary run both are the same home and
+  this rule is invisible. It shows when a plan shadows `home` — a tree
+  rendered on one machine for another, a phone or a container — where
+  without it the renderer's `/Users/<me>/…` was baked into the target's
+  files and repaired afterwards by a sed script.
 
 ### 3.1 Structural keywords
 

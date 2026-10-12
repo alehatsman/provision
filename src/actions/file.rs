@@ -11,7 +11,7 @@
 use super::{Ctx, Effect};
 use crate::config::model::Step;
 use crate::error::Result;
-use crate::template::{Engine, expanduser};
+use crate::template::{Engine, expanduser, expanduser_in};
 use crate::yaml::N;
 use minijinja::Value;
 use std::path::Path;
@@ -234,7 +234,7 @@ pub(crate) fn parse(
             // relative target absolute — not this. Without it a link written
             // `~/.local/bin/moongit` never matches the absolute target on
             // disk and the step reports changed forever.
-            link_to = Some(expanduser(&target));
+            link_to = Some(expanduser_in(ctx, &target));
             // Spec §6.3: `content` is `state: file` only. On a link it was
             // accepted and did nothing.
             if let Some(n) = content_at {
@@ -280,7 +280,7 @@ pub(crate) fn parse(
     }
 
     Ok(Some(Spec {
-        path: expanduser(&path),
+        path: expanduser_in(ctx, &path),
         state,
         content,
         link_to,

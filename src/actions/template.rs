@@ -9,7 +9,7 @@
 use super::{Ctx, Effect, file};
 use crate::config::model::Step;
 use crate::error::Result;
-use crate::template::{Engine, expanduser};
+use crate::template::{Engine, expanduser, expanduser_in};
 use crate::yaml::N;
 use minijinja::Value;
 use std::path::{Path, PathBuf};
@@ -45,7 +45,7 @@ pub(crate) fn parse(
     let Some(dest) = render(dest_at.as_str()?) else {
         return Ok(None);
     };
-    let dest = expanduser(&dest);
+    let dest = expanduser_in(ctx, &dest);
     let src = crate::config::load::resolve(src_at.file, &expanduser(&src_rel));
 
     // `mode`, `owner` and `group` mean what they do on `file` (§6.4), so they

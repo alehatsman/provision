@@ -12,7 +12,7 @@
 use super::{Ctx, Effect};
 use crate::config::model::Step;
 use crate::error::Result;
-use crate::template::{Engine, expanduser};
+use crate::template::{Engine, expanduser_in};
 use minijinja::Value;
 use std::path::Path;
 
@@ -115,7 +115,7 @@ pub(crate) fn parse(
 
     Ok(Some(Spec {
         repo: repo.trim().to_string(),
-        dest: expanduser(dest.trim()),
+        dest: expanduser_in(ctx, dest.trim()),
         reference,
         depth,
     }))

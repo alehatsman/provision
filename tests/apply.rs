@@ -2070,6 +2070,81 @@ fn file_creates_missing_parent_directories() {
 }
 
 #[test]
+fn tilde_follows_the_scopes_home_for_a_path_on_the_target() {
+    // Issue #10: a tree rendered on one machine for another baked the
+    // renderer's home into every `~`. §3: a path naming a location on the
+    // machine being converged, and the `expanduser` filter, expand against
+    // the scope's `home`; a path read out of the plan tree does not.
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("phone-home");
+    let src = dir.path().join("hook.txt");
+    std::fs::write(&src, "#!/bin/sh\n").unwrap();
+    let plan = dir.path().join("staged.yml");
+    std::fs::write(
+        &plan,
+        format!(
+            "- vars:\n    home: {home}\n\
+             - name: A file at the target's home\n  \
+             file:\n    path: ~/.config/git/config\n    content: \"[core]\\n\"\n\
+             - name: A link at the target's home\n  \
+             file:\n    path: ~/.config/git/hook\n    state: link\n    src: ~/.local/hook\n\
+             - name: A file copied out of the plan tree\n  \
+             file:\n    path: ~/.config/git/copied\n    src: ./hook.txt\n\
+             - name: The filter says the same thing\n  \
+             file:\n    path: ~/.config/git/rendered\n    \
+             content: \"hooksPath = {{{{ '~/.config/git/hooks' | expanduser }}}}\\n\"\n",
+            home = target.display()
+        ),
+    )
+    .unwrap();
+
+    let out = run_in(dir.path(), &["apply", plan.to_str().unwrap()]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    // The destinations went to the declared home, not this process's.
+    assert!(target.join(".config/git/config").is_file(), "no config");
+    // `src` is read out of the plan tree, on this machine, as always — the
+    // copy proves it resolved here rather than under the target's home.
+    assert_eq!(
+        std::fs::read_to_string(target.join(".config/git/copied")).unwrap(),
+        "#!/bin/sh\n"
+    );
+    // The link target is on the target machine too, so it reads as the
+    // target's home — not as a path into this one.
+    let link = std::fs::read_link(target.join(".config/git/hook")).unwrap();
+    assert_eq!(link, target.join(".local/hook"));
+    // And the filter, which is the half the issue was filed about.
+    assert_eq!(
+        std::fs::read_to_string(target.join(".config/git/rendered")).unwrap(),
+        format!("hooksPath = {}/.config/git/hooks\n", target.display())
+    );
+}
+
+#[test]
+fn tilde_is_this_machines_home_when_nothing_shadows_it() {
+    // `home` is a fact, so the rule above is invisible on an ordinary run:
+    // both homes are the same one. A plan that sets nothing gets exactly
+    // what it got before.
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("plain.yml");
+    std::fs::write(
+        &plan,
+        "- name: Where does it point\n  file:\n    path: \"{{ env.PROVISION_SCRATCH }}/where\"\n    content: \"{{ '~/x' | expanduser }}\\n\"\n",
+    )
+    .unwrap();
+    let out = run_in(dir.path(), &["apply", plan.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(0));
+    let got = std::fs::read_to_string(dir.path().join("where")).unwrap();
+    let home = std::env::var("HOME").expect("a unix test runner has HOME");
+    assert_eq!(got, format!("{home}/x\n"));
+}
+
+#[test]
 fn parent_directories_are_deterministic_not_umask_derived() {
     // create_dir_all would give every level a umask-derived mode. §6.3 says
     // `mode` lands on the leaf and parents get 0755, which is what GNU
