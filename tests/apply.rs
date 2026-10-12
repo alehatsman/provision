@@ -74,6 +74,8 @@ fn fixture(name: &str) -> PathBuf {
 fn os_fact() -> &'static str {
     if cfg!(target_os = "macos") {
         "darwin"
+    } else if cfg!(target_os = "android") {
+        "android"
     } else {
         "linux"
     }
