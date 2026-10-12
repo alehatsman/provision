@@ -256,6 +256,19 @@ will actually run. D11 already says plan is best-effort and must say so;
 
 **Overturned by.** Nothing. It is D11 applied to one more case.
 
+**Amended 2026-10-12 (#16), owner's call.** The placeholder only made
+sense to a `when`. A field that transforms a register, such as
+`{{ crc.stdout | trim | int }}`, fails on the empty string. That failed
+`validate`, `plan` and `apply`'s pre-walk, so a plan that applies fine
+could not be applied at all. The rule now covers every template, not just
+`when`. Under `validate` and `plan`, a template that reads a register in
+reach cannot fail, and `plan` reports its step unprobed. A `vars` value
+computed from a register joins the register set, so it propagates. The
+other option was a typed placeholder, `0` where a number is wanted. It was
+rejected because it is magic, and because it puts back the false verdict
+this decision exists to prevent: `when: port > 0` would answer for a port
+nobody computed.
+
 ## D15 — `unknown` counts as a change for `plan`'s exit code
 
 **Decision.** `plan` exits 2 for any step that is not `ok` or `skipped` —

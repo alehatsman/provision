@@ -89,9 +89,9 @@ pub(crate) struct Expander {
     /// Set by the walk `apply` runs before executing anything, so the sudo
     /// preflight can happen before the first step (spec §7).
     pub needs_sudo: bool,
-    /// Names bound by `register`. At plan time they hold a placeholder, so a
-    /// `when` that reads one cannot be trusted — the step is reported
-    /// unprobed rather than skipped.
+    /// Names bound by `register`, and `vars` names computed from one. At plan
+    /// time they hold a placeholder, so a template that reads one cannot be
+    /// trusted. The step is reported unprobed rather than judged (D14).
     registers: BTreeSet<String>,
     /// Set once a `shell` or `cmd` step has been walked. They are the only
     /// steps whose effects provision cannot describe, so after one of them a
@@ -389,12 +389,37 @@ impl Expander {
         // so `validate` and `plan` skipped it as unprobed and only `apply`
         // found the name undefined. Every registering step binds its name —
         // a placeholder when nothing ran — so a register in reach is defined.
-        match self.engine.undeclared(expr) {
-            Some(names) => names
-                .iter()
-                .any(|n| self.registers.contains(n) && scope.defines(n)),
-            None => false,
+        self.any_register(self.engine.undeclared(expr), scope)
+    }
+
+    /// `reads_a_register` for a template string: a field, a `name`, a `vars`
+    /// value (D14, amended for #16).
+    fn template_reads_a_register(&self, src: &str, scope: &Scope) -> bool {
+        if self.mode.executes() || self.registers.is_empty() {
+            return false;
         }
+        self.any_register(self.engine.undeclared_in_template(src), scope)
+    }
+
+    fn node_reads_a_register(&self, n: N<'static>, scope: &Scope) -> bool {
+        let mut strings = Vec::new();
+        collect_strings(n, &mut strings);
+        strings.iter().any(|s| {
+            s.as_str()
+                .is_ok_and(|src| self.template_reads_a_register(src, scope))
+        })
+    }
+
+    fn any_register(
+        &self,
+        names: Option<std::collections::HashSet<String>>,
+        scope: &Scope,
+    ) -> bool {
+        names.is_some_and(|names| {
+            names
+                .iter()
+                .any(|n| self.registers.contains(n) && scope.defines(n))
+        })
     }
 
     // ── structural keywords ───────────────────────────────────────────────
@@ -408,9 +433,18 @@ impl Expander {
                 continue;
             };
             let ctx = scope.ctx();
+            // A value computed from a register is register-derived itself
+            // (D14, #16). Under `validate` and `plan` it was computed from a
+            // placeholder, so a filter that needs real output may fail on it.
+            // That is not a problem, and its readers are unprobed.
+            let derived = self.node_reads_a_register(v, scope);
             match self.engine.render_node(v, &ctx) {
-                Ok(value) => scope.set(name, value),
+                Ok(value) => scope.set(name.clone(), value),
+                Err(_) if derived => scope.set(name.clone(), Value::from("")),
                 Err(d) => self.diags.push(d),
+            }
+            if derived {
+                self.registers.insert(name);
             }
         }
     }
@@ -708,10 +742,21 @@ impl Expander {
         {
             collect_strings(n, &mut fields);
         }
+        // A field that reads a register is rendered from the placeholder
+        // under `validate` and `plan` (D14, #16). Its render can fail on a
+        // value `apply` never sees, so that failure is not a diagnostic, and
+        // the step as a whole cannot be judged.
         let mut renderable = true;
+        let mut derived = false;
         for f in fields {
+            let reads = f
+                .as_str()
+                .is_ok_and(|src| self.template_reads_a_register(src, scope));
+            derived |= reads;
             if let Err(d) = self.render_str(f, &ctx) {
-                self.diags.push(d);
+                if !reads {
+                    self.diags.push(d);
+                }
                 renderable = false;
             }
         }
@@ -749,10 +794,12 @@ impl Expander {
             renderable = false;
         }
 
-        if step.key == "template" {
+        // A source path rendered from a placeholder names a file that apply
+        // alone knows.
+        if step.key == "template" && !derived {
             self.check_template_sources(step, &ctx);
         }
-        if step.key == "file" {
+        if step.key == "file" && !derived {
             self.check_file_source(step, &ctx);
         }
         // Set after this step's own check: the rule reads "earlier in the
@@ -780,12 +827,26 @@ impl Expander {
             // the day `pkg` landed, in this repo's own example and in the
             // fleet. §8 promises validate is the subset of plan that runs
             // nothing, not a weaker check.
-            if renderable && let Err(d) = Action::parse(&self.engine, step, &ctx, raw, defer_src) {
+            // Not for a derived step: its body holds placeholders, and a
+            // typed field such as a `mode` would be judged on a value apply
+            // never sees.
+            if renderable
+                && !derived
+                && let Err(d) = Action::parse(&self.engine, step, &ctx, raw, defer_src)
+            {
                 self.diags.push(d);
             }
             // `validate` binds the placeholder so a later `when` that reads
             // this register still compiles. Nothing runs.
             self.bind_register(step, scope, None, &Status::WouldRunUnprobed);
+            return;
+        }
+
+        // A step rendered from placeholders is not probed: a gate rendered
+        // from one answers for the wrong value (D14).
+        if derived {
+            self.bind_register(step, scope, None, &Status::WouldRunUnprobed);
+            self.record(step, scope, depth, Status::WouldRunUnprobed);
             return;
         }
 
@@ -1230,6 +1291,9 @@ impl Expander {
         match self.engine.render(raw, &scope.ctx()) {
             Ok(s) if !s.trim().is_empty() => s,
             Ok(_) => step.fallback_name(),
+            // Rendered from a placeholder, and `do_action` already let it
+            // pass (D14, #16). The raw text identifies the line.
+            Err(_) if self.template_reads_a_register(raw, scope) => raw.to_string(),
             Err(e) => {
                 let msg = self.engine.describe_with(raw, &scope.ctx(), &e);
                 self.diags.push(n.err(msg));
