@@ -180,9 +180,17 @@ mod tests {
     fn a_component_scope_carries_its_own_directory() {
         let parent = Scope::root(globals(&[]));
         let child = parent.child_with_props(Map::new(), Path::new("/tools/rq"));
-        assert_eq!(
-            child.ctx().get_attr("component_dir").unwrap().to_string(),
-            "/tools/rq"
+        let got = child.ctx().get_attr("component_dir").unwrap().to_string();
+        // The two properties the spec names, not a literal. A rooted path
+        // gains a drive letter on Windows -- `/tools/rq` becomes `D:\tools\rq`
+        // -- so asserting the string asserted which host ran the suite, which
+        // is the host-dependence `tests/apply.rs` opens by warning about.
+        let got = Path::new(&got);
+        assert!(got.is_absolute(), "{} is not absolute", got.display());
+        assert!(
+            got.ends_with(Path::new("tools/rq")),
+            "{} is not the component's own directory",
+            got.display()
         );
         // A plan's own scope has none: `import` shares the caller's scope and
         // is not a component.

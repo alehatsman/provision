@@ -1,0 +1,18 @@
+# The one dependency plan.md's "boring crates, pinned" did not cover.
+#
+# `clippy -D warnings` on an unpinned toolchain means the gate's definition
+# changes when a runner image updates: 1.99 added
+# `needless_borrows_for_generic_args` and turned two lines that had been on
+# main for weeks into a build failure, with nothing in this repo having
+# changed (#29). A gate that can go red because someone else shipped a lint
+# is not reporting on this repo.
+#
+# So the gate runs the compiler the fleet runs. Bumping this is a deliberate
+# commit with its own clippy fallout, the same way the rust-quality pin in
+# `tasks/tools.yml` is one line and a decision — not a surprise on a Tuesday.
+#
+# The cost, stated: CI stops being an early warning for new lints between
+# bumps. That warning is worth having, and it is worth having on purpose.
+[toolchain]
+channel = "1.98.1"
+components = ["clippy", "rustfmt"]
