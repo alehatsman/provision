@@ -145,6 +145,16 @@ Call site:
   is those ten literal characters, not a path. Defaults are data in the
   component file, and the value a call site passes is the one that gets
   rendered. A default that has to be computed is a `vars` step instead.
+
+  A string is allowed to hold `{{` — that is the point of the rule — but a
+  **path is not**. When a path field a step writes to (`file.path`,
+  `template.dest`, `download.dest`, `git.dest`) still contains `{{` after
+  rendering, that is an error before anything runs. A path is the one place
+  "as written" cannot be what the author meant: nothing else in the language
+  leaves braces in a rendered value, so the brace is evidence of an
+  unrendered default rather than a literal, and `apply` would otherwise
+  create a directory named `{{ home }}`. A step marked `raw: true` is not
+  rendered at all and is exempt.
 - `description` is optional, a plain string, and only read by
   `provision list <dir>/`. Any other root key is an error.
 - **`list <component.yml>` also reports the caller variables the component

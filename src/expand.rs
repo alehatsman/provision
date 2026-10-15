@@ -1083,6 +1083,12 @@ impl Expander {
             renderable = false;
         }
 
+        // §3.2: a prop `default` is taken as written, so a `{{` can survive
+        // rendering. A string may hold one; a path may not.
+        if !raw {
+            self.check_rendered_path(step, &ctx);
+        }
+
         // A source path rendered from a placeholder names a file that apply
         // alone knows.
         if step.key == "template" && !derived {
@@ -1621,6 +1627,38 @@ impl Expander {
             _ => return None,
         };
         self.resolved_path(step, key, ctx)
+    }
+
+    /// §3.2: a prop's `default` is taken as written, never rendered, so a
+    /// default holding `{{ home }}/x` reaches a step as those characters.
+    /// That is legal for a string and never what anyone meant for a path —
+    /// `apply` would create a directory named `{{ home }}`, and both
+    /// read-only verbs used to report the file clean, which inverts what
+    /// they are for. Nothing else in the language leaves braces in a
+    /// rendered value, so the brace is the evidence.
+    fn check_rendered_path(&mut self, step: &Step<'static>, ctx: &Value) {
+        let keys: &[&str] = match step.key {
+            "file" => &["path"],
+            "template" | "download" | "git" => &["dest"],
+            _ => return,
+        };
+        for key in keys {
+            let Some(at) = step.body.get(key) else {
+                continue;
+            };
+            let Ok(rendered) = self.render_str(at, ctx) else {
+                continue; // the field check already reported why
+            };
+            if rendered.contains("{{") {
+                self.diags.push(
+                    at.err(format!("`{key}` still contains `{{{{` after rendering"))
+                        .with_note(
+                            "a prop `default` is taken as written, never rendered — pass the \
+                             value at the call site, or compute it in a `vars` step",
+                        ),
+                );
+            }
+        }
     }
 
     /// Spec §8: `src` is one of the paths existence is checked for before
