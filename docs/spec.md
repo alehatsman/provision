@@ -606,6 +606,7 @@ Ensure packages are present or absent through one manager.
 pkg:
   names: [git, curl]           # or name: git
   state: present               # present | absent | latest
+  version: ">=24"              # optional floor; `present` only
   manager: apt                 # apt | pacman | yay | brew | winget; default: first available
   cask: false                  # brew only
   adopt: false                 # brew casks only; takes over an app already there
@@ -666,6 +667,64 @@ pkg:
   and so is `state: absent`, which never installs anything. Under `latest` it
   applies to the names that are missing and are therefore installed, not to
   the upgrade call.
+- **`version` is a floor, and it changes the question rather than the
+  command.** `version: ">=24"` makes the declared state "installed, and at
+  least 24" instead of "installed". Nothing about it is expressed to the
+  manager: the install or upgrade call is the same call, and the floor is
+  checked against the version the query already returns. That is what makes
+  it work on a manager with no floor syntax of its own — pacman has none,
+  and winget takes an exact version rather than a range.
+
+  It exists because `present` and `latest` are both wrong for a package whose
+  distro version is too old. Ubuntu noble ships `nodejs` 18.19.1; with
+  NodeSource registered, `state: present` reports `ok` in 104ms having
+  changed nothing, because the question it asked was "is `nodejs` installed"
+  and the answer was yes. `latest` installs 24 today and 25 whenever someone
+  applies next, which is upgrade-class behaviour a converge step must not
+  have.
+
+- **`>=` is the only operator**, and the only form accepted. An exact pin is
+  not a floor and would need the manager's own syntax, which is where the
+  per-manager differences live; `<=` has no use that a plan can act on. A
+  `version` that is not `>=` followed by a version is a validation error
+  naming the form.
+
+- **`present` only.** `version` with `state: absent` is a validation error —
+  absent has no version. With `state: latest` it is also an error: `latest`
+  already takes the newest the manager offers, so a floor on top either
+  restates it or contradicts it, and neither is worth a second meaning.
+
+- **What a name below the floor does.** It is not missing, so it is upgraded
+  rather than installed: the same upgrade call `latest` uses, on that name
+  alone. A name that is absent is installed, as under plain `present`.
+
+- **The floor is verified after, and failing it fails the step** — the same
+  rule, and the same reason, as "present after" above. `apt-get install -y
+  nodejs` can exit 0 having installed a version that is still below the
+  floor, if the repository offering a newer one was never registered. The
+  step then fails naming the package, the version it got and the floor it
+  wanted, which is the honest answer: the plan asked for something this
+  machine's sources cannot provide, and that is a fact about the plan.
+
+- **How versions are compared, exactly.** Leading numeric components only: a
+  leading `epoch:` is dropped (apt writes `1:8.2.3`), the rest is split on
+  `.` and `-`, and components are compared numerically left to right until
+  one is not a whole number, at which point comparison stops and what has
+  matched so far decides. `24.1.0` satisfies `>=24`; `18.19.1` does not;
+  `24.0.0-1nodesource1` satisfies `>=24` because comparison has already
+  decided by then. This is **not** Debian or rpm version ordering, and it
+  does not try to be: a floor is a coarse question and the full orderings
+  disagree with each other. Where it cannot decide — a version with no
+  leading number at all — the step **fails** rather than guessing, naming
+  the version it could not read.
+
+- Under `plan`, a floor is answered from the local query, so it is not
+  `unknown` the way `latest` is: whether the installed version clears the
+  floor is a question the local database does answer. Below the floor is
+  reported as a change. Whether the upgrade can *reach* the floor is a
+  network question, and plan does not claim it — the same way plan does not
+  claim an install will succeed.
+
 - `absent` mirrors `present` with the manager's remove command.
 - Plan: lists the packages that would be installed, by actual query.
 - `sudo` is not implied. apt and pacman need `sudo: true`. brew and yay must

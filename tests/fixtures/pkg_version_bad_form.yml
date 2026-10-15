@@ -1,0 +1,2 @@
+- name: an exact pin is not a floor
+  pkg: {name: git, version: "24"}

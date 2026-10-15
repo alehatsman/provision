@@ -1065,3 +1065,68 @@ a clean `validate` as proof that the other OS's half of a plan will run.
 fault worth catching across the gate. Then the honest move is a second verb
 or a flag that takes a target os and renders against it — not relaxing this
 one into rendering a branch the machine cannot evaluate.
+
+## D28 — `pkg` takes a `>=` version floor, checked locally
+
+**Decision.** `pkg` accepts `version: ">=24"` on `state: present`. It is a
+floor and nothing else: no exact pin, no `<=`, no ranges. It changes the
+question the step asks — "installed, and at least 24" instead of "installed"
+— and never the call the step makes.
+
+**Why.** `present` and `latest` were both wrong for a package whose distro
+version is too old, which is the ordinary case for a plan that registers a
+third-party repository. Ubuntu noble ships `nodejs` 18.19.1; with NodeSource
+registered, `state: present` reported `ok` in 104ms having changed nothing,
+because the question it asked was "is `nodejs` installed" and the honest
+answer was yes. `latest` would have installed 24 that day and 25 on some
+unrelated future apply — upgrade-class behaviour, which in this fleet is a
+deliberate act (`just upgrade`) and explicitly not something an `apply` does.
+So the choice was between a constraint too weak and one unbounded, and the
+thing actually wanted was not expressible. The working pattern was to drop
+out of `pkg` into a `shell` step with a hand-written `unless` that parses
+`node --version` — a second way to say what the `pkg` step already said,
+which is the shape D5 and §6.5's `adopt` note both argue against.
+
+**Why it is checked locally and not expressed to the manager.** This is the
+part that makes it affordable. The queries already carry versions, because
+`latest` has nothing to compare without them (§6.5), so the floor costs no
+new probe and no new per-manager code. Expressing it instead would have
+meant four different syntaxes and one dead end: apt takes `name=version`,
+brew has versioned formulae rather than constraints, winget's `--version` is
+exact rather than a range, and **pacman has no floor syntax at all**. A
+feature that could not work on pacman is not one this fleet can have.
+
+**What this costs, stated plainly.**
+
+- **The comparison is coarse, by choice.** Leading numeric components only:
+  a leading `epoch:` dropped, split on `.` and `-`, compared left to right
+  until a component is not a whole number. It is not Debian ordering and not
+  rpm ordering. Those two disagree with each other, and implementing either
+  badly would be worse than naming a simple rule and holding to it. The rule
+  is in spec §6.5 and pinned by unit tests including the apt-epoch case,
+  where getting it wrong would make every epoch-carrying package clear every
+  floor.
+- **A version with no leading number fails the step** rather than being
+  guessed at. D11 and D14's house answer: say so, do not invent.
+- **An unreachable floor fails the step**, and that is a new way for an
+  apply to go red. It is the honest answer — the plan asked for something
+  this machine's sources cannot provide, usually a repository that was never
+  registered — and the message names the version it got and the floor it
+  wanted, because those two numbers are the diagnosis.
+- `plan` answers a floor from the local query rather than reporting
+  `unknown` the way `latest` does, because whether the installed version
+  clears the floor *is* a question the local database answers. Whether the
+  upgrade can reach the floor is a network question and plan claims nothing
+  about it — the same way it claims nothing about an install succeeding.
+
+**What this does not open.** Not a constraint language. `>=` is one
+operator, chosen because it is the only one a converge step can act on: an
+exact pin is a different feature needing the manager's own syntax, and `<=`
+describes a state a plan cannot reach by installing. Repositories, taps and
+PPAs remain outside `pkg` (§6.5) — this makes the *floor* expressible, not
+the source that satisfies it, and a plan still registers NodeSource itself.
+
+**Overturned by.** A plan that needs an exact pin, which is where the
+per-manager syntax differences become unavoidable and this design stops
+paying. Or a manager whose version strings the numeric rule cannot read, at
+which point the rule needs naming per manager rather than globally.

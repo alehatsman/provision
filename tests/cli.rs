@@ -981,6 +981,29 @@ fn help_and_version_are_not_usage_errors() {
     }
 }
 
+// ── `pkg` version floor (D28, spec §6.5) ─────────────────────────────────
+
+#[test]
+fn a_floor_is_rejected_where_it_has_no_meaning() {
+    // `absent` has no version. Caught at validate, at the key's own line,
+    // rather than at apply.
+    let (code, text) = validate("pkg_version_bad_state.yml");
+    assert_eq!(code, EXIT_VALIDATION, "{text}");
+    assert!(text.contains("`version` does not apply"), "{text}");
+    assert_positioned(&text);
+}
+
+#[test]
+fn only_a_floor_form_is_accepted() {
+    // An exact pin is a different feature: it needs the manager's own
+    // syntax, which is exactly what this design avoids. The error says so by
+    // naming the form rather than silently taking "24" as ">=24".
+    let (code, text) = validate("pkg_version_bad_form.yml");
+    assert_eq!(code, EXIT_VALIDATION, "{text}");
+    assert!(text.contains("is not a version floor"), "{text}");
+    assert!(text.contains("`>=` and a version"), "{text}");
+}
+
 // ── a subtree this machine gates off (D27) ───────────────────────────────
 
 #[test]

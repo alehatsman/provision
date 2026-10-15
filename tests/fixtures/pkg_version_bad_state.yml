@@ -1,0 +1,2 @@
+- name: a floor on a state that has no version
+  pkg: {name: git, state: absent, version: ">=2"}

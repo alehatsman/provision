@@ -168,7 +168,7 @@ The decisions are in [docs/decisions.md](docs/decisions.md).
 | role, `include_tasks` | `use` a component with declared `props`, `import` a file | props are typed and required by declaration, not by convention (D12) |
 | `vars`, `set_fact`, `vars_files` | `vars` step, `vars_file` | `--var k=v` on the command line is the top layer |
 | `copy`, `template`, `file` | `file`, `template` | `file` takes `content` or `src`, `state: file/dir/link/absent` |
-| `package`, `apt`, `pacman`, `homebrew` | `pkg` with `manager:` | one query for the set, one install for the missing subset |
+| `package`, `apt`, `pacman`, `homebrew` | `pkg` with `manager:` | one query for the set, one install for the missing subset; `version: ">=24"` is a floor, checked locally (D28) |
 | `service`, `systemd` | `service` | `state: started/stopped/restarted/reloaded`, `enabled` |
 | `command`, `shell` | `cmd`, `shell` | `shell` needs `creates`, `unless` or `changed_when` under `validate --strict` (D3) |
 | `assert`, `fail`, `wait_for` | `assert` with `retry` | plan runs asserts once; `retry` belongs to apply |
