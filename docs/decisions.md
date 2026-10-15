@@ -791,6 +791,14 @@ evidence about *a* runner, not about moongit: a moongit job still has to run
 before D17's CI half is settled on its own terms. The December check reads
 this decision as partial credit, not a pass.
 
+**Setup is a separate invocation.** The gate is `tasks/ci.yml`; the tools it
+needs are `tasks/tools.yml`, run first. That is not tidiness — a single file
+doing both cannot work, because `use` paths resolve during validation and a
+checkout made by step 1 does not exist when step 2's `use` is resolved
+(#27). The combined file was written first, passed on a warm machine, and
+failed on the first cold runner, which is the useful half of having a cold
+runner at all.
+
 **Bootstrapping.** The gate builds provision from source and then runs the
 job with the binary it just built. There is no released-binary dependency in
 the gate, and no gate dependency in the release: a tag that fails to build
