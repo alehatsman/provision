@@ -374,9 +374,8 @@ fn a_missing_import_says_where_it_looked() {
 #[test]
 fn a_file_src_no_step_could_create_still_fails_before_anything_runs() {
     // Spec §8, D18: the deferral is for a source the plan itself builds. A
-    // plan with no command in it builds nothing, so this is the fail-fast the
-    // deferral must not cost — and it says so twice, once for the source and
-    // once for the bytes, both at the `src` that named it.
+    // plan with no command and no declaration in it builds nothing, so this
+    // is the fail-fast the deferral must not cost.
     let (code, out) = validate("missing_file_src.yml");
     assert_eq!(code, EXIT_VALIDATION, "{out}");
     assert!(out.contains("file src not found"), "{out}");
@@ -384,7 +383,64 @@ fn a_file_src_no_step_could_create_still_fails_before_anything_runs() {
         out.contains("relative to the file that names them"),
         "{out}"
     );
+    // §9.3, one fault one diagnostic. It used to say this twice, once for the
+    // source and once for the bytes, in two wordings at one position — and
+    // only the first carries the note about how paths resolve.
+    assert_eq!(
+        out.matches("missing_file_src.yml:").count(),
+        1,
+        "one missing source, more than one diagnostic:\n{out}"
+    );
     assert_positioned(&out);
+}
+
+// D18's overturn clause. `git`, `download` and `template` declare a `dest`
+// and `file` declares a `path`, so a later `src` inside one of them is
+// pending, not missing. Before this, the plan below was exit 3 — for a path
+// it creates two lines above — while inserting any `shell` step unlocked it.
+#[test]
+fn a_file_src_under_a_declared_dest_is_deferred() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("declared.yml");
+    std::fs::write(
+        &path,
+        "description: clone then read out of the checkout\n\
+         steps:\n\
+         \x20 - name: clone\n\
+         \x20   git: {repo: \"https://example.invalid/x.git\", dest: ./dotfiles}\n\
+         \x20 - name: link\n\
+         \x20   file: {path: ./out/gitconfig, state: file, src: ./dotfiles/gitconfig}\n",
+    )
+    .unwrap();
+    let out = run(&["validate", &path.display().to_string()]);
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "{text}");
+}
+
+// The other half: a declaration names one subtree and defers only that. A
+// typo anywhere else is still caught before anything runs — which is what
+// makes this a reading of what the plan said rather than the guess D18
+// rejected by name.
+#[test]
+fn a_file_src_outside_every_declared_dest_still_fails_fast() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("typo.yml");
+    std::fs::write(
+        &path,
+        "description: a typo outside the checkout\n\
+         steps:\n\
+         \x20 - name: clone\n\
+         \x20   git: {repo: \"https://example.invalid/x.git\", dest: ./dotfiles}\n\
+         \x20 - name: link\n\
+         \x20   file: {path: ./out/gitconfig, state: file, src: ./elsewhere/typo}\n",
+    )
+    .unwrap();
+    let out = run(&["validate", &path.display().to_string()]);
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(EXIT_VALIDATION), "{text}");
+    assert!(text.contains("file src not found"), "{text}");
 }
 
 #[test]
