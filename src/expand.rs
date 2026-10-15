@@ -116,6 +116,8 @@ pub(crate) struct Expander {
     /// steps whose effects provision cannot describe, so after one of them a
     /// `file` step's missing `src` may be a path the plan itself builds (D18).
     walked_a_command: bool,
+    /// See `gate_from_root`.
+    gate_from_root: bool,
     /// D18's overturn clause: the paths earlier steps *declared* they would
     /// write — a `git`, `download` or `template` step's `dest`, a `file`
     /// step's `path`. A later `src` inside one of these is pending, not
@@ -187,6 +189,7 @@ impl Expander {
             manifest: Manifest::default(),
             registers: BTreeSet::new(),
             walked_a_command: false,
+            gate_from_root: false,
             declared: Vec::new(),
             stack: Vec::new(),
             call_path: Vec::new(),
@@ -217,6 +220,15 @@ impl Expander {
     /// root unless `validate --strict` asks.
     pub(crate) fn strict(mut self, on: bool) -> Expander {
         self.strict = on;
+        self
+    }
+
+    /// Whether the check is on because of the file's *shape* rather than a
+    /// flag. Only the diagnostic reads it: the root-shape rule is what makes
+    /// a file a plan, and it was stated in no help text and no error, so the
+    /// one moment it costs someone something is the one moment to say it.
+    pub(crate) fn gate_from_root(mut self, yes: bool) -> Expander {
+        self.gate_from_root = yes;
         self
     }
 
@@ -1516,10 +1528,17 @@ impl Expander {
             || step.mods.creates.is_some()
             || step.mods.changed_when.is_some();
         if !gated {
+            let mut note = "add `unless:`, `creates:`, or `changed_when:`".to_string();
+            if self.gate_from_root {
+                note.push_str(
+                    " — this file's root is a list, which makes it a convergence plan and \
+                     holds it to the gate; a `description:`/`steps:` root is a task and is not",
+                );
+            }
             self.diags.push(
                 step.at
                     .err(format!("`{}` step has no idempotency gate", step.key))
-                    .with_note("add `unless:`, `creates:`, or `changed_when:`"),
+                    .with_note(note),
             );
         }
     }
@@ -1710,6 +1729,35 @@ impl Expander {
                 );
             }
         }
+    }
+
+    /// Spec §3.1: a `use` child sees the caller, and the caller does not see
+    /// the child — a component's own `vars` and `register` bindings do not
+    /// leak back. That boundary explained itself nowhere at the point it
+    /// cost anyone anything: reading a value registered inside a component
+    /// gave a bare ``undefined variable `version` `` with no hint that the
+    /// name exists one scope down and deliberately does not reach here.
+    ///
+    /// Run once, after the walk: the set of every register bound anywhere is
+    /// not complete until then.
+    pub(crate) fn explain_scoped_registers(&mut self) {
+        if self.registers.is_empty() {
+            return;
+        }
+        self.diags.annotate(|d| {
+            let name = d
+                .msg
+                .strip_prefix("undefined variable `")?
+                .strip_suffix('`')?;
+            if !self.registers.contains(name) {
+                return None;
+            }
+            Some(format!(
+                "`{name}` is registered inside a `use`, and a component's own vars and \
+                 registers do not leak back to its caller — register it in this file, or \
+                 pass the value down as a prop"
+            ))
+        });
     }
 
     /// Spec §8: `src` is one of the paths existence is checked for before

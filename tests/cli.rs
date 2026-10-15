@@ -1626,3 +1626,88 @@ fn an_unnamed_call_site_falls_back_to_its_file() {
     assert_eq!(code, 0, "{text}");
     assert!(text.contains("lib.yml"), "{text}");
 }
+
+// #38, the templating vocabulary. minijinja has no API for enumerating what
+// it knows, so the note names what *provision* adds — the ones a reader
+// cannot look up anywhere — and says plainly that the rest are minijinja's.
+#[test]
+fn an_unknown_filter_names_provisions_own() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("f.yml");
+    std::fs::write(
+        &path,
+        "description: bad filter\nsteps:\n  - name: \"{{ 'a' | zzz_filter }}\"\n    shell: \"true\"\n    changed_when: \"false\"\n",
+    )
+    .unwrap();
+    let out = run(&["validate", &path.display().to_string()]);
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(EXIT_VALIDATION), "{text}");
+    assert!(text.contains("expanduser"), "{text}");
+    assert!(text.contains("minijinja"), "{text}");
+}
+
+// #38: `retry: 3` is the obvious thing to write, and it answered with
+// `expected a mapping, found an integer` — naming neither the key nor the
+// shape it wanted.
+#[test]
+fn a_retry_that_is_not_a_mapping_names_the_key_and_the_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("rt.yml");
+    std::fs::write(
+        &path,
+        "description: bad retry\nsteps:\n  - name: x\n    shell: \"true\"\n    retry: 3\n    changed_when: \"false\"\n",
+    )
+    .unwrap();
+    let out = run(&["validate", &path.display().to_string()]);
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(EXIT_VALIDATION), "{text}");
+    assert!(text.contains("`retry` is a mapping"), "{text}");
+    assert!(text.contains("attempts"), "{text}");
+}
+
+// #38: the root-shape rule decides the `--strict` default and was stated in
+// no help text and no error. The one moment it costs someone something is
+// the one moment to say it.
+#[test]
+fn the_gate_diagnostic_explains_why_this_file_is_held_to_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("plan.yml");
+    std::fs::write(&path, "- name: x\n  shell: \"echo hi\"\n").unwrap();
+    let out = run(&["validate", &path.display().to_string()]);
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(EXIT_VALIDATION), "{text}");
+    assert!(text.contains("root is a list"), "{text}");
+    assert!(
+        text.contains("`description:`/`steps:` root is a task"),
+        "{text}"
+    );
+}
+
+// #38: §3.1's scope boundary explained itself nowhere at the point of
+// failure — reading a value registered inside a `use` gave a bare
+// `undefined variable` with no hint that the name exists one scope down and
+// deliberately does not reach the caller.
+#[test]
+fn a_register_that_did_not_leak_out_of_a_use_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("prod.yml"),
+        "description: produces\nsteps:\n  - name: compute\n    shell: \"echo 1.2.3\"\n    register: version\n    changed_when: \"false\"\n",
+    )
+    .unwrap();
+    let path = dir.path().join("cons.yml");
+    std::fs::write(
+        &path,
+        "description: consumes\nsteps:\n  - name: use it\n    use: ./prod.yml\n  - name: read it\n    shell: \"echo {{ version.stdout }}\"\n    changed_when: \"false\"\n",
+    )
+    .unwrap();
+    let out = run(&["validate", &path.display().to_string()]);
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(EXIT_VALIDATION), "{text}");
+    assert!(text.contains("undefined variable `version`"), "{text}");
+    assert!(text.contains("do not leak back"), "{text}");
+}
