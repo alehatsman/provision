@@ -373,11 +373,21 @@ impl Expander {
             ("--skip-tags", &self.selection.skip_tags),
         ] {
             for v in values {
-                // `always` is part of the language (§8), not a tag the plan
-                // has to declare: `--skip-tags always` is a documented move
-                // and refusing it for lack of an `always`-tagged step would
+                // `always` is exempt on `--skip-tags` only. There it is a
+                // documented move that suppresses the keyword's override, and
+                // refusing it for lack of an `always`-tagged step would
                 // reject the idiom on exactly the plans it is written for.
-                if v == "always" || self.seen_tags.contains(v) {
+                //
+                // On `--tags` it is not exempt, and granting it the exemption
+                // reinstated the bug this check exists to kill: `apply
+                // --tags always` on a plan with no `always`-tagged step
+                // selected nothing, did nothing, and exited 0 — which is
+                // verbatim the "apply that touched nothing reporting success"
+                // the D7 amendment quotes as its reason to exist. §8 only
+                // ever justified the exemption for `--skip-tags`; the loop
+                // applied it to both.
+                let exempt = flag == "--skip-tags" && v == "always";
+                if exempt || self.seen_tags.contains(v) {
                     continue;
                 }
                 self.diags.push(

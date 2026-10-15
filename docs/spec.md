@@ -1390,8 +1390,11 @@ Tag selection (Ansible semantics, deliberately):
   `--skip-tags handlr` ran everything. This is a deliberate divergence from
   Ansible and from the rest of D7; the note doubles as the only way to ask a
   plan what tags it has, since `list` on a plan refuses. `always` is a
-  keyword here, not a tag the plan must declare, so `--skip-tags always` is
-  accepted either way. Checked at the end of the walk, because tags are only
+  keyword on `--skip-tags`, not a tag the plan must declare, so
+  `--skip-tags always` is accepted either way — it suppresses the keyword's
+  override, which is meaningful on any plan. On `--tags` it is **not**
+  exempt: `--tags always` against a plan with no `always`-tagged step selects
+  nothing and can only be a mistake, which is the case this rule exists for. Checked at the end of the walk, because tags are only
   known once `import`/`use` have expanded — and stood down when the walk
   already found problems, since a plan that failed to load never reached its
   tags.
