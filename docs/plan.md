@@ -75,11 +75,18 @@ rule (§4), that an `apt-get install` reporting success can install nothing
 tool the way the README tells a reader to run it is what found all four.
 
 Since 2026-10-15 the same gate runs on GitHub Actions as one job in one
-process — `provision apply tasks/job.yml --json --deadline 40m` — with the
-stream read back by a checker that is not provision, and a second job that
-cancels a run with SIGTERM and bounds one with `--deadline` (D24). That is
-the first time the contract phase 7 built has been used by a runner. It is
-not moongit, so D19's reopen check reads it as partial credit.
+process — `provision apply tasks/ci.yml --json --deadline 40m`, after a
+separate `tasks/tools.yml` invocation for setup — with the stream read back
+by a checker that is not provision, and a second job that cancels a run with
+SIGTERM and bounds one with `--deadline` (D24). That is the first time the
+contract phase 7 built has been used by a runner. It is not moongit, so D19's
+reopen check reads it as partial credit.
+
+The first cold run paid for itself twice. It found that a file cannot both
+create a `use` path and use it (#27), which the dogfood on a warm machine
+could not have shown, and the Windows job found a unit test asserting a Unix
+path literal (#28) — a test that had never run on Windows in the project's
+life.
 
 Rust, one crate, one binary, all ten actions, three platforms. **There is no
 line budget.** There was one — 6–9k lines in `src/`, stop and cut at 12k —

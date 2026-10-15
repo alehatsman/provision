@@ -33,11 +33,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux is where the fleet lives: tools, then the full rust-quality
-          # gate, composed into one job by `tasks/job.yml`.
+          # Linux is where the fleet lives. The gate itself is the job; the
+          # tools are setup, and have to be a separate invocation — see the
+          # prepare step below.
           - name: gate (linux)
             os: ubuntu-latest
-            job: tasks/job.yml
+            job: tasks/ci.yml
             deadline: 40m
             timeout: 50
             tools: true
@@ -77,6 +78,16 @@ jobs:
 
       - name: Build provision
         run: cargo build --release --locked
+
+      # Setup, not part of the job, and necessarily its own invocation: `use`
+      # paths resolve during validation, before any step runs, so one file
+      # cannot both create a checkout and `use` from it. A combined
+      # tools-then-gate file validates green only on a machine where the
+      # checkout already exists, which is every machine except a cold runner.
+      # See issue #27.
+      - name: Prepare the gate's tools
+        if: matrix.tools
+        run: ./target/release/provision apply tasks/tools.yml
 
       # The whole point: one process, one job file, the stream on stdout. The
       # human output goes to stderr and is live in this log (spec §9.3), so

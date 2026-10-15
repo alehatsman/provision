@@ -240,11 +240,19 @@ The same gate runs on GitHub Actions, as one job in one process — which is
 the shape a CI runner is supposed to use it in (D19, D24):
 
 ```
-$ provision apply tasks/job.yml --json --deadline 40m
+$ provision apply tasks/tools.yml                      # setup, once per runner
+$ provision apply tasks/ci.yml --json --deadline 40m   # the job
 ```
 
-`tasks/job.yml` is two `use:` lines, `tools.yml` then `ci.yml`, so CI runs
-what a push runs and neither restates the other. The workflow redirects the
+Two invocations, and the first one is why: `use` paths resolve during
+validation, before any step runs, so one file cannot both create the
+rust-quality checkout and `use` a preset from it — it would validate green
+only on a machine that already had the checkout, which is every machine
+except a fresh runner. A combined file was written, passed locally, and
+failed on CI's first cold run; the split is what the Development section
+above already told a reader to do, and [#27](https://github.com/alehatsman/provision/issues/27)
+is why it is not a one-liner. CI runs the same `tasks/ci.yml` a push runs, so
+neither restates the other. The workflow redirects the
 stream to a file and reads it back with `.github/check-stream.py`, which
 asserts what spec §9.3 promises: one object per step as it finishes, a
 summary that says whether the run was stopped, and counts that agree with the
