@@ -26,6 +26,7 @@ impl Engine {
         env.add_filter("quote", f_quote);
         env.add_filter("to_json", f_to_json);
         env.add_filter("to_yaml", f_to_yaml);
+        env.add_filter("crc32", f_crc32);
         env.add_test("exists", t_exists);
         Engine { env }
     }
@@ -91,6 +92,18 @@ impl Engine {
             .compile_expression(expr)
             .ok()
             .map(|e| e.undeclared_variables(false))
+    }
+
+    /// The same question for a template string rather than an expression: the
+    /// top-level names any `{{ … }}` or `{% … %}` in it reads.
+    pub(crate) fn undeclared_in_template(
+        &self,
+        src: &str,
+    ) -> Option<std::collections::HashSet<String>> {
+        self.env
+            .template_from_str(src)
+            .ok()
+            .map(|t| t.undeclared_variables(false))
     }
 
     /// Render a spanned node into a value: strings through the field rule of
@@ -292,6 +305,26 @@ fn f_to_yaml(v: &Value) -> String {
     out
 }
 
+/// CRC-32 of the string's UTF-8 bytes, as an integer: the IEEE polynomial
+/// zlib, gzip and Python's `zlib.crc32` use. Not `cksum`, which is a
+/// different CRC. It turns a path into a stable number, e.g. a port per
+/// checkout: `{{ component_dir | crc32 % 100 + 55432 }}`. Bitwise rather than
+/// table-driven, because it hashes a path a few times per run.
+fn f_crc32(s: &str) -> u32 {
+    let mut crc = !0u32;
+    for &b in s.as_bytes() {
+        crc ^= u32::from(b);
+        for _ in 0..8 {
+            crc = if crc & 1 == 1 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
+
 fn t_exists(s: &str) -> bool {
     Path::new(&expanduser(s)).exists()
 }
@@ -399,6 +432,24 @@ mod tests {
             e.describe_with("{{ nope }}", &c, &err),
             "undefined variable `nope`"
         );
+    }
+
+    #[test]
+    fn crc32_matches_zlib_and_is_an_integer() {
+        let e = Engine::new();
+        let c = ctx(&[("dir", Value::from("/home/a/carscrape"))]);
+        // The standard check value for CRC-32/ISO-HDLC.
+        assert_eq!(
+            e.render("{{ '123456789' | crc32 }}", &c).unwrap(),
+            "3421780262"
+        );
+        assert_eq!(e.render("{{ '' | crc32 }}", &c).unwrap(), "0");
+        let port = e
+            .render_field("{{ dir | crc32 % 100 + 55432 }}", &c)
+            .unwrap();
+        assert_eq!(port.kind(), Kind::Number);
+        let n = i64::try_from(port).unwrap();
+        assert!((55432..55532).contains(&n), "{n}");
     }
 
     #[test]

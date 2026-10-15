@@ -175,7 +175,13 @@ body of `shell` **when** `raw: true` is set on that step. Templates in
 
 - Undefined variable: error at plan time, with file:line and the variable name.
 - Filters available: minijinja built-ins plus `expanduser`, `basename`,
-  `dirname`, `quote` (shell-quote), `to_yaml`, `to_json`.
+  `dirname`, `quote` (shell-quote), `to_yaml`, `to_json`, `crc32`.
+- `crc32` hashes a string's UTF-8 bytes to an integer (CRC-32 as zlib and
+  gzip compute it, not `cksum`'s). It derives a stable number from a path —
+  `{{ component_dir | crc32 % 100 + 55432 }}` is a port per checkout, so
+  parallel worktrees do not share one. There is no checkout-path fact:
+  `component_dir` already names the task's own directory, and a plan that is
+  not a component names its paths itself.
 - Tests available: minijinja built-ins plus `exists` (path).
 - `{% raw %}` blocks are honored; needed for shell scripts with `{{`. This is
   Jinja2's tag. `{% verbatim %}` is Twig's and is **not** supported.
@@ -230,8 +236,8 @@ a string that happens to parse.
 | `sudo` | bool | false | Run the action as root (§7). Windows: error; use `shell` from an elevated prompt. |
 | `timeout` | duration | 10m | Kill the step and fail. `30s`, `5m`, `1h`. |
 | `retry` | `{attempts, delay}` | none | Re-run on failure. `delay` is a duration. Output shows attempt N/M. |
-| `env` | mapping | {} | Extra environment for `shell`, `cmd`, `unless`. Templated. |
-| `cwd` | path | the invocation directory | Working directory for `shell`, `cmd`, `unless`, under every command and for every step, including one inside a `use`d component. A command runs where the operator is standing; a shared gate checked out elsewhere must not gate its own checkout. An explicit `cwd:` resolves against the step's own file, like every other path a plan names, and `component_dir` (§3.2) names a component's own directory for a path inside a shell string. Phase 5b, 2026-09-08: this used to be the step's file directory under `apply` and the invocation directory under `run`. Measured against the fleet, no step depended on the old default — zero `cwd:` modifiers, zero relative paths in shell strings — and one rule beats two. |
+| `env` | mapping | {} | Extra environment for every command the step runs: `shell`, `cmd`, `assert`'s `command`, `unless`, and the commands a typed action spawns (`pkg`, `service`, `git`, …). Templated. |
+| `cwd` | path | the invocation directory | Working directory for `shell`, `cmd`, `assert`'s `command`, `unless`, under every command and for every step, including one inside a `use`d component. A command runs where the operator is standing; a shared gate checked out elsewhere must not gate its own checkout. An explicit `cwd:` resolves against the step's own file, like every other path a plan names, and `component_dir` (§3.2) names a component's own directory for a path inside a shell string. Phase 5b, 2026-09-08: this used to be the step's file directory under `apply` and the invocation directory under `run`. Measured against the fleet, no step depended on the old default — zero `cwd:` modifiers, zero relative paths in shell strings — and one rule beats two. |
 | `tags` | list | [] | For `--tags` selection (§8). |
 | `register` | identifier | — | Store the step result as a variable: `{rc, stdout, stderr, changed, skipped, timed_out}`. |
 | `changed_when` | expr | action-defined | Override the changed verdict. `result` is in scope. |
@@ -674,6 +680,9 @@ assert:
 ```
 
 - Always reports `ok` or `failed`. Plan runs asserts unless `--plan-no-probe`.
+- `command` runs like a `shell` script, with the step's `env`, `cwd` and
+  `sudo` (§4): a readiness check reaches the same service the step around it
+  is configuring. `expr` spawns nothing and reads only the scope.
 - **A failing assert does not stop a `plan` walk.** Apply stops at the first
   failure; plan never does. Plan has not done the work, so an assert about
   work not yet done — "verify the key is present", before the step that
@@ -1227,6 +1236,7 @@ not that answer.
 | A step's shell exits but a child it started still holds stdout or stderr — `sleep 30 &` | The step is not finished until its pipes close, and that wait answers to the step's `timeout` and to Ctrl-C and SIGTERM exactly as the wait for the exit does: the group is killed, which closes the pipe, and the step reads `timed out` or `interrupted`. A pipe still open 2s after the kill is held by a process that left the group (`setsid`); its output is given up rather than the run |
 | Plan probes with `--plan-no-probe` | `unless`/`assert`/`pkg` queries skipped, reported `would run (unprobed)` |
 | `when` reads a `register` during `plan` | The step that registers it has not run, so the name holds a placeholder (`rc: 0`, empty output, `changed: false`, `timed_out: false`) and the reader is reported `would run (unprobed)` rather than skipped. Plan does not claim a verdict it cannot have (D11) |
+| A field, a `name` or a `vars` value reads a `register` during `validate` or `plan` | The name holds the placeholder, so a filter that needs real output — `{{ r.stdout \| trim \| int }}` on an empty string — can fail on a value `apply` never sees. That failure is not a problem: `validate` does not report it, and `apply`'s pre-walk does not stop on it. Only the field that reads a register is excused; a typo in another field of the same step is still an error. A step with such a field does not have its action body type-checked, because a `mode` or a port rendered from a placeholder is a value `apply` never sees. `plan` reports the step `would run (unprobed)` without probing it, because its fields are placeholders and a gate rendered from them answers for the wrong value. A `vars` value that reads a register is **register-derived**: it binds the empty string if it would not render, and anything that reads it later is treated exactly like a reader of the register itself, `when` included. `apply` renders the real values; a render that fails there stops the walk, exit 3 (below). A name stays register-derived for the rest of the run even if a later `vars` sets it again. The error that causes is in the honest direction: an extra `unprobed`, never a verdict plan cannot have (D14) |
 | A parent's `when` reads a `register` bound inside a `use`d component | An error at `validate`, like any other name the child set: the child's scope does not leak back (§3.1). It is not a result waiting to run, so it is not reported unprobed, and `apply` is not the first command to find it undefined |
 | A step's own command times out (its `timeout`) versus provision's `--deadline` kills it | Both report `rc: 124` — `timeout(1)`'s code (see `--deadline` above) — because either way the step was killed, not exited. `register.timed_out` is `true` in both; it does not distinguish the two, only "killed" from "exited". A step whose own command legitimately runs `timeout(1)` internally and exits 124 on its own reports `timed_out: false`, because it exited (D22) |
 | Non-UTF-8 in stdout | Lossy in both the display and the `register`. Exact bytes were the earlier rule and were dropped: a `register` holding bytes breaks `result.stdout == "yes"`, which is the only thing a register is for |

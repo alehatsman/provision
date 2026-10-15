@@ -1,0 +1,27 @@
+---
+# Spec §10 / D14 amended (#16): a template that transforms a register fails
+# on the placeholder's empty string. Under `validate` and `plan` that is not
+# a problem; the step is unprobed, and so is everything computed from it.
+# Under `apply` the real value renders, and the port lands in a file.
+- name: Registers a number
+  shell: printf '%s\n' 1234567
+  changed_when: "false"
+  register: crc
+
+- vars:
+    port: "{{ 55432 + (crc.stdout | trim | int) % 100 }}"
+
+- name: A field filters the register
+  shell: printf '%s' "{{ crc.stdout | trim | int + 1 }}" > ./from-field
+  cwd: "{{ env.PROVISION_SCRATCH }}"
+  changed_when: "true"
+
+- name: A field reads a derived var
+  shell: printf '%s' "{{ port }}" > ./from-derived
+  cwd: "{{ env.PROVISION_SCRATCH }}"
+  changed_when: "true"
+
+- name: A when reads a derived var
+  shell: "true"
+  changed_when: "false"
+  when: port | int > 55432
