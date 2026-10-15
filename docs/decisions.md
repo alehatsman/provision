@@ -156,6 +156,26 @@ conditions is this decision, and the single shared `Value` is what makes it
 one engine. A newtype today would add a conversion at every field render to
 protect against an event that has not happened.
 
+**Amended 2026-10-15, on where the variable's name comes from.** §3.4
+promises the name of the undefined variable, and minijinja cannot supply it:
+every undefined is `Error::from(ErrorKind::UndefinedError)` with no detail
+and a fixed "undefined value" display. The name is recovered instead by
+static analysis -- asking the compiled template or expression which names it
+reads, then walking each dotted path against the context and reporting the
+shortest prefix that does not resolve. `env.MYCACHE` when `env` is bound,
+plain `palette` when `palette` is not, because naming a child of something
+that does not exist invents a level the plan never had.
+
+Two limits worth writing down so they are not filed as bugs twice. **A
+subscript cannot be named**: `{{ t['nope'] }}` leaves the analysis holding
+`t`, which is defined, so the message stays minijinja's. That is the correct
+answer under D11 and D14, and there is a test pinning it. And **strict
+undefined fires only when a value is used** -- string-converted, iterated, or
+looked up another level -- so a field that is one expression and nothing else
+used to return a successful `undefined`. `render_field` now raises the error
+minijinja would have raised had the value been used, which is what makes a
+bad `props:` value name the typo instead of the prop.
+
 ## D7 — Ansible tag semantics
 
 **Decision.** `--tags x` runs only steps carrying `x`, plus steps tagged

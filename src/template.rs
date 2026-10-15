@@ -52,7 +52,22 @@ impl Engine {
         ctx: &Value,
     ) -> std::result::Result<Value, minijinja::Error> {
         match sole_expression(src) {
-            Some(expr) => self.eval(expr, ctx),
+            Some(expr) => match self.eval(expr, ctx) {
+                // Strict undefined (D6) only fires when a value is *used* --
+                // string-converted, iterated, or looked up a further level.
+                // A field that is one expression and nothing else does
+                // neither, so `{{ nope }}` came back as a successful
+                // `undefined` and was reported downstream by whatever
+                // happened to receive it: a prop said "is declared string but
+                // got nothing", naming the prop rather than the typo. Raise
+                // the error minijinja would have raised had the value been
+                // used. The kind is what `describe_with` reads, so the name
+                // comes back with it.
+                Ok(v) if v.is_undefined() => {
+                    Err(minijinja::Error::from(minijinja::ErrorKind::UndefinedError))
+                }
+                other => other,
+            },
             None => self.render(src, ctx).map(Value::from),
         }
     }
@@ -76,6 +91,17 @@ impl Engine {
         let v = self
             .eval(expr, ctx)
             .map_err(|e| at(self.describe_expr(expr, ctx, &e)))?;
+        // Same hole as `render_field`: `when: env.NOPE` evaluates to a
+        // successful undefined, which fell past the `Bool` arm below and
+        // reported "evaluated to  (undefined), not true or false" -- an empty
+        // value and the wrong diagnosis.
+        if v.is_undefined() {
+            return Err(at(self.describe_expr(
+                expr,
+                ctx,
+                &minijinja::Error::from(minijinja::ErrorKind::UndefinedError),
+            )));
+        }
         match v.kind() {
             Kind::Bool => Ok(v.is_true()),
             _ => Err(at(format!(
@@ -621,6 +647,35 @@ mod tests {
         let c = ctx(&[]);
         let err = e.eval_bool("branch == 'main'", &c, &at).unwrap_err();
         assert_eq!(err.msg, "undefined variable `branch`", "{}", err.msg);
+    }
+
+    // The regression guard for the root cause: a field that is one expression
+    // and nothing else never *used* the undefined value, so strict mode
+    // stayed quiet and handed back a successful `undefined`.
+    #[test]
+    fn a_sole_expression_that_is_undefined_is_an_error() {
+        let e = Engine::new();
+        let c = ctx(&[]);
+        let err = e.render_field("{{ nope }}", &c).unwrap_err();
+        assert_eq!(err.kind(), minijinja::ErrorKind::UndefinedError);
+        assert_eq!(
+            e.describe_with("{{ nope }}", &c, &err),
+            "undefined variable `nope`"
+        );
+    }
+
+    // `when: env.NOPE` reported "evaluated to  (undefined), not true or
+    // false" -- an empty value and the wrong diagnosis.
+    #[test]
+    fn a_condition_that_is_undefined_says_so_rather_than_not_a_boolean() {
+        let e = Engine::new();
+        let at = |m: String| Diag::new("t.yml", 1, 1, m);
+        let mut map = BTreeMap::new();
+        map.insert("OTHER".to_string(), Value::from("1"));
+        let c = ctx(&[("env", Value::from(map))]);
+        let err = e.eval_bool("env.NOPE", &c, &at).unwrap_err();
+        assert_eq!(err.msg, "undefined variable `env.NOPE`", "{}", err.msg);
+        assert!(!err.msg.contains("not true or false"), "{}", err.msg);
     }
 
     #[test]

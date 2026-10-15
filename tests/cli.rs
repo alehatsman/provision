@@ -297,6 +297,43 @@ fn a_components_register_does_not_leak_back_to_its_parent() {
     assert_positioned(&out);
 }
 
+// The headline case for §3.4. One typo at a call site, one diagnostic, naming
+// the variable the reader has to fix -- not the prop, and not the component's
+// declaration line in another file.
+//
+// A sole-expression field that evaluated to undefined used to come back
+// `Ok(undefined)`, because strict mode fires only when a value is *used*. The
+// prop type check then rejected it as "got nothing", and `fill_defaults`
+// added a second error calling it missing.
+#[test]
+fn an_undefined_variable_in_a_prop_value_names_the_variable() {
+    let (code, out) = validate("undefined_in_prop.yml");
+    assert_eq!(code, EXIT_VALIDATION, "{out}");
+    assert!(out.contains("undefined variable `nope`"), "{out}");
+    assert!(
+        !out.contains("got nothing"),
+        "that is the symptom, not the cause: {out}"
+    );
+    assert!(
+        !out.contains("missing required prop"),
+        "it was given a value; it is wrong, not missing: {out}"
+    );
+    assert!(out.contains("1 problem"), "exactly one: {out}");
+    assert_positioned(&out);
+}
+
+// `--prop` values are templates too (§8), and the same context was thrown
+// away there.
+#[test]
+fn an_undefined_variable_in_a_cli_prop_names_the_variable() {
+    let path = fixture_arg("component/needs_repo.yml");
+    let out = run(&["validate", "--prop", "repo={{ nope }}", &path]);
+    assert_eq!(out.status.code(), Some(EXIT_VALIDATION));
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert!(text.contains("undefined variable `nope`"), "{text}");
+    assert!(!text.contains("missing required prop"), "{text}");
+}
+
 // ── props ─────────────────────────────────────────────────────────────────
 
 #[test]
