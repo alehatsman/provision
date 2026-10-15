@@ -2204,6 +2204,6 @@ fn collect_tree(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
 fn rel_display(p: &Path) -> String {
     std::env::current_dir()
         .ok()
-        .and_then(|cwd| p.strip_prefix(cwd).ok().map(|r| r.display().to_string()))
-        .unwrap_or_else(|| p.display().to_string())
+        .and_then(|cwd| p.strip_prefix(cwd).ok().map(crate::error::show))
+        .unwrap_or_else(|| crate::error::show(p))
 }

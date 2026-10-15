@@ -122,11 +122,7 @@ impl Text {
         // At depth 0 there is no call site, so the file is the header — and
         // a bare `import` chain inside one file still changes it.
         if ev.via.is_empty() && previous.1 != ev.file {
-            let name = ev
-                .file
-                .strip_prefix(&self.base)
-                .unwrap_or(&ev.file)
-                .display();
+            let name = crate::error::show(ev.file.strip_prefix(&self.base).unwrap_or(&ev.file));
             self.write(format_args!("  {}{dim}{name}{dim:#}\n", indent(ev.depth)));
         }
         self.current = Some((ev.via.clone(), ev.file.clone()));
@@ -188,7 +184,7 @@ impl Sink for Text {
         // This *is* the root file's header, with the counts on it, so claim
         // the slot rather than printing a second line saying the same name.
         self.current = Some((Vec::new(), plan.to_path_buf()));
-        let name = plan.strip_prefix(&self.base).unwrap_or(plan).display();
+        let name = crate::error::show(plan.strip_prefix(&self.base).unwrap_or(plan));
         // "to run", not bare "steps" (#45). This count is taken on the
         // preflight walk, which evaluates `when` and the tag filter and so
         // excludes the steps they rule out -- while the summary below counts
@@ -221,7 +217,7 @@ impl Sink for Text {
     }
 
     fn summary(&mut self, plan: &Path, s: &Summary) {
-        let name = plan.strip_prefix(&self.base).unwrap_or(plan).display();
+        let name = crate::error::show(plan.strip_prefix(&self.base).unwrap_or(plan));
         let mut parts = vec![format!(
             "{} step{}",
             s.total,

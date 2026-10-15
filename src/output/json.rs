@@ -28,11 +28,10 @@ impl Json {
         let _ = out.flush();
     }
 
+    /// D29: `/` on every platform. A runner's contract that renders
+    /// differently depending on which machine produced it is two contracts.
     fn rel(&self, p: &Path) -> String {
-        p.strip_prefix(&self.base)
-            .unwrap_or(p)
-            .display()
-            .to_string()
+        crate::error::show(p.strip_prefix(&self.base).unwrap_or(p))
     }
 }
 
