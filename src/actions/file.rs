@@ -127,7 +127,7 @@ pub(crate) fn parse_metadata(
         }
     }
 
-    let field = |k: &str| body.get(k).and_then(|n| n.as_str().ok()).and_then(&render);
+    let field = |k: &str| body.get(k).and_then(|n| n.as_str().ok()).and_then(render);
     Ok(Some(Metadata {
         mode,
         owner: field("owner"),

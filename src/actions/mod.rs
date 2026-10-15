@@ -273,7 +273,7 @@ impl Action {
 
             "assert" => {
                 let field = |k: &str| -> Option<String> {
-                    body.get(k).and_then(|n| n.as_str().ok()).and_then(&render)
+                    body.get(k).and_then(|n| n.as_str().ok()).and_then(render)
                 };
                 let command = field("command");
                 // An `expr` is an expression, not a template: it is evaluated
