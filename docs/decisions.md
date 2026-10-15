@@ -188,6 +188,30 @@ compilation (#191) made `plan -t` fail on excluded steps. Ansible's rule is
 known and predictable; excluded steps are never rendered, so they cannot
 fail.
 
+**Amended 2026-10-15, on an unknown filter value.** Ansible accepts a tag no
+step carries and runs nothing. Provision does not: a `--tags` or `--skip-tags`
+value matching no step in the run is exit 3, named per value, with the plan's
+tags in the note. The amendment is not a style preference — `apply drift.yml
+--tags handlr` reported `2 steps · 2 skipped`, exit 0, which is an apply that
+touched nothing reporting success, and the inverse typo ran the whole plan.
+Neither is recoverable by reading the output, and `break-glass.md` §3b's
+second recovery move is an operator typing `--skip-tags <tag>` from memory
+while something is broken. D7 adopted Ansible's semantics because they are
+*predictable*; silently accepting a typo is the one place they are not.
+
+The note carries the plan's tag set because there is no other way to ask for
+it — `list` on a plan refuses (D17), and adding a verb to enumerate tags would
+be a new noun for a question that only ever gets asked at the moment the
+answer is already needed.
+
+**What this costs, stated plainly.** A pipeline passing a tag that a plan has
+since dropped now fails instead of running nothing — louder, and in CI that is
+the point, but it is a new way for a green job to go red. `always` is exempt
+as a keyword, so `--skip-tags always` is still accepted on a plan with no
+`always` step. And the check stands down when the walk already found
+problems: a typo'd tag on a plan that also fails to load is not reported, on
+the grounds that "no step is tagged `x`" would then be a guess.
+
 **Overturned by.** Nothing.
 
 ## D8 — `sudo: true` only; no `become_user`, no run-as-admin

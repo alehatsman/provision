@@ -179,7 +179,7 @@ The decisions are in [docs/decisions.md](docs/decisions.md).
 | `ignore_errors: true` | `failed_when: false` | |
 | `creates`, `removes` on `command` | `creates`, `unless` on any command step | `unless` is a command, exit 0 skips |
 | `--check`, `--diff` | `plan` | best effort, says `unknown` when it cannot tell (D11); exit 2 when anything would change |
-| `tags`, `--tags`, `--skip-tags`, `always` | the same | Ansible semantics verbatim (D7) |
+| `tags`, `--tags`, `--skip-tags`, `always` | the same | Ansible semantics (D7), with one divergence: a filter value no step carries is exit 3, not an empty run |
 | `become`, `become_user` | `sudo: true` | root or you, nothing between (D8) |
 | `loop`, `with_items` | none | deferred; copy the step (plan.md "Deferred") |
 | `notify`, handlers | `register` + `when: x.changed` on the restart step | no handlers (D5) |

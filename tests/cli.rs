@@ -531,6 +531,122 @@ fn an_excluded_step_is_never_rendered() {
     assert!(!out.contains("never_defined_anywhere"), "{out}");
 }
 
+// ── tags: a filter value that matches nothing ─────────────────────────────
+//
+// A divergence from D7's "Ansible semantics", amended there. Ansible accepts
+// an unknown tag and runs nothing; here that was an apply which did nothing
+// reporting success, and the inverse typo ran everything — both silent, and
+// `break-glass.md` §3b has an operator typing one from memory mid-incident.
+
+#[test]
+fn an_unknown_tag_is_a_usage_error_not_an_empty_run() {
+    let (code, out) = plan(&[&fixture_arg("tags.yml"), "--tags", "handlr"]);
+    assert_eq!(code, EXIT_VALIDATION, "{out}");
+    assert!(
+        out.contains("`handlr` matches no step in this run"),
+        "{out}"
+    );
+    // The note is the fix, not decoration: there is no other way to ask a
+    // plan what tags it has (`list` on a plan refuses).
+    assert!(out.contains("tags in this plan: always, x, y"), "{out}");
+}
+
+#[test]
+fn an_unknown_skip_tag_is_refused_the_same_way() {
+    // The inverse typo is the worse one: it silently ran *everything*. Not
+    // `tags.yml`: excluding nothing there renders its deliberately-undefined
+    // step, and the check stands down once the walk has other problems.
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("plan.yml");
+    std::fs::write(
+        &plan,
+        "- name: a\n  shell: \"true\"\n  changed_when: \"false\"\n  tags: [slow]\n",
+    )
+    .unwrap();
+    let out = run(&[
+        "apply",
+        "--skip-tags",
+        "handlr",
+        &plan.display().to_string(),
+    ]);
+    assert_eq!(out.status.code(), Some(EXIT_VALIDATION));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("`handlr` matches no step in this run"),
+        "{err}"
+    );
+    assert!(err.contains("tags in this plan: slow"), "{err}");
+}
+
+#[test]
+fn one_good_tag_does_not_excuse_a_typo_beside_it() {
+    // Per value, not per flag: `--tags x,handlr` still selects steps, so a
+    // "selected nothing" check would miss this entirely.
+    let (code, out) = plan(&[&fixture_arg("tags.yml"), "--tags", "x,handlr"]);
+    assert_eq!(code, EXIT_VALIDATION, "{out}");
+    assert!(out.contains("`handlr`"), "{out}");
+    assert!(!out.contains("`x` matches"), "x is a real tag: {out}");
+}
+
+#[test]
+fn always_is_a_keyword_not_a_tag_the_plan_must_declare() {
+    // `--skip-tags always` is documented (§8) and is written for plans that
+    // have an `always` step somewhere below — refusing it on a plan that
+    // happens not to declare one would reject the idiom where it is needed.
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("plan.yml");
+    std::fs::write(
+        &plan,
+        "- name: a\n  shell: \"true\"\n  changed_when: \"false\"\n",
+    )
+    .unwrap();
+    let out = run(&[
+        "apply",
+        "--skip-tags",
+        "always",
+        &plan.display().to_string(),
+    ]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+// The load-bearing one. An unknown `--tags` value does not skip everything:
+// `always` steps run regardless, so the typo'd filter still touches the
+// machine. This pins the refusal to the preflight — move the check into the
+// executing walk and the marker appears, because a diag raised mid-walk only
+// stops it at the *next* step (D26, src/expand.rs).
+#[test]
+fn apply_refuses_an_unknown_tag_before_an_always_step_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    let marker = dir.path().join("ran");
+    let plan = dir.path().join("plan.yml");
+    std::fs::write(
+        &plan,
+        format!(
+            "- name: always runs\n  shell: touch {}\n  creates: {}\n  tags: [always]\n",
+            marker.display(),
+            marker.display()
+        ),
+    )
+    .unwrap();
+
+    let out = run(&["apply", "--tags", "handlr", &plan.display().to_string()]);
+    assert_eq!(
+        out.status.code(),
+        Some(EXIT_VALIDATION),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        !marker.exists(),
+        "the always-tagged step ran before the typo was caught"
+    );
+}
+
 #[test]
 fn skip_tags_wins_over_everything() {
     // `always` is excluded despite its name, and `y` stays excluded so the

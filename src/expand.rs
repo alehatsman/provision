@@ -133,6 +133,11 @@ pub(crate) struct Expander {
     /// Spec §8 `--deadline`: when the run's wall clock runs out. `None` is no
     /// deadline, which is the default and every `validate`.
     deadline: Option<Instant>,
+    /// Every tag the walk saw declared, on a step or inherited from the
+    /// `import`/`use` that carried it. Collected so that a `--tags` value
+    /// matching none of them can be named at the end of the walk, and so the
+    /// diagnostic can print the set the plan actually has.
+    seen_tags: BTreeSet<String>,
 }
 
 impl Expander {
@@ -157,6 +162,7 @@ impl Expander {
             keep_going: false,
             strict: false,
             deadline: None,
+            seen_tags: BTreeSet::new(),
         }
     }
 
@@ -215,6 +221,7 @@ impl Expander {
             self.diags.push(d);
         }
         self.walk(&steps, &mut scope, 0, &BTreeSet::new());
+        self.check_selection();
         Ok(())
     }
 
@@ -249,6 +256,7 @@ impl Expander {
             .unwrap_or(Path::new("."));
         let mut scope = Scope::root(Rc::clone(&self.globals)).child_with_props(props, dir);
         self.walk(&component.steps, &mut scope, 0, &BTreeSet::new());
+        self.check_selection();
         Ok(())
     }
 
@@ -311,6 +319,56 @@ impl Expander {
         }
     }
 
+    /// Spec §8: a `--tags` or `--skip-tags` value that matches no step in the
+    /// plan is a usage error, not an empty selection.
+    ///
+    /// This is a deliberate divergence from D7's "Ansible semantics": Ansible
+    /// accepts an unknown tag and runs nothing. Here `apply drift.yml --tags
+    /// handlr` reported `2 skipped`, exit 0 — an apply that did nothing
+    /// reporting success — and the inverse typo ran everything. Both are
+    /// silent, and `break-glass.md` §3b has an operator typing one of these
+    /// from memory while something is broken.
+    ///
+    /// Called at the end of the walk because tags are only known once
+    /// `import`/`use` have been expanded (D7's own ordering). Skipped when the
+    /// walk already found problems: a plan that failed to load never reached
+    /// its tags, and "no step is tagged `x`" would then be a guess.
+    ///
+    /// The one blind spot, stated: a subtree behind a structural `when: false`
+    /// is never entered, so tags declared only inside it are not seen. The
+    /// steps are not in this run either way, so the refusal is still true of
+    /// the run — it is the wording "no step in the plan" that would overreach,
+    /// which is why the message says what it says.
+    fn check_selection(&mut self) {
+        if !self.diags.is_empty() || self.mode.executes() {
+            return;
+        }
+        let known: Vec<&str> = self.seen_tags.iter().map(String::as_str).collect();
+        let note = if known.is_empty() {
+            "no step in this plan declares any tag".to_string()
+        } else {
+            format!("tags in this plan: {}", known.join(", "))
+        };
+        for (flag, values) in [
+            ("--tags", &self.selection.tags),
+            ("--skip-tags", &self.selection.skip_tags),
+        ] {
+            for v in values {
+                // `always` is part of the language (§8), not a tag the plan
+                // has to declare: `--skip-tags always` is a documented move
+                // and refusing it for lack of an `always`-tagged step would
+                // reject the idiom on exactly the plans it is written for.
+                if v == "always" || self.seen_tags.contains(v) {
+                    continue;
+                }
+                self.diags.push(
+                    Diag::file_level(flag, format!("`{v}` matches no step in this run"))
+                        .with_note(note.clone()),
+                );
+            }
+        }
+    }
+
     fn step(
         &mut self,
         step: &Step<'static>,
@@ -328,6 +386,11 @@ impl Expander {
                 }
             }
         }
+
+        // Recorded before the filter, not after: a step the selection excludes
+        // still *declares* its tags, and it is exactly the excluded steps that
+        // prove a `--tags` value was a real tag rather than a typo.
+        self.seen_tags.extend(tags.iter().cloned());
 
         // Spec §8: tag filtering happens before rendering, so an excluded step
         // cannot fail on a variable it never gets to read. This is mooncake
