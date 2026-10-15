@@ -130,6 +130,11 @@ Call site:
   tags: [core, palette]
 ```
 
+A call site's `name:` is read: it is the header the component's steps appear
+under, and the entry it contributes to each of their `via` paths (§9.3). An
+unnamed `use`/`import` falls back to the file it names, which is what the
+header always showed.
+
 - Unknown prop at the call site: error. Missing required prop: error.
   Wrong type after template rendering: error. All three at `validate`
   time, not at apply time.
@@ -1541,8 +1546,12 @@ One line per step, updated in place while running (spinner), then frozen:
   `shell` step, stopped being one when its exit code became its contract
   (§6.1). So an `apply` reports only `ok`, `changed`, `skipped` and
   `failed`, which is the vocabulary a CI runner reads (§8).
-- Nested `import`/`use` shown as a dim header line with the file name;
-  steps indented one level. Depth capped at display; execution is flat.
+- Nested `import`/`use` shown as a dim header line; steps indented one
+  level. Depth capped at display; execution is flat. The header is the call
+  site's `name:` when it has one and the file name otherwise, and **one
+  header per call site**, not per file: two `use`s of the same component are
+  two entries, because they are two pieces of work and collapsing them to
+  one header made a plan under-report what it was about to do.
 - Skipped steps collapse to one dim line each; `--hide-skipped` drops them
   and the summary still counts them.
 - The failure block under a `✗` line is the step's own captured output:
@@ -1636,6 +1645,20 @@ best-effort (D11) and explicitly unprobed for a register-gated step (D14),
 so a claim about what a run *would change*, made before it starts, is one
 provision cannot keep — while how much is about to happen, and whether any
 of it is root, is one it can.
+
+A step reached through `import` or `use` carries `via`: the call path from
+the root file down to it, one entry per call site — the site's `name:` when
+it has one, the file it names otherwise. It is absent at depth 0, where
+there is no call path to report. Without it two invocations of one component
+emitted byte-identical `file`, `line` and `name`, so a runner reading the
+stream could not tell which call site a step belonged to, and an
+intermediate component never appeared at all. A call-site name on an event
+is a field, not a graph: `via` says where a step came from and nothing about
+ordering or dependency.
+
+```json
+{"event":"step","file":"n/leaf.yml","line":4,"name":"leaf step","via":["Developer toolchains","rust"],"status":"ok"}
+```
 
 A problem found while walking is its own event, carrying `file`, `line`,
 `col`, `message` and an optional `note` — the same words the terminal

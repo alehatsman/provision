@@ -1538,3 +1538,91 @@ fn a_shell_variable_in_unless_is_left_alone() {
         String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(0), "{text}");
 }
+
+// #32: a `use` step's `name:` was stored and never printed — `do_use` never
+// reaches `finish`, so it only ever showed when the step was skipped. Two
+// invocations of one component then emitted byte-identical `file`, `line`
+// and `name`, and the component in between never appeared at all.
+#[test]
+fn a_call_site_name_reaches_the_output_and_the_stream() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("leaf.yml"),
+        "description: leaf\n\
+         props:\n\
+         \x20 what: {type: string, required: true}\n\
+         steps:\n\
+         \x20 - name: \"leaf step for {{ props.what }}\"\n\
+         \x20   shell: \"true\"\n\
+         \x20   changed_when: \"false\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("mid.yml"),
+        "description: mid\n\
+         steps:\n\
+         \x20 - name: rust\n\
+         \x20   use: ./leaf.yml\n\
+         \x20   props: {what: rust}\n\
+         \x20 - name: node\n\
+         \x20   use: ./leaf.yml\n\
+         \x20   props: {what: node}\n",
+    )
+    .unwrap();
+    let root = dir.path().join("root.yml");
+    std::fs::write(
+        &root,
+        "description: root\n\
+         steps:\n\
+         \x20 - name: Developer toolchains\n\
+         \x20   use: ./mid.yml\n",
+    )
+    .unwrap();
+
+    let (code, text) = plan(&[&root.display().to_string()]);
+    assert_eq!(code, 0, "{text}");
+    // Every call site appears, the intermediate one included.
+    for label in ["Developer toolchains", "rust", "node"] {
+        assert!(text.contains(label), "`{label}` is missing from:\n{text}");
+    }
+
+    let out = run(&[
+        "plan",
+        "--plan-no-probe",
+        "--json",
+        &root.display().to_string(),
+    ]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let vias: Vec<String> = stdout
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter(|r| r["event"] == "step")
+        .map(|r| r["via"].to_string())
+        .collect();
+    assert_eq!(
+        vias,
+        vec![
+            "[\"Developer toolchains\",\"rust\"]",
+            "[\"Developer toolchains\",\"node\"]"
+        ],
+        "two invocations of one component must be distinguishable:\n{stdout}"
+    );
+}
+
+// The fallback, which is what the header always showed: an unnamed call site
+// is the file it names, so a plan that never used `name:` on a `use` reads as
+// it did before.
+#[test]
+fn an_unnamed_call_site_falls_back_to_its_file() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("lib.yml"),
+        "description: lib\nsteps:\n  - name: inner\n    shell: \"true\"\n    changed_when: \"false\"\n",
+    )
+    .unwrap();
+    let root = dir.path().join("root.yml");
+    std::fs::write(&root, "description: root\nsteps:\n  - use: ./lib.yml\n").unwrap();
+    let (code, text) = plan(&[&root.display().to_string()]);
+    assert_eq!(code, 0, "{text}");
+    assert!(text.contains("lib.yml"), "{text}");
+}

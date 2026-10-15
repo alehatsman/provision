@@ -86,6 +86,12 @@ impl Sink for Json {
         if let Some(n) = &ev.note {
             m.insert("note".into(), json!(n));
         }
+        // §9.3: absent at depth 0, where there is no call path to report.
+        // Two invocations of one component used to emit byte-identical
+        // `file`, `line` and `name`; this is what tells them apart.
+        if !ev.via.is_empty() {
+            m.insert("via".into(), json!(ev.via));
+        }
         if let Some(d) = &ev.detail {
             m.insert("diff".into(), json!(d));
         }

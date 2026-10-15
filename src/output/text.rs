@@ -37,9 +37,12 @@ pub(crate) struct Text {
     /// suppress, so a script can pass both commands the same arguments.
     no_diff: bool,
     base: PathBuf,
-    /// The file whose header was printed last, so nested `import`/`use` shows
-    /// as one dim header rather than a path on every line.
-    current: Option<PathBuf>,
+    /// The call path and file whose header was printed last, so nested
+    /// `import`/`use` shows as one dim header rather than a path on every
+    /// line. The call path is part of the key because two `use`s of one
+    /// component are two pieces of work: keying on the file alone printed
+    /// one header for both and made a plan under-report what it was doing.
+    current: Option<(Vec<String>, PathBuf)>,
     live: Option<Spinner>,
 }
 
@@ -101,14 +104,32 @@ impl Text {
         }
     }
 
-    fn header(&mut self, file: &Path, depth: usize) {
-        if self.current.as_deref() == Some(file) {
-            return;
-        }
-        self.current = Some(file.to_path_buf());
-        let name = file.strip_prefix(&self.base).unwrap_or(file).display();
+    fn header(&mut self, ev: &Event) {
+        // Every level of the call path that is new since the last step gets
+        // its own line, indented to its depth: the call site's `name:` when
+        // it has one, the file it names otherwise. Printing only the
+        // innermost one hid the components in between, and keying on the
+        // file alone printed one header for two `use`s of the same component
+        // — two pieces of work reported as one (§9.1).
+        let previous = self.current.take().unwrap_or_default();
         let dim = Style::new().dimmed();
-        self.write(format_args!("  {}{dim}{name}{dim:#}\n", indent(depth)));
+        for (i, label) in ev.via.iter().enumerate() {
+            if previous.0.get(i) == Some(label) {
+                continue;
+            }
+            self.write(format_args!("  {}{dim}{label}{dim:#}\n", indent(i)));
+        }
+        // At depth 0 there is no call site, so the file is the header — and
+        // a bare `import` chain inside one file still changes it.
+        if ev.via.is_empty() && previous.1 != ev.file {
+            let name = ev
+                .file
+                .strip_prefix(&self.base)
+                .unwrap_or(&ev.file)
+                .display();
+            self.write(format_args!("  {}{dim}{name}{dim:#}\n", indent(ev.depth)));
+        }
+        self.current = Some((ev.via.clone(), ev.file.clone()));
     }
 }
 
@@ -130,7 +151,7 @@ impl Sink for Text {
         if self.hide_skipped && matches!(ev.status, Status::Skipped(_)) {
             return;
         }
-        self.header(&ev.file, ev.depth);
+        self.header(ev);
 
         let style = style_for(&ev.status);
         let name = truncate(&format!("{}{}", indent(ev.depth), ev.name), NAME_WIDTH);
@@ -166,7 +187,7 @@ impl Sink for Text {
     fn manifest(&mut self, plan: &Path, m: &crate::expand::Manifest) {
         // This *is* the root file's header, with the counts on it, so claim
         // the slot rather than printing a second line saying the same name.
-        self.current = Some(plan.to_path_buf());
+        self.current = Some((Vec::new(), plan.to_path_buf()));
         let name = plan.strip_prefix(&self.base).unwrap_or(plan).display();
         // "to run", not bare "steps" (#45). This count is taken on the
         // preflight walk, which evaluates `when` and the tag filter and so

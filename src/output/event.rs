@@ -112,6 +112,11 @@ pub(crate) struct Event {
     /// Extra words for the status column: `3 of 14`. Spec §6.4 wants the
     /// count on the line, not buried in the diff underneath it.
     pub note: Option<String>,
+    /// §9.3: the call path from the root file down to this step, one entry
+    /// per enclosing `import`/`use`. Empty at depth 0. It is what tells two
+    /// invocations of one component apart — without it they emit identical
+    /// `file`, `line` and `name`.
+    pub via: Vec<String>,
 }
 
 #[derive(Debug, Default, Clone)]
