@@ -13,32 +13,110 @@ pub(crate) const ACTION_KEYS: &[&str] = &[
     "shell", "cmd", "file", "template", "pkg", "service", "assert", "git", "defaults", "download",
 ];
 pub(crate) const STRUCTURAL_KEYS: &[&str] = &["vars", "vars_file", "import", "use"];
-pub(crate) const MODIFIER_KEYS: &[&str] = &[
-    "name",
-    "when",
-    "unless",
-    "creates",
-    "sudo",
-    "timeout",
-    "retry",
-    "env",
-    "cwd",
-    "tags",
-    "register",
-    "changed_when",
-    "failed_when",
-    "raw",
-    "props",
-    "optional",
+/// What one step modifier is, for `provision list --json` (D25).
+///
+/// The envelope is what makes a step *correct* rather than merely
+/// parseable, and until this table existed nothing described it: `list
+/// <action>` covered the ten actions and the sixteen keys every step may
+/// carry were a bare name list. `applies` is the word a reader needs most,
+/// because four of these are only legal on one kind of step.
+pub(crate) struct ModifierDoc {
+    pub name: &'static str,
+    pub applies: &'static str,
+    pub note: &'static str,
+}
+
+const fn m(name: &'static str, applies: &'static str, note: &'static str) -> ModifierDoc {
+    ModifierDoc {
+        name,
+        applies,
+        note,
+    }
+}
+
+/// Every key a step may carry besides its one action or structural key
+/// (spec §4). The unknown-key check reads this table, so a key that is not
+/// here is not accepted, and a key here that the walk ignores is a bug this
+/// table makes visible.
+pub(crate) static MODIFIERS: &[ModifierDoc] = &[
+    m("name", "any step", "what the step line says; templated"),
+    m(
+        "when",
+        "any step",
+        "an expression; false skips the step and, on a `use`/`import`, its whole subtree",
+    ),
+    m(
+        "unless",
+        "command steps",
+        "a command; exit 0 skips the step",
+    ),
+    m(
+        "creates",
+        "command steps",
+        "a path; existing skips the step",
+    ),
+    m(
+        "sudo",
+        "any action",
+        "run as root. not templated; true or false as a literal",
+    ),
+    m(
+        "timeout",
+        "command steps",
+        "per attempt, not per step: `30s`, `5m`, `1h`",
+    ),
+    m("retry", "command steps", "a mapping: `{attempts, delay}`"),
+    m(
+        "env",
+        "action steps",
+        "a mapping added to the command's environment; values templated",
+    ),
+    m("cwd", "command steps", "the working directory; templated"),
+    m(
+        "tags",
+        "any step",
+        "a name or a list; `always` survives every filter (D7)",
+    ),
+    m(
+        "register",
+        "action steps",
+        "bind this step's result to a name for a later `when`",
+    ),
+    m(
+        "changed_when",
+        "command steps",
+        "an expression deciding `changed`; also satisfies the gate",
+    ),
+    m(
+        "failed_when",
+        "command steps",
+        "an expression deciding `failed`; `false` is `ignore_errors`",
+    ),
+    m(
+        "raw",
+        "shell steps",
+        "do not render the script as a template",
+    ),
+    m("props", "`use` only", "the component's declared arguments"),
+    m(
+        "optional",
+        "`vars_file` only",
+        "a missing file is not an error",
+    ),
 ];
+
+/// The modifier names, for the unknown-key check.
+pub(crate) fn modifier_keys() -> impl Iterator<Item = &'static str> {
+    MODIFIERS.iter().map(|m| m.name)
+}
 
 /// Every key a step may carry, for the unknown-key check.
 pub(crate) fn all_step_keys() -> Vec<&'static str> {
     ACTION_KEYS
         .iter()
         .chain(STRUCTURAL_KEYS)
-        .chain(MODIFIER_KEYS)
         .copied()
+        .chain(modifier_keys())
         .collect()
 }
 
@@ -278,6 +356,11 @@ static ACTIONS: &[(&str, ActionDoc)] = &[
     ),
 ];
 
+/// Every builtin, in table order, for `list --json`.
+pub(crate) fn action_docs() -> impl Iterator<Item = (&'static str, &'static ActionDoc)> {
+    ACTIONS.iter().map(|(n, d)| (*n, d))
+}
+
 pub(crate) fn action_doc(action: &str) -> Option<&'static ActionDoc> {
     ACTIONS.iter().find(|(n, _)| *n == action).map(|(_, d)| d)
 }
@@ -433,7 +516,7 @@ pub(crate) fn parse_step<'a>(at: N<'a>) -> Result<Step<'a>> {
     let body = at.require(key)?;
     let mut mods = Mods::default();
     for (name, key_node) in keys {
-        if !MODIFIER_KEYS.contains(&name) {
+        if !modifier_keys().any(|k| k == name) {
             continue;
         }
         let v = at.require(name)?;

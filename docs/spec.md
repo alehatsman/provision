@@ -895,7 +895,7 @@ defaults:
 provision validate <file.yml> [--strict] [--json] [--prop k=v]... [--var k=v]... [--vars-file f]...
 provision plan     <file.yml> [--prop k=v]... [--tags t,u] [--skip-tags t] [--var k=v]... [--vars-file f]... [--plan-no-probe] [--no-diff] [--json] [--hide-skipped] [--color when] [--deadline 30m]
 provision apply    <file.yml> [same as plan] [--ask-sudo-pass] [--verbose] [--stream] [--keep-going]
-provision list     <dir>/ | <component.yml> | <action>
+provision list     [<dir>/ | <component.yml> | <action>] [--json]
 provision facts    [--json]
 provision --version
 ```
@@ -1071,6 +1071,22 @@ gates, so it has a wall clock worth bounding too. There is no
   second, hand-kept list beside it is how a tool grows a help text that
   lies. The names come from the same place the check does, so a key that
   exists is listed and a key that is listed exists.
+
+- `list --json`, with **no path**: every builtin action and every step
+  modifier, as one document (D25). Verbs that answer return a document;
+  verbs that walk stream. `--json` on a path narrows it to that one action
+  or component.
+
+  The modifiers are the half that had no printed form at all. `list
+  <action>` answers "which keys does `git` take"; nothing answered "which
+  keys may any step carry", and the envelope — `when`, `register`,
+  `creates`, `unless`, `changed_when`, `tags` and the rest — is what makes a
+  step *correct* rather than merely parseable. Each carries where it is
+  legal, because four of the sixteen are legal on one kind of step only.
+
+  The same one-table rule holds: the unknown-key check reads the modifier
+  table the dump prints, so a modifier that is documented is one the parser
+  accepts.
 
   A path that exists wins: `list ./git` is that file, and only a bare name
   matching no path is looked up as an action. Exit 0; a name that is

@@ -114,8 +114,15 @@ enum Command {
     List {
         /// A directory of component files, one component file, or the name of
         /// a builtin action (`git`, `pkg`, …). A trailing separator is
-        /// optional: the verb already says what the argument is.
-        path: PathBuf,
+        /// optional: the verb already says what the argument is. Omit it
+        /// entirely with `--json` to dump the whole vocabulary.
+        path: Option<PathBuf>,
+        /// One JSON document on stdout. With no path, that document is every
+        /// builtin action and every step modifier — what a writer of plan
+        /// files needs in one call, rather than a column-aligned table to
+        /// scrape or a 1300-line spec to carry (D25).
+        #[arg(long)]
+        json: bool,
     },
     /// Print the facts this machine reports.
     Facts {
@@ -289,7 +296,12 @@ fn run() -> Result<u8, Diag> {
         }
     };
     match cli.command {
-        Command::List { path } => list(&path, &cwd()),
+        Command::List { path, json } => match (path, json) {
+            (None, true) => Ok(vocabulary()),
+            (None, false) => Err(Diag::file_level("list", "needs a path, or `--json`")
+                .with_note("a directory of components, a component file, an action name, or `--json` for all of them")),
+            (Some(p), json) => list(&p, &cwd(), json),
+        },
 
         Command::Facts { json } => {
             let f = facts::Facts::detect();
@@ -608,7 +620,7 @@ fn is_component(path: &Path) -> Result<bool, Diag> {
 /// can be run here, a file says what one of them takes. One verb, because it
 /// is one question asked with two amounts of precision, and the directory
 /// form used to answer only the first half of it.
-fn list(path: &Path, base: &Path) -> Result<u8, Diag> {
+fn list(path: &Path, base: &Path, json: bool) -> Result<u8, Diag> {
     if path.is_dir() {
         return list_tasks(path, base);
     }
@@ -620,6 +632,10 @@ fn list(path: &Path, base: &Path) -> Result<u8, Diag> {
         if let Some(name) = path.to_str()
             && let Some(doc) = config::model::action_doc(name)
         {
+            if json {
+                output::line(format_args!("{}", action_json(name, doc)));
+                return Ok(EXIT_OK);
+            }
             return Ok(describe_action(name, doc));
         }
         return Err(
@@ -639,6 +655,49 @@ fn list(path: &Path, base: &Path) -> Result<u8, Diag> {
 ///
 /// The fields come from the table the unknown-key check reads (spec §8), so
 /// a key that is listed here is a key `validate` accepts.
+/// One action as a document: the same table `describe_action` prints, in the
+/// shape something other than a person can read.
+fn action_json(name: &str, doc: &config::model::ActionDoc) -> serde_json::Value {
+    serde_json::json!({
+        "name": name,
+        "summary": doc.summary,
+        "body": doc.shape,
+        "fields": doc.fields.iter().map(|f| serde_json::json!({
+            "name": f.name,
+            "need": f.need,
+            "note": f.note,
+        })).collect::<Vec<_>>(),
+    })
+}
+
+/// `provision list --json` with no path: every builtin action and every step
+/// modifier, in one document.
+///
+/// D25's "verbs that answer return a document". A writer of plan files needs
+/// the envelope at least as much as it needs the ten actions — `when`,
+/// `register`, `creates`, `unless` and the rest are what make a step correct
+/// rather than merely parseable — and until this existed nothing described
+/// them anywhere a program could read.
+fn vocabulary() -> u8 {
+    let doc = serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "actions": config::model::action_docs()
+            .map(|(name, d)| action_json(name, d))
+            .collect::<Vec<_>>(),
+        "structural": config::model::STRUCTURAL_KEYS,
+        "modifiers": config::model::MODIFIERS.iter().map(|m| serde_json::json!({
+            "name": m.name,
+            "applies": m.applies,
+            "note": m.note,
+        })).collect::<Vec<_>>(),
+    });
+    output::line(format_args!(
+        "{}",
+        serde_json::to_string_pretty(&doc).unwrap_or_default()
+    ));
+    EXIT_OK
+}
+
 fn describe_action(name: &str, doc: &config::model::ActionDoc) -> u8 {
     output::line(format_args!("  {name:<24}  {}", doc.summary));
     if let Some(shape) = doc.shape {
