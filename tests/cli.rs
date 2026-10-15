@@ -289,7 +289,10 @@ fn a_child_scope_does_not_leak_back_to_its_parent() {
 fn a_components_register_does_not_leak_back_to_its_parent() {
     let (code, out) = validate("register_isolation.yml");
     assert_eq!(code, EXIT_VALIDATION, "{out}");
-    assert!(out.contains("undefined value"), "{out}");
+    // The name, not just "undefined value": the parent is reading
+    // `inner_result`, and saying so is the difference between this error and
+    // a scavenger hunt (§3.4).
+    assert!(out.contains("undefined variable `inner_result`"), "{out}");
     assert!(out.contains("register_isolation.yml:5:"), "{out}");
     assert_positioned(&out);
 }
