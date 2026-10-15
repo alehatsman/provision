@@ -123,6 +123,11 @@ pub(crate) struct Expander {
     /// declaration names one subtree and defers only what is inside it.
     declared: Vec<PathBuf>,
     stack: Vec<PathBuf>,
+    /// One entry per enclosing `import`/`use`: the call site's `name:` when
+    /// it has one, the file it names otherwise. Pushed and popped with
+    /// `stack`, so the two never disagree about where the walk is. This is
+    /// what tells two invocations of one component apart (#32).
+    call_path: Vec<String>,
     runner: Option<Runner>,
     sink: Box<dyn Sink>,
     index: usize,
@@ -184,6 +189,7 @@ impl Expander {
             walked_a_command: false,
             declared: Vec::new(),
             stack: Vec::new(),
+            call_path: Vec::new(),
             runner: None,
             sink: Box::new(crate::output::Silent),
             index: 0,
@@ -748,7 +754,7 @@ impl Expander {
             }
             Err(d) => self.diags.push(d),
         }
-        self.stack.pop();
+        self.leave();
     }
 
     fn do_use(
@@ -762,7 +768,7 @@ impl Expander {
             return;
         };
         let Some(component) = self.diags.absorb(load::parse_component(doc)) else {
-            self.stack.pop();
+            self.leave();
             return;
         };
 
@@ -783,7 +789,7 @@ impl Expander {
             let dir = component.path.parent().unwrap_or(Path::new("."));
             let mut child = scope.child_with_props(Map::new(), dir);
             self.walk(&component.steps, &mut child, depth + 1, tags);
-            self.stack.pop();
+            self.leave();
             return;
         }
 
@@ -803,7 +809,7 @@ impl Expander {
                 }
             }
         }
-        self.stack.pop();
+        self.leave();
     }
 
     /// Find, enter and load the file an `import` or `use` names. `Some` means
@@ -838,10 +844,22 @@ impl Expander {
             }
             return None;
         }
-        self.enter(&path, step.body)?;
+        // The call site's own name is the label, and the file it names is
+        // the fallback — which is what the header has always shown, so an
+        // unnamed `use` reads exactly as it did. Rendered leniently: a name
+        // that will not render is reported by the field check, and a
+        // shape-only walk must not report anything at all.
+        let label = step.mods.name.and_then(|n| n.as_str().ok()).map_or_else(
+            || rel_display(&path),
+            |raw| match self.engine.render(raw, &ctx) {
+                Ok(rendered) if !rendered.trim().is_empty() => rendered,
+                _ => raw.to_string(),
+            },
+        );
+        self.enter(&path, step.body, label)?;
         let doc = self.diags.absorb(self.loader.load(&path));
         if doc.is_none() {
-            self.stack.pop();
+            self.leave();
         }
         doc
     }
@@ -1814,6 +1832,7 @@ impl Expander {
             rc,
             detail,
             note,
+            via: self.call_path.clone(),
         };
         self.sink.step(&ev);
     }
@@ -1869,7 +1888,7 @@ impl Expander {
     }
 
     /// Push a file onto the include stack, reporting a cycle by naming it.
-    fn enter(&mut self, path: &Path, at: N<'static>) -> Option<()> {
+    fn enter(&mut self, path: &Path, at: N<'static>, label: String) -> Option<()> {
         if let Some(i) = self.stack.iter().position(|p| p == path) {
             let mut chain: Vec<String> =
                 self.stack.iter().skip(i).map(|p| rel_display(p)).collect();
@@ -1879,7 +1898,14 @@ impl Expander {
             return None;
         }
         self.stack.push(path.to_path_buf());
+        self.call_path.push(label);
         Some(())
+    }
+
+    /// The other half of `enter`. Both vectors pop together or neither does.
+    fn leave(&mut self) {
+        self.stack.pop();
+        self.call_path.pop();
     }
 }
 
