@@ -22,7 +22,7 @@ use crate::template::Engine;
 use crate::yaml::N;
 use minijinja::Value;
 use std::collections::BTreeMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Action {
@@ -399,6 +399,13 @@ pub(crate) struct Ctx<'a> {
     /// depends on it: a message naming a step timeout the file does not
     /// contain sends a reader hunting for a number nobody wrote.
     pub deadline_bound: bool,
+    /// Spec §8, D19: the run's `--deadline` as an absolute instant, so every
+    /// command this action runs can be clamped against what is *now* left.
+    /// `timeout` above was computed once, before the action's first command,
+    /// and a typed action runs several — a `pkg` step queries, installs and
+    /// queries again. Without reclamping, each one got the whole remaining
+    /// budget in turn and the step overran the deadline by a multiple of it.
+    pub deadline: Option<Instant>,
     pub env: &'a BTreeMap<String, String>,
 }
 
@@ -415,7 +422,30 @@ impl Ctx<'_> {
     ///
     /// Probes and mutations take the same path regardless, because a hung
     /// manager hangs `is-active` exactly as it hangs `start`.
+    /// What this command gets: the lesser of the step's ceiling and the time
+    /// the run has left. `None` means the run has none left at all.
+    fn budget(&self) -> Option<Duration> {
+        let Some(deadline) = self.deadline else {
+            return Some(self.timeout);
+        };
+        let left = deadline.saturating_duration_since(Instant::now());
+        (!left.is_zero()).then(|| left.min(self.timeout))
+    }
+
     pub(crate) fn exec(&self, argv: &[&str], as_root: bool) -> std::io::Result<process::Raw> {
+        // The clock ran out while an earlier command of this same action was
+        // running. Answered as a kill rather than as an error, because that
+        // is what happened: every caller already reports a `TimedOut` command
+        // the way §8 wants, and inventing a second shape for the same event
+        // would be a second wording for one thing.
+        let Some(timeout) = self.budget() else {
+            return Ok(process::Raw {
+                rc: 124,
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+                how: process::How::TimedOut,
+            });
+        };
         let argv: Vec<String> = argv.iter().map(|s| (*s).to_string()).collect();
         let (argv, stdin) = if as_root {
             // The step's own `env` keys, exactly as the shell path passes
@@ -432,7 +462,7 @@ impl Ctx<'_> {
             cwd: None,
             env: self.env,
             stdin: stdin.as_deref(),
-            timeout: self.timeout,
+            timeout,
             stream: false,
         })
     }

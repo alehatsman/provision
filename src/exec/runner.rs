@@ -423,6 +423,7 @@ impl Runner {
             escalate: &self.sudo,
             timeout,
             deadline_bound,
+            deadline: p.deadline,
             env: &p.env,
         };
         let (effect, mut note) = match &p.action {

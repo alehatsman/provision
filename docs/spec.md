@@ -1305,7 +1305,13 @@ gates, so it has a wall clock worth bounding too. There is no
   the walk — the step does not run, and neither does anything after it, the
   same stop the first failure makes. And each step's effective `timeout` is
   the lesser of its own and the time left, so no step can run past the
-  deadline it was admitted under. A step killed that way fails with
+  deadline it was admitted under. **The clamp is per command, not per
+  step**: a typed action runs several — a `pkg` step queries, installs and
+  queries again — and taking the remaining budget once, before the first of
+  them, gave each one the whole of it in turn, so the step overran the
+  deadline by a multiple of what was left. A command that starts with no
+  budget left is not started at all and reads as killed, because that is
+  what happened to it. A step killed that way fails with
   `deadline exceeded after N`, naming the run's clock rather than a step
   timeout that is not in the file: the whole point of §4's per-step number is
   that a reader can find it, and a message pointing at one that was never

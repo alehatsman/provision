@@ -706,6 +706,20 @@ work against something which is not a test harness. It is not evidence about
 moongit, the consumer this decision's line was drawn for, so the December
 reading is "partial" and not "settled".
 
+**Amendment, 2026-10-16.** "provision owns one job's clock" held for the
+shell path and leaked on the typed one. The remaining budget was computed
+once, after the gate and before the action's first command, and handed to
+every command the action ran — so a `pkg` step whose query hangs spent that
+budget on the query, again on the verify query, and again on anything after
+it, and a 3-second deadline ended a 5-second run. The clamp is now taken per
+command against the run's deadline, and a command that starts with nothing
+left is not started. The reported kill was always correct; it was the clock
+that was not.
+
+Found by `a_typed_action_after_its_gate_gets_only_the_time_left` failing on
+Linux and passing on macOS — a difference in how many commands the action
+got to run, not a difference in the rule. Issue #19.
+
 ## D20 — a bare `shell` step's exit code is its whole contract
 
 **Decision.** A `shell` or `cmd` step with no `unless`, `creates` or
