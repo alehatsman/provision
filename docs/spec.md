@@ -1547,7 +1547,15 @@ status, in full, not truncated. A typed action ran no command and carries
 none; a skipped step ran none and carries none. A gate's (`unless`,
 `creates`) result is never reported: it decides whether the step runs, it
 is not the step's result (phase 5b; before it `rc` and `stderr` came only
-with a failure). That is the whole of what a CI runner reads per step (§8),
+with a failure). A step provision killed — its own `timeout`, or
+`--deadline` — reports `rc: 124` and `timed_out: true`, the same two values
+its `register` holds (D22): one run cannot report two exit codes for one
+step, and `timed_out` is the discriminator on both sides. `interrupted:
+true` is the matching field for a stop from outside, and the two are never
+both set. A step the clock ended before any command ran — the budget was
+already spent, or its `unless` was the thing killed — carries `timed_out`
+with `rc: null`: no command ran, so there is no code to report, and the
+reason the step ended is still the clock. That is the whole of what a CI runner reads per step (§8),
 so it is emitted as each step finishes, never batched:
 
 ```json
@@ -1599,6 +1607,12 @@ prints, with the column the text form also has:
 ```json
 {"event":"diagnostic","file":"job.yml","line":3,"col":3,"message":"unknown key `creats` in a step","note":"did you mean `creates`?"}
 ```
+
+A diagnostic is emitted once. A fault is a file, a line, a column and a
+message, and the same four is the same fault however many times the walk
+passed over it — a step's `name` is rendered by the field check and again
+for the step's line, and an unknown filter in it used to arrive twice and
+be counted as `2 problems`.
 
 `validate` takes `--json` too, where the diagnostics are the whole of the
 stream and silence means it passed (D25). Diagnostics come **before** the

@@ -32,6 +32,12 @@ pub(crate) struct Failure {
     pub stderr: String,
     /// Ctrl-C, not the step's own fault. Changes the exit code, not the glyph.
     pub interrupted: bool,
+    /// D22: provision killed the step — its own `timeout`, or `--deadline` —
+    /// rather than the command exiting. `rc` is `124` either way, which is
+    /// why this field and not `rc` is the discriminator. The same pair the
+    /// step's `register` holds; one run does not report two exit codes for
+    /// one step.
+    pub timed_out: bool,
 }
 
 impl Status {

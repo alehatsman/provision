@@ -1356,3 +1356,26 @@ fn a_sha256_that_is_not_a_digest_is_rejected_at_parse() {
     assert!(text.contains("is not a sha256 digest"), "{text}");
     assert_positioned(&text);
 }
+
+// Spec §9.3: one fault, one diagnostic. A step's `name` is rendered twice —
+// once by the field check, once for the step's own line — and a bad filter
+// in it used to arrive twice and be counted as `2 problems`, while
+// `validate`, which renders it once, reported the same file as `1 problem`.
+#[test]
+fn one_fault_in_a_steps_name_is_one_diagnostic() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("bad.yml");
+    std::fs::write(
+        &path,
+        "- name: \"B {{ nope | zzzfilter }}\"\n  shell: \"true\"\n  changed_when: \"false\"\n",
+    )
+    .unwrap();
+    let (code, out) = plan(&[&path.display().to_string()]);
+    assert_eq!(code, 3, "{out}");
+    assert_eq!(
+        out.matches("unknown filter").count(),
+        1,
+        "the same fault was reported more than once:\n{out}"
+    );
+    assert!(out.contains("1 problem"), "{out}");
+}

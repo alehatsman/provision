@@ -797,6 +797,17 @@ to guard.
 codes so a step's own internal `timeout` call is distinguishable from
 provision's own deadline-kill."
 
+**Amendment, 2026-10-15.** The decision said `register`, and the `--json`
+step event was left reporting `rc: null` for a killed step — so the same
+step in the same run said `rc: 124, timed_out: true` to a `failed_when`
+expression and `rc: null` to a CI runner reading the stream. `null` was
+defensible on its own ("the command never exited, so it has no code") and
+is still wrong here: the question D22 answered is whose code `124` is, and
+answering it differently for the two consumers means the stream and the
+register disagree about what happened. The step event now carries the same
+pair, `rc: 124` and `timed_out: true`. D19's runner gets the discriminator
+`register` already had; nothing about the register changed.
+
 ## D23 — one person's tool, published
 
 **Decided by the owner 2026-10-12**, when the question "who is this for"

@@ -239,6 +239,10 @@ impl Runner {
                         rc: None,
                         stderr: String::new(),
                         interrupted: false,
+                        // No command ran, so there is no `rc` to give. The
+                        // clock is still what ended the step, and that is
+                        // the part a runner reads.
+                        timed_out: true,
                     },
                 );
             };
@@ -326,6 +330,7 @@ impl Runner {
                 rc: None,
                 stderr: String::new(),
                 interrupted: false,
+                timed_out: false,
             })
         })
     }
@@ -344,11 +349,17 @@ impl Runner {
     ) -> R<Done> {
         let status = match out.how {
             How::Interrupted => Status::Failed(interrupted()),
+            // D22: the child's `rc` is `124`, the same value the step's
+            // `register` reports, and `timed_out` is what tells it apart
+            // from a command that chose to exit `124` itself. Reporting
+            // `null` here made the stream and the register disagree about
+            // one step in one run.
             How::TimedOut => Status::Failed(Failure {
                 msg: timed_out_msg(timeout, deadline_bound),
-                rc: None,
+                rc: Some(out.rc),
                 stderr: out.stderr.clone(),
                 interrupted: false,
+                timed_out: true,
             }),
             How::Exited if judge.failed(&out)? => Status::Failed(Failure {
                 // Spec §6.7: an assert's `msg` is what the operator reads, so
@@ -360,6 +371,7 @@ impl Runner {
                 rc: Some(out.rc),
                 stderr: out.stderr.clone(),
                 interrupted: false,
+                timed_out: false,
             }),
             How::Exited => match judge.changed(&out)? {
                 // `changed_when` said so; or, with no `changed_when`, a gate
@@ -402,6 +414,7 @@ impl Runner {
                 rc: None,
                 stderr: String::new(),
                 interrupted: false,
+                timed_out: true,
             }));
         };
         let ctx = actions::Ctx {
@@ -493,6 +506,7 @@ impl Runner {
                     rc: Some(1),
                     stderr: detail,
                     interrupted,
+                    timed_out: false,
                 }),
                 None,
             ),
@@ -515,6 +529,7 @@ impl Runner {
                     rc: Some(0),
                     stderr: String::new(),
                     interrupted: false,
+                    timed_out: false,
                 });
             } else if let Some(changed) = judge.changed(&out)? {
                 status = match (changed, act) {
@@ -582,6 +597,7 @@ impl Runner {
                         rc: Some(out.rc),
                         stderr: out.stderr,
                         interrupted: false,
+                        timed_out: false,
                     }));
                 }
                 // Same rule one line up, for the other way a gate fails to
@@ -596,9 +612,13 @@ impl Runner {
                             p.timed_out(),
                             cmd.lines().next().unwrap_or("")
                         ),
+                        // §9.3: a gate's own result is never the step's, so
+                        // there is no `rc` to report — but the clock killed
+                        // this step and the runner is owed that much.
                         rc: None,
                         stderr: out.stderr,
                         interrupted: false,
+                        timed_out: true,
                     }));
                 }
                 How::Interrupted => return Err(Stop::Fail(interrupted())),
@@ -639,12 +659,14 @@ fn no_root() -> Failure {
         rc: None,
         stderr: String::new(),
         interrupted: false,
+        timed_out: false,
     }
 }
 
 fn interrupted() -> Failure {
     Failure {
         msg: "interrupted".into(),
+        timed_out: false,
         rc: None,
         stderr: String::new(),
         interrupted: true,

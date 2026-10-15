@@ -667,6 +667,40 @@ fn timed_out_distinguishes_a_kill_from_the_steps_own_124() {
     );
 }
 
+// D22's amendment: the stream has to say the same thing the register does.
+// Reporting `rc: null` here made one step in one run carry two exit codes,
+// one for `failed_when` and another for the CI runner reading `--json`.
+#[test]
+fn the_json_stream_reports_a_killed_steps_rc_and_who_killed_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture("timeout_register.yml");
+    let out = run_in(
+        dir.path(),
+        &["apply", path.to_str().unwrap(), "--json", "--keep-going"],
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let rows: Vec<serde_json::Value> = stdout
+        .lines()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect();
+    let step = |name: &str| -> serde_json::Value {
+        rows.iter()
+            .find(|r| r["event"] == "step" && r["name"] == name)
+            .unwrap_or_else(|| panic!("no step event for `{name}`:\n{stdout}"))
+            .clone()
+    };
+
+    let killed = step("Provision kills this one");
+    assert_eq!(killed["rc"], 124, "{stdout}");
+    assert_eq!(killed["timed_out"], true, "{stdout}");
+
+    // The other half of D22: a command that exits 124 by itself reports the
+    // same `rc` and must not claim the clock killed it.
+    let own = step("This one exits 124 on its own");
+    assert_eq!(own["rc"], 124, "{stdout}");
+    assert!(own.get("timed_out").is_none(), "{stdout}");
+}
+
 // ── output forms ──────────────────────────────────────────────────────────
 
 #[test]
