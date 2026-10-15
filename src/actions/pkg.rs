@@ -325,7 +325,25 @@ impl Floor {
 fn numeric_parts(v: &str) -> Vec<u64> {
     let body = v.split_once(':').map_or(v, |(_, rest)| rest);
     body.split(['.', '-'])
-        .map_while(|c| c.parse::<u64>().ok())
+        // The LEADING DIGITS of each component, not the whole component.
+        // Requiring the whole of it was the bug: `map_while(parse)` stopped at
+        // the first component carrying any suffix, so brew's `1.5.7_1` rebuild
+        // marker read as `[1,5]` (`_` is not a split character), `3.6b` as
+        // `[3]`, and a cask's `12.8,282010` as `[12]`. Each was then judged
+        // BELOW the floor it already met -- 22 formulae and 2 casks on one
+        // ordinary machine -- and apply did not merely misreport it: the
+        // upgrade no-ops because the package is current, `verify_floor`
+        // re-reads the same string, and the step is red on every apply,
+        // forever.
+        //
+        // Taking the leading digits reads `1.5.7_1` as `[1,5,7]` and `3.6b` as
+        // `[3,6]`, which is what the suffix means. A component with no leading
+        // digit at all still ends the parse, so `latest` yields nothing and is
+        // reported unreadable rather than guessed (D28).
+        .map_while(|c| {
+            let digits: String = c.chars().take_while(char::is_ascii_digit).collect();
+            digits.parse::<u64>().ok()
+        })
         .collect()
 }
 
@@ -915,6 +933,39 @@ mod tests {
         // with one would clear every floor.
         assert_eq!(floor(">=8").satisfied_by("1:8.2.3"), Some(true));
         assert_eq!(floor(">=9").satisfied_by("1:8.2.3"), Some(false));
+    }
+
+    // The regression this rule was rewritten for, with the real version
+    // strings it was wrong on. Requiring a whole component to parse made each
+    // of these read as BELOW a floor it already met, and apply then went red
+    // on every run: the upgrade no-ops because the package is current, and
+    // the post-check re-reads the same string.
+    #[test]
+    fn a_suffix_does_not_drag_a_version_below_its_floor() {
+        // brew's `_N` rebuild marker. `_` is not a split character, so the
+        // whole-component rule stopped at `7_1` and reported [1, 5].
+        assert_eq!(floor(">=1.5.7").satisfied_by("1.5.7_1"), Some(true));
+        assert_eq!(floor(">=3.2.4").satisfied_by("3.2.4_10"), Some(true));
+        assert_eq!(floor(">=1.4.0").satisfied_by("1.4.0_40"), Some(true));
+        // A trailing letter.
+        assert_eq!(floor(">=3.6").satisfied_by("3.6b"), Some(true));
+        // A cask's `version,build` form.
+        assert_eq!(floor(">=12.8").satisfied_by("12.8,282010"), Some(true));
+        assert_eq!(floor(">=8.0.2").satisfied_by("8.0.2,6302"), Some(true));
+        // And the suffix does not let a genuinely older version through.
+        assert_eq!(floor(">=1.5.8").satisfied_by("1.5.7_1"), Some(false));
+        assert_eq!(floor(">=3.7").satisfied_by("3.6b"), Some(false));
+    }
+
+    #[test]
+    fn a_component_with_no_leading_digit_still_ends_the_parse() {
+        // The rule reads leading digits, not whole components -- but a
+        // component with no digit at all is still unreadable, so `latest`
+        // fails the step rather than being guessed at (D28).
+        assert_eq!(floor(">=24").satisfied_by("latest"), None);
+        assert_eq!(floor(">=24").satisfied_by("stable"), None);
+        // A readable prefix followed by an unreadable component just stops.
+        assert_eq!(floor(">=1.2").satisfied_by("1.2.x"), Some(true));
     }
 
     #[test]
