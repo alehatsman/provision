@@ -161,6 +161,35 @@ impl Sink for Text {
         }
     }
 
+    /// One line before the first step: how much is about to happen, and
+    /// whether any of it is root. Not a diff — see `Manifest`.
+    fn manifest(&mut self, plan: &Path, m: &crate::expand::Manifest) {
+        // This *is* the root file's header, with the counts on it, so claim
+        // the slot rather than printing a second line saying the same name.
+        self.current = Some(plan.to_path_buf());
+        let name = plan.strip_prefix(&self.base).unwrap_or(plan).display();
+        let mut parts = vec![format!(
+            "{} step{}",
+            m.steps,
+            if m.steps == 1 { "" } else { "s" }
+        )];
+        // One file is the ordinary case and saying so is noise; more than one
+        // means the run reaches past the file the operator named.
+        if m.files.len() > 1 {
+            parts.push(format!("{} files", m.files.len()));
+        }
+        if m.sudo > 0 {
+            parts.push(format!("{} sudo", m.sudo));
+        }
+        // Dimmed like the plain header it replaces: it is still the file's
+        // name, and the step lines under it are what a reader is scanning.
+        let dim = Style::new().dimmed();
+        self.write(format_args!(
+            "  {dim}{name} · {}{dim:#}\n",
+            parts.join(" · ")
+        ));
+    }
+
     fn summary(&mut self, plan: &Path, s: &Summary) {
         let name = plan.strip_prefix(&self.base).unwrap_or(plan).display();
         let mut parts = vec![format!(

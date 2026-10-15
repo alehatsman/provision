@@ -89,6 +89,16 @@ impl Sink for Json {
         Self::emit(&o);
     }
 
+    fn manifest(&mut self, plan: &Path, m: &crate::expand::Manifest) {
+        Self::emit(&json!({
+            "event": "manifest",
+            "plan": self.rel(plan),
+            "steps": m.steps,
+            "files": m.files.len(),
+            "sudo": m.sudo,
+        }));
+    }
+
     /// D25: a problem is something the program said, so it rides the same
     /// stream under the same discriminator. `col` is carried because a
     /// diagnostic has one and a step does not — the walk knows which key on

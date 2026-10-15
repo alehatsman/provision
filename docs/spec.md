@@ -1255,6 +1255,22 @@ present and both booleans. A runner reading only the summary has to be able
 to tell a job that finished from one that was stopped, and an absent key is
 not that answer.
 
+`apply` emits one `manifest` event before the first step, and prints the
+same thing as the root file's header line: how many steps, over how many
+files when more than one, and how many ask for root. It comes from the
+preflight walk (§7), which already visits every step, so it probes nothing
+and costs nothing.
+
+```json
+{"event":"manifest","plan":"main_pc.yml","steps":166,"files":9,"sudo":12}
+```
+
+It reports the **shape** of the run and never a diff. `plan`'s verdicts are
+best-effort (D11) and explicitly unprobed for a register-gated step (D14),
+so a claim about what a run *would change*, made before it starts, is one
+provision cannot keep — while how much is about to happen, and whether any
+of it is root, is one it can.
+
 A problem found while walking is its own event, carrying `file`, `line`,
 `col`, `message` and an optional `note` — the same words the terminal
 prints, with the column the text form also has:
