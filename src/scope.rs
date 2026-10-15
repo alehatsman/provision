@@ -111,6 +111,19 @@ impl Scope {
         m.extend(self.own.clone());
         m.extend(self.globals.cli.clone());
         m.insert("env".to_string(), self.globals.env.clone());
+        // Spec §5: `facts.<name>` is the fact itself, and nothing can shadow
+        // it. Inserted here, after every layer that can, for exactly the
+        // reason `env` is — a namespace that a `vars` step could overwrite
+        // would be no more trustworthy than the bare name it exists to
+        // replace.
+        //
+        // Bare `hostname` keeps §3.3's precedence, deliberately: that rule is
+        // what `--vars-file` relies on to validate a Linux plan from a Mac,
+        // which is the whole off-host fleet workflow. The problem was never
+        // that a fact *can* be shadowed; it is that a guard had no way to say
+        // "the real one". Now it does, and a plan that means the machine says
+        // `facts.hostname`.
+        m.insert("facts".to_string(), Value::from(self.globals.facts.clone()));
         if let Some(p) = &self.props {
             m.insert("props".to_string(), Value::from(p.clone()));
         }
@@ -133,6 +146,34 @@ mod tests {
             .map(|(k, v)| (k.to_string(), Value::from(*v)))
             .collect();
         Rc::new(Globals::new(&Facts::detect(), cli))
+    }
+
+    #[test]
+    fn the_facts_namespace_cannot_be_shadowed() {
+        // The point of the namespace. A `vars` step outranking a bare fact is
+        // §3.3 working as specified; a `vars` step changing what
+        // `facts.hostname` reports would make the guard worthless.
+        let real = Facts::detect();
+        let real_host = real
+            .iter()
+            .find(|(k, _)| *k == "hostname")
+            .map(|(_, v)| v.to_string())
+            .expect("hostname is always a fact");
+        let mut scope = Scope::root(globals(&[("hostname", "from_cli")]));
+        scope.set("hostname", Value::from("from_vars"));
+
+        let ctx = scope.ctx_map();
+        let facts = ctx.get("facts").expect("facts namespace is always present");
+        let got = facts
+            .get_attr("hostname")
+            .expect("facts carries every fact");
+        assert_eq!(got.to_string(), real_host);
+
+        // And the bare name still follows §3.3, unchanged.
+        assert_eq!(
+            ctx.get("hostname").map(ToString::to_string),
+            Some("from_cli".to_string())
+        );
     }
 
     #[test]

@@ -1,0 +1,18 @@
+# The hazard, as a fixture. This plan is written for a machine called `x1`
+# and a `vars` step above the guard claims to be it. Read through the bare
+# name the guard passes anywhere; read through `facts.` it refuses, which is
+# what it was written to do.
+- vars:
+    hostname: x1
+- name: the bare name is shadowed
+  assert: {expr: 'hostname == "x1"', msg: bare name saw the vars step}
+  tags: [always]
+- name: the fact itself is not
+  assert: {expr: 'facts.hostname != "x1"', msg: facts.hostname was shadowed}
+  tags: [always]
+# And `facts` itself cannot be taken over either.
+- vars:
+    facts: not-a-mapping
+- name: the namespace survives a vars step naming it
+  assert: {expr: 'facts.hostname is defined', msg: the facts namespace was replaced}
+  tags: [always]

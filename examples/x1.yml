@@ -3,8 +3,8 @@
 
 - name: Refuse to run on the wrong machine
   assert:
-    expr: hostname not in ["mainpc", "minipc", "mac"]
-    msg: "hostname {{ hostname }} belongs to another machine"
+    expr: facts.hostname not in ["mainpc", "minipc", "mac"]
+    msg: "hostname {{ facts.hostname }} belongs to another machine"
   tags: [always]
 
 - vars_file:
