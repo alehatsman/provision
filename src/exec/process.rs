@@ -181,7 +181,7 @@ fn run_raw(s: &Spawn<'_>) -> std::io::Result<Raw> {
     let err = drain(child.stderr.take(), s.stream, true);
 
     let how = match wait_for(&mut child, pid, limit) {
-        How::Exited => wait_for_pipes(&out, &err, pid, limit),
+        How::Exited => wait_for_pipes(&out, &err, pid, limit, &mut child),
         stopped => stopped,
     };
     let rc = match how {
@@ -223,7 +223,7 @@ const PIPE_GRACE: Duration = Duration::from_secs(2);
 /// The nap starts at a millisecond and doubles to the tick. Nearly every
 /// step's pipes are closed by the time its shell is reaped, and a flat 100ms
 /// here would be added to every one of them.
-fn wait_for_pipes(out: &Reader, err: &Reader, pid: u32, limit: Instant) -> How {
+fn wait_for_pipes(out: &Reader, err: &Reader, pid: u32, limit: Instant, child: &mut Child) -> How {
     let tick = Duration::from_millis(100);
     let mut nap = Duration::from_millis(1);
     loop {
@@ -231,12 +231,12 @@ fn wait_for_pipes(out: &Reader, err: &Reader, pid: u32, limit: Instant) -> How {
             return How::Exited;
         }
         if interrupted() {
-            kill_group(pid, None);
+            kill_group(pid, Some(child));
             return How::Interrupted;
         }
         let now = Instant::now();
         if now >= limit {
-            kill_group(pid, None);
+            kill_group(pid, Some(child));
             return How::TimedOut;
         }
         std::thread::sleep(nap.min(limit - now));
