@@ -750,6 +750,19 @@ fn json_carries_rc_and_output_for_every_step_that_ran_a_command() {
     assert_eq!(steps[3]["status"], "skipped");
 }
 
+// Spec §4, "a register for a step that never ran". The table there is a
+// promise about six field values, so it is pinned here field by field --
+// including the trap it exists to name: `rc == 0` is true for a step that was
+// never spawned, so the fan-in gate everybody writes passes a stage that did
+// not run. Filed as #33 after a review wrote exactly that gate.
+#[test]
+fn a_skipped_steps_register_holds_the_documented_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(dir.path(), "skipped_register.yml", &[]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("3 skipped"), "{out}");
+}
+
 // A skipped step's name is rendered like any other -- except a tag-excluded
 // one, which is filtered before anything of it is rendered (spec §8) so that
 // it cannot fail on a variable it was never meant to read. Rendering its name
