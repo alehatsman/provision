@@ -83,7 +83,18 @@ impl Diags {
         Diags(Vec::new())
     }
 
+    /// Spec §9.3: one fault, one diagnostic. A fault *is* its file, line,
+    /// column and message, so the same four arriving twice is the walk
+    /// passing over one line twice, not two problems — a step's `name` is
+    /// rendered once by the field check and again for the step's own line,
+    /// and an unknown filter in it used to be reported twice and counted as
+    /// `2 problems`. Dropping the duplicate here rather than at the report
+    /// keeps `len()` and the fatality checks reading the same number the
+    /// operator does.
     pub(crate) fn push(&mut self, d: Diag) {
+        if self.0.contains(&d) {
+            return;
+        }
         self.0.push(d);
     }
 
@@ -93,7 +104,7 @@ impl Diags {
         match r {
             Ok(v) => Some(v),
             Err(d) => {
-                self.0.push(d);
+                self.push(d);
                 None
             }
         }

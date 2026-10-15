@@ -65,15 +65,22 @@ impl Sink for Json {
         }
         // A failure's `rc` and `stderr` are written after the pair above, not
         // instead of them: they are the same values for a command that
-        // exited, and for one that never did — a timeout, an interrupt — the
-        // failure's `rc: null` is the honest answer and the command's is not
-        // there to give. A typed action's failure has only these.
+        // exited, and for one provision killed they are `124` and whatever
+        // it had written, which is what the step's `register` reports too
+        // (D22). `timed_out` is the discriminator on both sides; `rc` alone
+        // cannot tell provision's kill from a command that exited `124` by
+        // itself. A step the clock ended before any command ran has no `rc`
+        // to give and says so with `null`, still flagged `timed_out`. A
+        // typed action's failure has only these.
         if let super::event::Status::Failed(f) = &ev.status {
             m.insert("message".into(), json!(f.msg));
             m.insert("rc".into(), json!(f.rc));
             m.insert("stderr".into(), json!(f.stderr));
             if f.interrupted {
                 m.insert("interrupted".into(), json!(true));
+            }
+            if f.timed_out {
+                m.insert("timed_out".into(), json!(true));
             }
         }
         if let Some(n) = &ev.note {
