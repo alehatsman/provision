@@ -4,8 +4,9 @@
 //! Nothing below a file's root keys is parsed and nothing runs, so the
 //! listing is the one command that cannot be broken by a broken file.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 /// Spec §8: `3` is "usage or validation error".
 const EXIT_VALIDATION: i32 = 3;
@@ -84,20 +85,40 @@ fn a_closed_stdout_is_not_an_error() {
         .unwrap();
     }
 
-    // bash reads backslashes as escapes, so a Windows path has to be handed
-    // over with `/` — which Windows itself accepts. Without this the shell
-    // mangles the path, `list` is asked for a directory that is not there,
-    // and the test reports a pipe bug that is really a quoting one.
-    let for_bash = |p: &Path| p.display().to_string().replace('\\', "/");
-    let script = format!(
-        "set -o pipefail; '{}' list '{}' | head -3 >/dev/null",
-        for_bash(Path::new(env!("CARGO_BIN_EXE_provision"))),
-        for_bash(dir.path())
+    // No shell. `bash` on a Windows runner is `System32\\bash.exe`, the WSL
+    // launcher, which on a host with no distribution installed prints an
+    // advert and exits 1 — a failure that looks exactly like provision's and
+    // is not. Closing the pipe from here is also the more direct test: the
+    // reader going away is the condition §10 is about, and `head` and
+    // `pipefail` were only ever the way to arrange it.
+    let mut child = Command::new(env!("CARGO_BIN_EXE_provision"))
+        .args(["list", dir.path().to_str().expect("temp paths are UTF-8")])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("provision failed to start");
+
+    // Read a little, then drop the handle. Provision is still writing, so the
+    // next write finds no reader — EPIPE on unix, a broken pipe on Windows.
+    {
+        let mut some = [0u8; 64];
+        let stdout = child.stdout.as_mut().expect("stdout is piped");
+        #[expect(clippy::let_underscore_must_use, reason = "a short read is fine")]
+        let _ = stdout.read(&mut some);
+    }
+    // Non-vacuity: if provision had already finished, closing the pipe would
+    // prove nothing and the test would pass for the wrong reason. It is still
+    // running, because 400 descriptions do not fit in a 64 KiB pipe.
+    assert!(
+        child
+            .try_wait()
+            .expect("the child is ours to ask")
+            .is_none(),
+        "provision finished before its reader went away, so nothing was tested"
     );
-    let out = Command::new("bash")
-        .args(["-c", &script])
-        .output()
-        .expect("bash failed to start");
+    drop(child.stdout.take());
+
+    let out = child.wait_with_output().expect("provision was spawned");
     let stderr = String::from_utf8_lossy(&out.stderr);
 
     assert!(
@@ -107,8 +128,7 @@ fn a_closed_stdout_is_not_an_error() {
     assert_eq!(
         out.status.code(),
         Some(0),
-        "the reader asking for less is not an error:\n{stderr}{}",
-        String::from_utf8_lossy(&out.stdout)
+        "the reader asking for less is not an error:\n{stderr}"
     );
 }
 
