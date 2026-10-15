@@ -264,3 +264,104 @@ fn a_directory_lists_a_name_index_component_by_its_directory() {
         "a directory with no index.yml is not one: {out}"
     );
 }
+
+// D25: verbs that answer return a document. One call gives a writer of plan
+// files the whole vocabulary -- the ten actions *and* the step envelope,
+// which is the half nothing described before: `list <action>` covered the
+// actions, and the sixteen keys every step may carry were a bare name list
+// inside the parser.
+#[test]
+fn list_json_with_no_path_dumps_the_whole_vocabulary() {
+    let (code, out) = run(&["list", "--json"]);
+    assert_eq!(code, 0, "{out}");
+    let doc: serde_json::Value = serde_json::from_str(&out).expect("one document");
+
+    let actions = doc["actions"].as_array().expect("actions");
+    assert_eq!(actions.len(), 10, "spec §6 has ten actions");
+    let git = actions
+        .iter()
+        .find(|a| a["name"] == "git")
+        .expect("git is a builtin");
+    let fields: Vec<&str> = git["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(fields, ["repo", "dest", "ref", "depth"]);
+    assert_eq!(git["fields"][0]["need"], "required");
+
+    // The envelope, which is the point of the issue.
+    let mods = doc["modifiers"].as_array().expect("modifiers");
+    let names: Vec<&str> = mods.iter().map(|m| m["name"].as_str().unwrap()).collect();
+    for k in [
+        "when",
+        "register",
+        "creates",
+        "unless",
+        "changed_when",
+        "tags",
+    ] {
+        assert!(names.contains(&k), "{k} missing from {names:?}");
+    }
+    // `applies` is the word a reader needs most: four of these are legal on
+    // one kind of step only.
+    let props = mods.iter().find(|m| m["name"] == "props").unwrap();
+    assert_eq!(props["applies"], "`use` only");
+
+    assert_eq!(
+        doc["structural"].as_array().unwrap().len(),
+        4,
+        "vars, vars_file, import, use"
+    );
+    assert!(doc["version"].is_string());
+}
+
+// A single action as a document, the same table the text form prints.
+#[test]
+fn list_json_for_one_action_is_that_action() {
+    let (code, out) = run(&["list", "git", "--json"]);
+    assert_eq!(code, 0, "{out}");
+    let doc: serde_json::Value = serde_json::from_str(&out).expect("one document");
+    assert_eq!(doc["name"], "git");
+    assert!(
+        doc["summary"].as_str().unwrap().contains("checkout"),
+        "{doc}"
+    );
+}
+
+// `list` with neither a path nor `--json` has nothing to answer about.
+#[test]
+fn list_with_no_argument_at_all_is_a_usage_error() {
+    let (code, out) = run(&["list"]);
+    assert_eq!(code, EXIT_VALIDATION, "{out}");
+    assert!(out.contains("needs a path, or `--json`"), "{out}");
+}
+
+// The listing and the validator read one table, so a modifier cannot be
+// documented and unparsed. This asserts the other direction too: each name
+// the dump advertises is one the parser actually recognises, so the error
+// for it is never "unknown key".
+#[test]
+fn every_modifier_the_dump_names_is_one_the_parser_knows() {
+    let (_, out) = run(&["list", "--json"]);
+    let doc: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+
+    for m in doc["modifiers"].as_array().unwrap() {
+        let name = m["name"].as_str().unwrap();
+        let plan = dir.path().join(format!("{name}.yml"));
+        // A body that is wrong for most of them — the point is only that the
+        // key itself is recognised, not that the value type fits.
+        std::fs::write(
+            &plan,
+            format!("- name: a step\n  shell: \"true\"\n  changed_when: \"false\"\n  {name}: x\n"),
+        )
+        .unwrap();
+        let (_, out) = run(&["validate", &plan.display().to_string()]);
+        assert!(
+            !out.contains("unknown key"),
+            "`{name}` is in `list --json` but the parser does not know it: {out}"
+        );
+    }
+}
