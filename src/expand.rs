@@ -1079,7 +1079,7 @@ impl Expander {
         // A source path rendered from a placeholder names a file that apply
         // alone knows.
         if step.key == "template" && !derived {
-            self.check_template_sources(step, &ctx);
+            derived = self.check_template_sources(step, &ctx, scope);
         }
         if step.key == "file" && !derived {
             self.check_file_source(step, &ctx);
@@ -1488,19 +1488,27 @@ impl Expander {
     /// Render the `.j2` sources a `template` step names, so an undefined
     /// variable inside a template is an error at plan time, not at apply time.
     /// Directory mode (spec §6.4) renders every file under `src`.
-    fn check_template_sources(&mut self, step: &Step<'static>, ctx: &Value) {
+    /// Returns whether any source body reads a register (D14). The step's
+    /// *fields* are tested by the caller; a `.j2` file's *bytes* are only
+    /// readable here, and until this returned something the boundary between
+    /// the two was the boundary of D14's rule — `content: "{{ fp.stdout }}"`
+    /// was correctly `unprobed` while the identical expression in a `.j2`
+    /// body produced a `would change` with the placeholder's empty string
+    /// baked into the diff. A fabricated diff is worse than no verdict: it is
+    /// plan claiming to know a thing it invented.
+    fn check_template_sources(&mut self, step: &Step<'static>, ctx: &Value, scope: &Scope) -> bool {
         let Some(src_at) = step.body.get("src") else {
             self.diags.push(step.body.err("`template` requires `src`"));
-            return;
+            return false;
         };
         let Some(rel) = self.diags.absorb(self.render_str(src_at, ctx)) else {
-            return;
+            return false;
         };
         let path = load::resolve(src_at.file, &rel);
         if !path.exists() {
             self.diags
                 .push(load::missing(src_at, &path, "template src"));
-            return;
+            return false;
         }
         let files = if path.is_dir() {
             match collect_tree(&path) {
@@ -1508,16 +1516,24 @@ impl Expander {
                 Err(e) => {
                     self.diags
                         .push(src_at.err(format!("cannot walk {}: {e}", path.display())));
-                    return;
+                    return false;
                 }
             }
         } else {
             vec![path]
         };
+        let mut derived = false;
         for f in files {
             let Ok(text) = std::fs::read_to_string(&f) else {
                 continue; // a binary asset in the tree is copied, not rendered
             };
+            // Same rule as a step field: a body rendered from the placeholder
+            // is not the body apply will write, so the step has no verdict
+            // and a failure to render it is not a diagnostic either.
+            if self.template_reads_a_register(&text, scope) {
+                derived = true;
+                continue;
+            }
             if let Err(e) = self.engine.render(&text, ctx) {
                 self.diags.push(
                     src_at
@@ -1533,6 +1549,7 @@ impl Expander {
                 );
             }
         }
+        derived
     }
 
     /// D18: whether a `file` step's missing `src` is unresolved rather than

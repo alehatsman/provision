@@ -779,6 +779,38 @@ fn the_manifest_counts_what_will_run_and_says_so() {
     );
 }
 
+// D14, amended: the rule covers every template, and it used to stop at the
+// boundary between a step's fields and a file's bytes. A fabricated diff is
+// worse than no verdict -- it is plan claiming to know something it invented.
+#[test]
+fn a_j2_body_that_reads_a_register_is_unprobed_not_diffed() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture("j2_register/plan.yml");
+    let res = run_in(dir.path(), &["plan", path.to_str().unwrap()]);
+    let out =
+        String::from_utf8_lossy(&res.stdout).into_owned() + &String::from_utf8_lossy(&res.stderr);
+    // Exit 2: the static template genuinely would change.
+    assert_eq!(res.status.code(), Some(2), "{out}");
+
+    let line = |name: &str| {
+        out.lines()
+            .find(|l| l.contains(name))
+            .unwrap_or_else(|| panic!("no line for {name}:\n{out}"))
+    };
+    // The derived one claims nothing and prints no diff.
+    assert!(
+        line("reads the register").contains("would run (unprobed)"),
+        "{out}"
+    );
+    assert!(
+        !out.contains("fingerprint:"),
+        "a diff was fabricated:\n{out}"
+    );
+    // The static one is still judged normally -- the rule narrowed to the
+    // bodies that actually read a register, not to `template` as a whole.
+    assert!(line("reads nothing").contains("would change"), "{out}");
+}
+
 // Spec §4, "a register for a step that never ran". The table there is a
 // promise about six field values, so it is pinned here field by field --
 // including the trap it exists to name: `rc == 0` is true for a step that was

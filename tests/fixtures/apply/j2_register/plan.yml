@@ -1,0 +1,13 @@
+# D14's rule covers "every template". It used to stop at the boundary between
+# the fields of a step and the bytes of a file: `content: "{{ fp.stdout }}"`
+# was correctly unprobed, while the identical expression inside a `.j2` was
+# rendered from the placeholder and reported `would change` with the
+# placeholder's empty string baked into the diff.
+- name: compute a fingerprint
+  shell: echo abc123
+  changed_when: "false"
+  register: fp
+- name: a j2 body that reads the register
+  template: {src: ./t/derived.j2, dest: "{{ env.PROVISION_SCRATCH }}/derived.conf"}
+- name: a j2 body that reads nothing
+  template: {src: ./t/static.j2, dest: "{{ env.PROVISION_SCRATCH }}/static.conf"}
