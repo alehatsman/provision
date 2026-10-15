@@ -338,10 +338,15 @@ fn list_with_no_argument_at_all_is_a_usage_error() {
     assert!(out.contains("needs a path, or `--json`"), "{out}");
 }
 
-// The listing and the validator read one table, so a modifier cannot be
-// documented and unparsed. This asserts the other direction too: each name
-// the dump advertises is one the parser actually recognises, so the error
-// for it is never "unknown key".
+// The listing and the validator read one table (`modifier_keys` is
+// `MODIFIERS`), so this cannot fail by construction on the *names* — it is a
+// smoke test that the table is wired to the parser at all, not evidence that
+// the two agree. It does not assert "the other direction"; an earlier comment
+// here claimed it did, which is how the table's prose drifted for months
+// without a failing test.
+//
+// The claims that can be wrong are in `applies` and `note`, and those are
+// what `the_dumps_prose_about_a_modifier_is_true` below actually checks.
 #[test]
 fn every_modifier_the_dump_names_is_one_the_parser_knows() {
     let (_, out) = run(&["list", "--json"]);
@@ -364,4 +369,68 @@ fn every_modifier_the_dump_names_is_one_the_parser_knows() {
             "`{name}` is in `list --json` but the parser does not know it: {out}"
         );
     }
+}
+
+// D25 made `list --json` a contract an agent reads, and the contract drifted
+// within hours: the `sudo` row said "not templated; true or false as a
+// literal" on the day templating landed, and nothing failed. Prose nothing
+// can falsify is worse than no prose, because a consumer cannot tell which
+// fields are load-bearing.
+//
+// So this asserts the dump against the binary, for the row that drifted.
+#[test]
+fn the_dumps_prose_about_a_modifier_is_true() {
+    let (_, out) = run(&["list", "--json"]);
+    let doc: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let sudo = doc["modifiers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["name"] == "sudo")
+        .expect("sudo is a documented modifier");
+    let note = sudo["note"].as_str().unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let write = |name: &str, body: &str| {
+        let p = dir.path().join(name);
+        std::fs::write(&p, body).unwrap();
+        p.display().to_string()
+    };
+
+    // Claim 1: "templated".
+    assert!(
+        note.contains("templated"),
+        "the note no longer says: {note}"
+    );
+    let templated = write(
+        "t.yml",
+        "- vars: {root: false}\n- name: a\n  shell: \"true\"\n  changed_when: \"false\"\n  sudo: \"{{ root }}\"\n",
+    );
+    let (code, text) = run(&["validate", &templated]);
+    assert_eq!(code, 0, "the note claims templated, but: {text}");
+
+    // Claim 2: "a sole expression must yield a bool".
+    let wrongtype = write(
+        "w.yml",
+        "- vars: {root: \"yes\"}\n- name: a\n  shell: \"true\"\n  changed_when: \"false\"\n  sudo: \"{{ root }}\"\n",
+    );
+    let (code, text) = run(&["validate", &wrongtype]);
+    assert_eq!(
+        code, EXIT_VALIDATION,
+        "a string was accepted as sudo: {text}"
+    );
+
+    // Claim 3: "it cannot read a register".
+    assert!(note.contains("cannot read a register"), "{note}");
+    let reg = write(
+        "r.yml",
+        "- {name: a, shell: \"true\", changed_when: \"false\", register: r}\n\
+         - {name: b, shell: \"true\", changed_when: \"false\", sudo: \"{{ r.changed }}\"}\n",
+    );
+    let (code, text) = run(&["validate", &reg]);
+    assert_eq!(
+        code, EXIT_VALIDATION,
+        "a register-derived sudo was accepted: {text}"
+    );
+    assert!(text.contains("cannot read a register"), "{text}");
 }

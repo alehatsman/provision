@@ -1,0 +1,4 @@
+- name: a step only the other os runs
+  shell: "true"
+  changed_when: "false"
+  tags: [otheros]

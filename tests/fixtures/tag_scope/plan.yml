@@ -1,0 +1,7 @@
+- name: gated off on every machine that runs these tests
+  import: ./inner.yml
+  when: os == "plan9"
+- name: visible here
+  shell: "true"
+  changed_when: "false"
+  tags: [here]
