@@ -78,9 +78,34 @@ def main():
 
     steps = [e for e in events if e["event"] == "step"]
     summaries = [e for e in events if e["event"] == "summary"]
-    other = {e["event"] for e in events} - {"step", "summary"}
+    manifests = [e for e in events if e["event"] == "manifest"]
+    # Spec §9.3's discriminator set. `diagnostic` is here because a run that
+    # is refused emits diagnostics and no summary at all -- this script is
+    # only ever pointed at a run that started, so it does not expect one, but
+    # a stray diagnostic must not read as an unknown kind.
+    other = {e["event"] for e in events} - {"step", "summary", "manifest", "diagnostic"}
     if other:
         fail(f"unknown event kinds: {sorted(other)}")
+
+    # §9.3: `apply` emits exactly one manifest, before the first step, and it
+    # is the first line of the stream. A runner reads it to know the shape of
+    # the job before any of it has happened, so arriving late is the same as
+    # not arriving. Checked here because this script IS the runner contract
+    # (D19) and the event shipped without it -- the gate went red on the next
+    # push and stayed red, which is the gate doing its job.
+    if manifests:
+        if len(manifests) != 1:
+            fail(f"expected exactly one manifest event, got {len(manifests)}")
+        if events[0]["event"] != "manifest":
+            fail("the manifest is not the first event — it describes the run before it starts")
+        m = manifests[0]
+        for key in ("plan", "steps", "files", "sudo"):
+            if key not in m:
+                fail(f"manifest is missing `{key}`")
+        # The manifest counts what the run will attempt (§9.3): `when` and the
+        # tag filter are applied, so it is at most the summary's `total`.
+        if not isinstance(m["steps"], int) or m["steps"] < 0:
+            fail(f"manifest `steps` is not a count: {m['steps']!r}")
 
     # A runner reads the summary to know the job ended. Exactly one, and last.
     if len(summaries) != 1:
@@ -88,6 +113,18 @@ def main():
     if events[-1]["event"] != "summary":
         fail("the summary is not the last event — a runner reads it to stop")
     summary = summaries[0]
+
+    # Only for a run that finished. A deadline or a Ctrl-C truncates the walk,
+    # so the summary counts the steps it *reached* while the manifest counted
+    # the steps it meant to attempt -- and then `steps` is legitimately
+    # greater than `total`. Asserting this unconditionally is wrong, and
+    # writing this check is how that was found.
+    ended_early = summary.get("interrupted") or summary.get("deadline_exceeded")
+    if manifests and not ended_early and manifests[0]["steps"] > summary.get("total", 0):
+        fail(
+            f"manifest claims {manifests[0]['steps']} steps to run but the summary "
+            f"counted {summary.get('total')} in total"
+        )
 
     if len(steps) < args.expect_steps:
         fail(f"expected at least {args.expect_steps} step events, got {len(steps)}")
