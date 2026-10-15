@@ -13,6 +13,11 @@
 #
 # The cost, stated: CI stops being an early warning for new lints between
 # bumps. That warning is worth having, and it is worth having on purpose.
+#
+# The two 1.99 sites were fixed under the pin rather than left to the next
+# bump (#29, option 3): a pin that is also a backlog of known failures turns
+# every bump into an unknown amount of work, which is the thing it was put
+# here to stop.
 [toolchain]
 channel = "1.98.1"
 components = ["clippy", "rustfmt"]
