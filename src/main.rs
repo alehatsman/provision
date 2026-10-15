@@ -1157,7 +1157,8 @@ fn check_exists(plan: &Path) -> Result<PathBuf, Diag> {
 }
 
 fn rel(p: &Path, base: &Path) -> String {
-    p.strip_prefix(base).unwrap_or(p).display().to_string()
+    // D29: the separator a reader sees is `/` on every platform.
+    error::show(p.strip_prefix(base).unwrap_or(p))
 }
 
 fn plural(n: usize) -> &'static str {

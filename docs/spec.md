@@ -1590,6 +1590,13 @@ printed the same way. Suitable for CI logs.
 
 ### 9.3 `--json`
 
+Every path provision prints — here, in a diagnostic's `file:line:col`, and
+in a step's header line — is written with `/` on every platform, Windows
+included (D29). Paths provision *resolves* are untouched. A contract that
+renders differently depending on which machine produced it is two
+contracts, and the one thing a reader does with the string is jump to the
+line.
+
 One JSON object per line on stdout, human output goes to stderr. `status` is
 one of `ok`, `changed`, `unknown`, `skipped`, `failed`, `would_change`,
 `would_run`, `would_run_unprobed`. `diff` is present only when there is one.

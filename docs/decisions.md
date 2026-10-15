@@ -1232,3 +1232,44 @@ the source that satisfies it, and a plan still registers NodeSource itself.
 per-manager syntax differences become unavoidable and this design stops
 paying. Or a manager whose version strings the numeric rule cannot read, at
 which point the rule needs naming per manager rather than globally.
+
+## D29 — a path provision *prints* uses `/` on every platform
+
+**Decision.** Every path provision renders for a reader — a diagnostic's
+`file:line:col`, a `--json` `file` field, a step's header line — is written
+with `/`, on Windows as well. Paths provision *resolves* are untouched: the
+filesystem still gets whatever the OS calls the file, and nothing about path
+handling changes.
+
+**Why.** `file:line:col` is the Phase 0 gate and the reason saphyr was chosen
+over serde_yaml (D13); D19 made the stream a runner's contract and D25 added
+the agent as a third consumer. A contract that renders differently depending
+on which machine produced it is two contracts. The concrete cost of that was
+already visible: four `tests/cli.rs` snapshots that hold the text a user
+reads could not be committed in one form, and the only ways out were
+per-platform snapshots — the same assertion maintained twice, drifting —
+or a platform-aware filter, which is a filter over the exact bytes the
+contract is about.
+
+The reader loses little. A Windows user sees `tests/fixtures/x.yml` where
+Explorer would say `tests\fixtures\x.yml`; every editor, shell and language
+on Windows accepts `/`, and the one thing a reader does with this string is
+jump to the line.
+
+**What this does not overturn.** D19's no-list and the shape of the stream.
+This is a rule about rendering one field, not a new field, and `--json`
+consumers that split on `/` were already doing so for every Unix run.
+
+**The cost, stated plainly.** Provision prints a path the OS would spell
+differently, which is a small lie told consistently, in exchange for one
+contract instead of two. The alternative considered and rejected was
+leaving the tests off Windows (#26's `#![cfg(unix)]`, one suite over), which
+closes the issue by not asking the question and leaves the Windows job's
+value at "it compiles".
+
+**Overturned by.** A reader who has to paste a diagnostic's path into
+something that rejects `/` on Windows. None is known; `cmd.exe` arguments
+are the nearest candidate and accept it for file paths.
+
+**Triggered 2026-10-15**, issue #31, found by D24's Windows gate on its
+first run.

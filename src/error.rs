@@ -3,6 +3,21 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+/// D29: a path provision *prints* is written with `/` on every platform, so
+/// the one line a human reads and an agent parses is the same text wherever
+/// it was produced. Paths provision *resolves* are untouched. Gated on
+/// Windows rather than replacing unconditionally: a backslash is a legal
+/// character in a Unix filename, and rewriting it there would rename the
+/// file in the message.
+pub(crate) fn show(p: &Path) -> String {
+    let s = p.display().to_string();
+    if cfg!(windows) {
+        s.replace('\\', "/")
+    } else {
+        s
+    }
+}
+
 /// A single problem, anchored at a position in a plan file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Diag {
@@ -49,7 +64,7 @@ impl Diag {
     /// Render the path relative to `base` when it is underneath it, so output
     /// reads `components/zsh/index.yml:12:3`, not an absolute path.
     pub(crate) fn display_from(&self, base: &Path) -> String {
-        let path = self.file.strip_prefix(base).unwrap_or(&self.file).display();
+        let path = show(self.file.strip_prefix(base).unwrap_or(&self.file));
         let mut out = if self.line == 0 {
             format!("{path}: {}", self.msg)
         } else {
@@ -144,5 +159,29 @@ impl Diags {
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = &Diag> {
         self.0.iter()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::show;
+    use std::path::Path;
+
+    // D29: the rewrite is gated on Windows because a backslash is a legal
+    // character in a Unix filename. Rewriting it there would print a path to
+    // a file that does not exist, which is worse than the separator it fixes.
+    #[cfg(unix)]
+    #[test]
+    fn a_backslash_in_a_unix_filename_survives() {
+        assert_eq!(show(Path::new(r"dir/odd\name.yml")), r"dir/odd\name.yml");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_path_is_printed_with_forward_slashes() {
+        assert_eq!(
+            show(Path::new(r"tests\fixtures\x.yml")),
+            "tests/fixtures/x.yml"
+        );
     }
 }
