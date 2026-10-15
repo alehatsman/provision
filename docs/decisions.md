@@ -1127,9 +1127,15 @@ feature that could not work on pacman is not one this fleet can have.
 
 **What this costs, stated plainly.**
 
-- **The comparison is coarse, by choice.** Leading numeric components only:
-  a leading `epoch:` dropped, split on `.` and `-`, compared left to right
-  until a component is not a whole number. It is not Debian ordering and not
+- **The comparison is coarse, by choice.** A leading `epoch:` dropped, split
+  on `.` and `-`, each piece contributing its leading digits, compared left
+  to right until a piece has no digit at all. Amended the day it shipped: it
+  first required the *whole* piece to be a number, which read brew's
+  `1.5.7_1` as `[1,5]` and reported it below `>=1.5.7` — wrong on 22 formulae
+  and 2 casks on one ordinary machine, and red on every apply forever, since
+  the upgrade no-ops and the post-check re-reads the same string. The
+  coarseness that remains is the price: a pre-release written `2.0~rc1` reads
+  as `2.0` and clears `>=2.0`, where Debian ordering puts it before. It is not Debian ordering and not
   rpm ordering. Those two disagree with each other, and implementing either
   badly would be worse than naming a simple rule and holding to it. The rule
   is in spec §6.5 and pinned by unit tests including the apt-epoch case,

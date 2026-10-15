@@ -791,13 +791,25 @@ pkg:
   wanted, which is the honest answer: the plan asked for something this
   machine's sources cannot provide, and that is a fact about the plan.
 
-- **How versions are compared, exactly.** Leading numeric components only: a
-  leading `epoch:` is dropped (apt writes `1:8.2.3`), the rest is split on
-  `.` and `-`, and components are compared numerically left to right until
-  one is not a whole number, at which point comparison stops and what has
-  matched so far decides. `24.1.0` satisfies `>=24`; `18.19.1` does not;
-  `24.0.0-1nodesource1` satisfies `>=24` because comparison has already
-  decided by then. This is **not** Debian or rpm version ordering, and it
+- **How versions are compared, exactly.** A leading `epoch:` is dropped (apt
+  writes `1:8.2.3`), the rest is split on `.` and `-`, and each piece
+  contributes **its leading digits** — so `7_1` is 7 and `6b` is 6. Those
+  numbers are compared left to right. A piece with no leading digit at all
+  ends the comparison, and what has matched so far decides.
+
+  Reading the leading digits, rather than requiring the whole piece to be a
+  number, is what makes real version strings work: brew's rebuild marker
+  (`1.5.7_1`), a trailing letter (`3.6b`) and a cask's build suffix
+  (`12.8,282010`) all clear the floors they plainly meet. Requiring the whole
+  piece reported each of them as *below* its floor, and that failure does not
+  self-correct — the upgrade no-ops because the package is already current,
+  the post-check re-reads the same string, and the step is red on every apply
+  forever.
+
+  `24.1.0` satisfies `>=24`; `18.19.1` does not; `24.0.0-1nodesource1`
+  satisfies `>=24`. `24` does **not** satisfy `>=24.1` — there the floor
+  named a component whose *value* the installed version does not reach, which
+  is different from one it merely did not spell. This is **not** Debian or rpm version ordering, and it
   does not try to be: a floor is a coarse question and the full orderings
   disagree with each other. Where it cannot decide — a version with no
   leading number at all — the step **fails** rather than guessing, naming
