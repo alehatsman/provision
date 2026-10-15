@@ -301,9 +301,10 @@ shell:                         # long form
 - Idempotency: **declared**, via `unless`, `creates`, or `changed_when`. A
   bare `shell` step with none of these declares nothing about state, and its
   **exit code is its whole contract**: `ok` on exit 0, `failed` otherwise.
-  `validate --strict` still rejects it, and is on by default for a plan (§8,
-  D3, D21) — a convergence plan usually does have state to declare, and
-  forgetting to declare it is the mistake that check exists to catch.
+  `validate --strict` still rejects it, and is on by default for a plan
+  under `validate`, `plan` and `apply` alike (§8, D3, D21, D26) — a
+  convergence plan usually does have state to declare, and forgetting to
+  declare it is the mistake that check exists to catch.
 - The verdict of a gated step is the gate's own meaning: `unless` exited
   non-zero, or `creates` did not exist, so the work was needed — a successful
   run is `changed`. With no gate there is no claim about state to report, and
@@ -870,10 +871,15 @@ defaults:
 - Environment is passed with `sudo --preserve-env=<the step's env keys>`.
 - No `become_user`. Root or the current user. That is the whole matrix.
 - The preflight can run "before the first step" because `apply` walks the
-  plan twice: once exactly as `validate` does — rendering every field,
-  resolving every file, touching nothing — and then again for real. The first
-  walk is what finds the sudo steps, and it is why a plan with a typo in its
-  last step fails before its first step runs.
+  plan twice: once as `validate` does — rendering every field, resolving
+  every file, running the idempotency-gate check when the root is a plan
+  (§8, D26), touching nothing — and then again for real. The first walk is
+  what finds the sudo steps, and it is why a plan with a typo in its last
+  step fails before its first step runs.
+- The gate check belongs to that first walk and not to the second. A problem
+  found while executing only ends the walk at the *next* step, so a gate
+  error raised during the real walk would arrive after the ungated command
+  had already run (D26).
 - That first walk cannot know a `when` that reads a `register`, so it
   over-approximates: a sudo step the real walk will skip still arms the
   preflight. Asking for a password that goes unused beats failing halfway in.
@@ -904,8 +910,11 @@ gates, so it has a wall clock worth bounding too. There is no
   `pkg` that names no package, a `file` with neither `content` nor `src`, a
   `mode` that is not a quoted octal string. No commands run. `--strict` also
   rejects `shell`/`cmd` steps with no idempotency gate, and is **on by
-  default when the root file is a plan** (a list root, D17's own test) —
-  `--strict` on the command line only ever turns it on, never off.
+  default when the root file is a plan** (a list root, D17's own test),
+  **under every verb that walks it — `validate`, `plan` and `apply` alike**
+  (D26). `--strict` on the command line only ever turns it on, never off,
+  and exists on `validate` alone because that is the only place it can turn
+  anything on that is not already on.
 
   **`--strict` is where D3 now lives.** A bare `shell` step runs and reports
   `ok` (§6.1), so nothing stops a convergence plan from carrying one that
@@ -925,9 +934,14 @@ gates, so it has a wall clock worth bounding too. There is no
   check moves to the walk that executes (§6.3, D18). Every other path — and a
   `src` with no command before it — is checked here.
 
-  `validate` is the subset of `plan` that runs nothing, not a weaker check.
-  Anything `plan` would reject before touching the machine, `validate`
-  rejects too.
+  `validate` is the subset of `plan` that runs nothing — not a weaker check,
+  and not a stricter one. One file, one set of arguments, one verdict: the
+  gate check is on by default for a plan root under `plan` and `apply` too,
+  and under `apply` it is the preflight walk (§7) that runs it, so nothing
+  has run when the run is refused. `plan` and `apply` take `--tags` /
+  `--skip-tags` and `validate` does not, so a filtered run answers for the
+  steps it would run; the whole-file question is `validate`'s, which takes
+  no filter.
 
   It is therefore evaluated against **this host's facts and PATH**, and that
   is kept as narrow as it can be. A rule about a *named* backend holds on
@@ -1070,7 +1084,12 @@ gates, so it has a wall clock worth bounding too. There is no
   interrupt. Steps a runner generates from plain command lines carry **no
   modifier at all** — a bare `shell` step's exit code is its whole contract
   and it reads `ok` on exit 0 (§6.1), so a generated job file is one line
-  per command.
+  per command **under a task root**: a `description:` and a `steps:` list.
+  The root shape is the switch (D17, D26). A list root is a convergence
+  plan, and the idempotency gate is on for it under every verb — including
+  the `apply` the runner calls — so a generated job writes the task shape,
+  which is what this repo's own `tasks/ci.yml` and `tasks/ci-fast.yml`
+  already do.
 
   The rest of that contract is three things and is fixed by D19. **Cancel**
   by sending SIGTERM to the process: the current step's process group dies,

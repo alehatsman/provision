@@ -337,8 +337,10 @@ Since 2026-09-12 an ungated `shell` step reports `ok` on exit 0 rather than
 makes `shell: cargo test` a complete step in a task or CI file. `--strict` is
 the guard that keeps a *convergence* plan from quietly carrying one, and — as
 of the same day — is on by default for a plan file, so an operator does not
-have to remember the flag on the file that most needs it (D21); a task or
-component file keeps the old default, off. `unknown` is plan-only and comes
+have to remember the flag on the file that most needs it (D21). It runs under
+`plan` and `apply` as well as `validate`, so the guard fires on the one verb
+that touches the machine (D26); a task or component file keeps the old
+default, off. `unknown` is plan-only and comes
 from `pkg latest`, a `git` branch ref, and `defaults` off macOS.
 
 `plan` exits 0 when there is nothing to do, 2 when there is, and 1 when a step
