@@ -142,7 +142,7 @@ Call site:
   an imported file shares the caller's scope and is not a component.
   Decided by review, confirmed by the owner 2026-09-08.
 - A prop's `default` is taken **as written**, not rendered: `default: "{{ home }}"`
-  is the literal seven characters, not a path. Defaults are data in the
+  is those ten literal characters, not a path. Defaults are data in the
   component file, and the value a call site passes is the one that gets
   rendered. A default that has to be computed is a `vars` step instead.
 - `description` is optional, a plain string, and only read by
@@ -151,6 +151,34 @@ Call site:
   as the root scope with props supplied by `--prop`, and `plan` and
   `validate` take it the same way (§8). A task step whose exit code is its
   whole contract is written bare and needs no modifier to read `ok` (§6.1).
+
+- **A `use` path must exist before the run starts, so a checkout and the
+  `use` of its contents are two roots.** `use` is resolved while the walk is
+  built, before any step executes — that is what makes `validate` a real
+  subset of `plan` and what lets a component's prop schema be checked ahead
+  of time. There is no point at which step 1's clone has happened and step
+  2's `use` has not yet been resolved. So this cannot work:
+
+  ```yaml
+  steps:
+    - use: ./tools.yml     # clones a shared repo into ~/.cache/…
+    - use: ./ci.yml        # `use`s a file from that checkout
+  ```
+
+  On a warm machine it validates and runs; on a cold one it is exit 3 with
+  nothing run, which is the worst way for a composition rule to fail. Run the
+  checkout and the thing that uses it as two invocations — which is what
+  `tasks/tools.yml` and `tasks/ci.yml` already are, and the order the README
+  gives.
+
+  This is D18's shape one rule further out, and it deliberately gets no
+  carve-out. D18 defers one *file's existence* to the executing walk;
+  deferring a `use` would defer the **shape of the plan itself**, so
+  `validate` could no longer claim it checked the whole walk — which D17 and
+  the three-depths-of-commitment model rest on. The narrower form — treat a
+  `use` under a directory an earlier `git`/`download` step *declared* as its
+  `dest` as unresolved — is D18's own overturn clause and stays available if
+  the two-roots rule ever stops paying.
 
 ### 3.3 Variables and precedence
 
@@ -169,8 +197,8 @@ step are templates evaluated against the scope at that point, so
 `rq_dir: "{{ home }}/.cache/x"` is a path. Values loaded by `vars_file` are
 data taken as written: those files hold shell snippets and config text where
 `{{` must survive, and there is no second render pass when a variable is
-later substituted into a field, so a `{{ home }}` inside one stays the
-literal seven characters. A file-loaded value that has to be computed is a
+later substituted into a field, so a `{{ home }}` inside one stays those
+ten literal characters. A file-loaded value that has to be computed is a
 `vars` step beside the `vars_file`, or uses `~`, which every path field
 expands (§3). Written into the spec 2026-09-08 after a consumer copied
 mooncake's rendered-vars shape and created a directory named `{{ home }}`;
@@ -345,6 +373,46 @@ phone gates on `is_termux` and writes its own steps, and whether `pkg` and
 Every action defines: fields, what "changed" means, what `plan` reports,
 and its idempotency guarantee. `changed` is a verdict, not a guess: an
 action that cannot tell reports `unknown`, shown distinctly in output.
+
+**Which actions can un-declare a thing, and which cannot.** A plan asserts
+what should exist. Saying what should *not* is only partly expressible, and
+the boundary is not obvious from the actions that do have it:
+
+| Action | Removal |
+|---|---|
+| `file` | `state: absent` |
+| `pkg` | `state: absent` |
+| `service` | `state: stopped`, `enabled: false` |
+| `defaults` | **none** — a preference set on day 1 cannot be un-declared |
+| `git`, `download` | **none** — remove the checkout or the file with `file: {state: absent}` |
+
+`break-glass.md` §3c names the first two as the way to write an undo, which
+reads as though the pattern generalises. It does not. For `defaults` the
+remaining forms are an ungated `defaults write` in a shell step — which
+§6.10 exists to replace — or a double-negative `unless` costing a `defaults
+read` on every run. This is a known gap, not an oversight.
+
+**Two steps declaring opposite states for one path is not detected.**
+
+```yaml
+- file: { path: ./tmux.conf, state: file, content: "..." }
+- file: { path: ./tmux.conf, state: absent }
+```
+
+`validate` says `ok`. `plan` reports `would change` then `ok`, because the
+second step judges the disk as it is *now* and not as the first step would
+leave it. `apply` reports `2 steps · 2 changed`, exit 0 — **and does so on
+every run, forever, while the file flaps**. Nothing reports a problem,
+because each step is individually correct and provision accumulates nothing
+across steps.
+
+Removing a thing means editing two places, so this is the most likely day-2
+authoring mistake. It is written down rather than checked because the check
+would need the first cross-step accumulator in the codebase and a rule that
+does not yet exist: `absent` then `file` is a legitimate sequence, so the
+question is contradiction, not repetition, and that needs deciding before it
+needs code. Until then: when you delete a declaration, delete it — do not
+add its opposite.
 
 ### 6.1 `shell`
 
