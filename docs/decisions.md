@@ -942,6 +942,23 @@ the failure it guards against is one a reader of the plan can see. What
 changed is that the pattern is now written down as a pattern rather than left
 to be inferred from an example.
 
+**Amended 2026-10-15: the convention needed a `facts.` to lean on.** As
+written above, the guard did not hold. `assert: {expr: hostname == "x1"}`
+reads the bare name, which §3.3 lets a `vars` step outrank — so
+`vars: {hostname: x1}` anywhere above it satisfied the guard on every
+machine, and `validate --strict` reported clean. A decision whose stated
+answer to blast radius is a convention cannot have that convention be
+silently defeatable from inside the file it is meant to protect.
+
+The fix is a namespace, not a prohibition. Refusing to let a plan shadow a
+fact would have broken `--vars-file`, which is how a Linux plan is validated
+from a Mac and is the whole off-host fleet workflow — the precedence rule is
+right, and the gap was that a guard had no way to say "the real one". It does
+now: `facts.hostname` is the fact and nothing shadows it, the same way `env`
+is already unshadowable. `examples/x1.yml` and the README pattern both read
+it through `facts.` as of this amendment. The convention stands; it now has
+something to stand on.
+
 **Overturned by.** Wanting the tool to *be* an agent runtime, which is a
 different project and should be named as one.
 

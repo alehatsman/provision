@@ -358,13 +358,19 @@ A plan is written for one machine and can say so. Make the first step an
 ```yaml
 - name: Refuse to run on the wrong machine
   assert:
-    expr: hostname not in ["mainpc", "minipc", "mac"]
-    msg: "hostname {{ hostname }} belongs to another machine"
+    expr: facts.hostname not in ["mainpc", "minipc", "mac"]
+    msg: "hostname {{ facts.hostname }} belongs to another machine"
   tags: [always]
 ```
 
 `expr:` is evaluated, not run, so the guard costs no process and holds under
 `plan` as well as `apply`.
+
+**`facts.hostname`, not `hostname`.** The bare name follows §3.3's
+precedence, so `vars: {hostname: mainpc}` anywhere above this step satisfies
+the guard on every machine — which is the one thing it exists not to do.
+`facts.*` is the fact itself and nothing shadows it. The bare name stays
+overridable on purpose: that is how a Linux plan gets validated from a Mac.
 
 `examples/x1.yml` opens with exactly that, so on one of the other machines it
 refuses before touching anything:

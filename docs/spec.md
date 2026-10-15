@@ -162,7 +162,9 @@ Lowest to highest:
 4. Inside a component, `props.*` (separate namespace, no collision), and
    `component_dir` (§3.2).
 
-`env.*` exposes the process environment read-only.
+`env.*` exposes the process environment read-only. `facts.*` does the same
+for the facts of §5: both are inserted after every layer that could shadow
+them, so a `vars` step naming `env` or `facts` is simply ignored.
 
 **A `vars` step is rendered; a `vars_file` is not.** Values in a `vars:`
 step are templates evaluated against the scope at that point, so
@@ -313,6 +315,21 @@ carries the distinction, and this is what it is for.
 ## 5. Facts
 
 Computed once at startup, lazily where expensive, read-only.
+
+Every fact is reachable two ways, and the difference matters. The **bare
+name** — `hostname` — follows §3.3's precedence, so a `vars` step, a
+`--var` or a `--vars-file` outranks it. That is deliberate and load-bearing:
+shadowing a fact is how a Linux plan is validated from a Mac, which is the
+whole off-host fleet workflow. The **namespace** — `facts.hostname` — is the
+fact itself and nothing can shadow it, the same way `env` cannot be shadowed.
+
+**A guard that means the machine says `facts.`.** `assert: {expr: hostname
+== "x1"}` is satisfied by `vars: {hostname: x1}` written anywhere above it,
+so a plan meant for one machine passes on every machine. The bug is not that
+the precedence rule is wrong; it is that until the namespace existed there
+was no way to write "the real one". A guard about the host — hostname, os,
+distro, is_wsl — reads it through `facts.`; everything else keeps using the
+bare name, where being overridable is the point.
 
 | Fact | Values |
 |---|---|

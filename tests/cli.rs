@@ -981,6 +981,32 @@ fn help_and_version_are_not_usage_errors() {
     }
 }
 
+// ── the `facts.` namespace (#36, spec §5) ────────────────────────────────
+
+#[test]
+fn a_vars_step_cannot_shadow_the_facts_namespace() {
+    // D25's blast-radius answer is a convention: the plan declares its own
+    // machine in its first step. That convention did not hold, because the
+    // guard read the bare name and §3.3 lets a `vars` step outrank it -- so
+    // `vars: {hostname: x1}` satisfied the guard on every machine. The
+    // precedence rule is right and stays (it is how a Linux plan is
+    // validated from a Mac); what was missing was a way to say "the real
+    // one".
+    //
+    // A *probed* plan: the `plan()` helper passes `--plan-no-probe`, which
+    // would skip every assert and make this test pass without evaluating a
+    // single one of them.
+    let path = fixtures().join("shadowed_guard.yml");
+    let out = run(&["plan", path.to_str().expect("fixture paths are UTF-8")]);
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "{text}");
+    // Proof all three asserts actually ran, rather than being skipped into
+    // silence: three `ok` step lines, and none reported `skipped`.
+    assert_eq!(text.matches('\u{2713}').count(), 3, "{text}");
+    assert!(!text.contains("skipped"), "{text}");
+}
+
 // ── `pkg` version floor (D28, spec §6.5) ─────────────────────────────────
 
 #[test]
