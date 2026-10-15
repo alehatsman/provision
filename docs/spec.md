@@ -179,7 +179,25 @@ the rule itself dates from phase 0.
 ### 3.4 Templating
 
 Jinja2 via minijinja. Applies to every string value in a step except the
-body of `shell` **when** `raw: true` is set on that step. Templates in
+body of `shell` **when** `raw: true` is set on that step, and except
+`raw:` and `optional:` themselves — `raw` decides whether templating
+happens at all, so it cannot be its own subject, and both are read before
+there is anything to render against.
+
+The typed modifiers are included: `sudo`, `timeout` and `retry`'s
+`attempts` and `delay` take a template, and the sole-expression rule below
+gives `sudo: "{{ props.root }}"` the bool the prop holds rather than the
+string `"true"` — a step cannot be half root. They used to be read straight
+from the YAML, which rejected a template with an error blaming the value
+for not being a bool or a duration, and made every root-needing step in a
+cross-platform component fork per OS family even when a typed bool prop
+already held the answer.
+
+One consequence, stated because it is the cost: a modifier holding a
+template cannot have its type checked when the file is parsed, because the
+value does not exist until there is a scope. Such a node is checked when it
+is rendered instead, at the step's own position, under every verb. A
+literal is still checked at parse time, which is almost every one. Templates in
 `.j2` files rendered by `template` use the same engine and scope.
 
 - Undefined variable: error at plan time, with file:line and the variable name.
@@ -242,9 +260,9 @@ a string that happens to parse.
 | `when` | expr | true | Skip the step when false. Evaluated before `unless`/`creates`. |
 | `unless` | string | — | A shell command, run through the interpreter `shell` defaults to (bash on unix, powershell on Windows), and with the step's own `sudo`, `env` and `cwd` — a root step's gate has to see root's view. Exit 0 means "already done", step skipped. Non-zero means run, **except** a gate that could not run at all: a spawn failure, `126`/`127` from the interpreter, or the gate hitting the step's timeout. Those fail the step (§10). A gate for a tool the plan has not installed yet must therefore ask whether the tool exists, not ask the tool: `command -v <tool> >/dev/null 2>&1`. `<tool> --version` is `127` on a fresh machine, which is a failed step, not a step that needs to run. |
 | `creates` | path | — | Skip when the path exists. |
-| `sudo` | bool | false | Run the action as root (§7). Windows: error; use `shell` from an elevated prompt. |
-| `timeout` | duration | 10m | Kill the step and fail. `30s`, `5m`, `1h`. |
-| `retry` | `{attempts, delay}` | none | Re-run on failure. `delay` is a duration. Output shows attempt N/M. |
+| `sudo` | bool | false | Templated (§3.4); a sole `{{ expr }}` must yield a bool. Run the action as root (§7). Windows: error; use `shell` from an elevated prompt. |
+| `timeout` | duration | 10m | Templated (§3.4). Kill the step and fail. `30s`, `5m`, `1h`. |
+| `retry` | `{attempts, delay}` | none | Both fields templated (§3.4). Re-run on failure. `delay` is a duration. Output shows attempt N/M. |
 | `env` | mapping | {} | Extra environment for every command the step runs: `shell`, `cmd`, `assert`'s `command`, `unless`, and the commands a typed action spawns (`pkg`, `service`, `git`, …). Templated. |
 | `cwd` | path | the invocation directory | Working directory for `shell`, `cmd`, `assert`'s `command`, `unless`, under every command and for every step, including one inside a `use`d component. A command runs where the operator is standing; a shared gate checked out elsewhere must not gate its own checkout. An explicit `cwd:` resolves against the step's own file, like every other path a plan names, and `component_dir` (§3.2) names a component's own directory for a path inside a shell string. Phase 5b, 2026-09-08: this used to be the step's file directory under `apply` and the invocation directory under `run`. Measured against the fleet, no step depended on the old default — zero `cwd:` modifiers, zero relative paths in shell strings — and one rule beats two. |
 | `tags` | list | [] | For `--tags` selection (§8). |
@@ -1009,6 +1027,21 @@ gates, so it has a wall clock worth bounding too. There is no
   steps it would run; the whole-file question is `validate`'s, which takes
   no filter.
 
+  **A subtree gated off on this host is still read for shape** (D27). The
+  walk descends into a structural step whose `when` is false and applies the
+  idempotency gate and §6.10's `defaults` os-gate to the steps inside — but
+  shape only: nothing there is rendered, no condition is evaluated, no
+  variable is bound, and no step is reported. The step itself is still
+  reported `skipped   when: false`. Without this a `when: os == "linux"`
+  component was invisible to `validate` on a Mac, so the same plan got
+  different verdicts on different hosts and an ungated `shell` was caught by
+  whichever machine happened to match. The descent is on exactly when
+  `strict` is, which is what keeps the one-verdict rule above true across
+  all three verbs. Everything needing a *value* — types, undefined
+  variables, missing files, prop arity — stays unchecked in there, because a
+  gated-off subtree may legitimately read names this host does not have: it
+  is checked for what it says, never for what it would do.
+
   It is therefore evaluated against **this host's facts and PATH**, and that
   is kept as narrow as it can be. A rule about a *named* backend holds on
   every host and is checked here; a rule about one this host merely happens
@@ -1337,6 +1370,17 @@ same thing as the root file's header line: how many steps, over how many
 files when more than one, and how many ask for root. It comes from the
 preflight walk (§7), which already visits every step, so it probes nothing
 and costs nothing.
+
+**`manifest.steps` and `summary.total` count different sets, on purpose.**
+`steps` is what the run will *attempt*: the preflight evaluates `when` and
+the tag filter, so the steps those rule out are not in it. `total` is every
+step the walk reached, skipped ones included. So `steps` is at most `total`,
+and the difference is exactly the steps `when` or tags excluded. `unless`
+and `creates` are **not** probed by the preflight — it is read-only and
+cheap by design (§7) — so a step gated by one of those is counted in
+`steps` and may still skip. The text form says `N steps to run` in the
+header and `N steps` in the summary for the same reason: one word for two
+sets was one run reporting two step counts.
 
 ```json
 {"event":"manifest","plan":"main_pc.yml","steps":166,"files":9,"sudo":12}

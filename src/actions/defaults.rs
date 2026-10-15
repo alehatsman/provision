@@ -111,7 +111,11 @@ pub(crate) fn parse(
 
     // Spec §6.10: a root write lands in root's preferences, which is a
     // different user's settings and never what the step meant.
-    if step.mods.sudo.is_some_and(|n| n.as_bool().unwrap_or(false)) {
+    if step
+        .mods
+        .sudo
+        .is_some_and(|n| crate::config::model::mod_bool(n, engine, ctx).unwrap_or(false))
+    {
         return Err(step
             .at
             .err("`defaults` must not run under `sudo`")

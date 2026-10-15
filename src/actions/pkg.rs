@@ -341,7 +341,10 @@ pub(crate) fn parse(
         Some(n) => n.as_bool()?,
         None => false,
     };
-    let sudo = step.mods.sudo.is_some_and(|n| n.as_bool().unwrap_or(false));
+    let sudo = step
+        .mods
+        .sudo
+        .is_some_and(|n| crate::config::model::mod_bool(n, engine, ctx).unwrap_or(false));
 
     // Spec §6.5: whether the step's backend is a fact about the *plan* or
     // about whichever host happens to be reading it. Written down, it is the

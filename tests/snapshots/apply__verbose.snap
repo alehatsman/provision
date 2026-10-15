@@ -2,7 +2,7 @@
 source: tests/apply.rs
 expression: loud
 ---
-  tests/fixtures/apply/verdicts.yml · 5 steps
+  tests/fixtures/apply/verdicts.yml · 5 steps to run
   ✓ An ungated shell is its own exit code            ok  [t]
   - A gate that says the work is done                skipped   unless  [t]
   ~ changed_when decides                             changed  [t]

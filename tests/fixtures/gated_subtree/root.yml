@@ -1,0 +1,5 @@
+# `linux` on a Mac, `darwin` on a Linux box -- either way this subtree is
+# gated off on the machine running the test, which is the point.
+- name: gated off on whichever machine validates this
+  import: ./bits.yml
+  when: os == "plan9"

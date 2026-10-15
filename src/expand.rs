@@ -133,6 +133,17 @@ pub(crate) struct Expander {
     /// Spec §8 `--deadline`: when the run's wall clock runs out. `None` is no
     /// deadline, which is the default and every `validate`.
     deadline: Option<Instant>,
+    /// Set while `validate` is inside a subtree its `when` ruled out. Spec
+    /// §8: `validate` answers for the file, and a subtree gated off on *this*
+    /// machine was simply invisible to it — a `when: os == "linux"`
+    /// component carried no weight on a Mac, so the same plan validated
+    /// differently on different hosts and an ungated `shell` inside a
+    /// cross-platform component was found by whichever machine happened to
+    /// match. The walk goes in anyway, but checks **shape only**: nothing is
+    /// rendered, because a gated-off step may read variables that do not
+    /// exist here and failing on those is precisely the mooncake #191 class
+    /// D7's ordering exists to prevent.
+    shape_only: bool,
     /// Set while the walk is inside an `import` or `use` whose own `when`
     /// names the os. Spec §3.1: such a `when` "applies to every imported
     /// step", and §6.10's `defaults` gate is the one rule that reads a
@@ -168,6 +179,7 @@ impl Expander {
             keep_going: false,
             strict: false,
             deadline: None,
+            shape_only: false,
             os_gated: false,
             seen_tags: BTreeSet::new(),
         }
@@ -399,6 +411,28 @@ impl Expander {
         // prove a `--tags` value was a real tag rather than a typo.
         self.seen_tags.extend(tags.iter().cloned());
 
+        // Shape-only: inside a subtree `validate` found gated off. No
+        // condition is evaluated (it may read variables that do not exist on
+        // this machine, which is why the subtree is gated), nothing is
+        // rendered, nothing is recorded. The strict gate is the whole point —
+        // it is a syntactic question about the step as written, and it is the
+        // check that was invisible here.
+        if self.shape_only {
+            if step.is_structural() {
+                let outer = self.os_gated;
+                self.os_gated = outer || self.when_names_os(step);
+                match step.key {
+                    "import" => self.do_import(step, scope, depth, &tags),
+                    "use" => self.do_use(step, scope, depth, &tags),
+                    _ => {}
+                }
+                self.os_gated = outer;
+            } else if self.strict {
+                self.check_strict_gate(step);
+            }
+            return;
+        }
+
         // Spec §8: tag filtering happens before rendering, so an excluded step
         // cannot fail on a variable it never gets to read. This is mooncake
         // #191 and #196, and it is why the check is here and not below `when`.
@@ -416,6 +450,36 @@ impl Expander {
                 let status = Status::Skipped("when: false".into());
                 self.bind_register(step, scope, None, &status);
                 self.record(step, scope, depth, status);
+                // Go in anyway, shape only. The step is still reported
+                // skipped above — this adds checks, not work or output.
+                //
+                // Gated on `strict` rather than on the verb, which decides
+                // two things at once. It is the honest trigger: the strict
+                // gate is the only thing a shape-only walk checks, so with
+                // strict off there is nothing to go in for. And it keeps
+                // §8's "one file, one set of arguments, one verdict" —
+                // strict is a property of the file (D26), so all three verbs
+                // that walk a plan root descend here and agree. Restricting
+                // this to the `validate` verb would have made it refuse a
+                // file `plan` accepts, with the same arguments on the same
+                // machine, which is the one thing §8 promises cannot happen.
+                // The executing `apply` walk has strict off and so skips it;
+                // its preflight does not.
+                if self.strict && step.is_structural() {
+                    let outer = (self.shape_only, self.os_gated);
+                    self.shape_only = true;
+                    self.os_gated = outer.1 || self.when_names_os(step);
+                    match step.key {
+                        "import" => self.do_import(step, scope, depth, &tags),
+                        "use" => self.do_use(step, scope, depth, &tags),
+                        // `vars`/`vars_file` compute values, and values are
+                        // the one thing a false branch has no business
+                        // producing: they would land in the live scope and
+                        // be read by the steps after it.
+                        _ => {}
+                    }
+                    (self.shape_only, self.os_gated) = outer;
+                }
                 return;
             }
             Cond::Error(d) => {
@@ -683,10 +747,25 @@ impl Expander {
     /// has reported why and left the stack as it was.
     fn open(&mut self, step: &Step<'static>, scope: &Scope, key: &str) -> Option<&'static Doc> {
         let ctx = scope.ctx();
-        let rel = self.diags.absorb(self.render_str(step.body, &ctx))?;
+        // The one thing a shape-only walk renders is the path of the next
+        // file, because there is no other way to reach it. It is also the one
+        // thing that can fail for a reason the walk must not report: a gated
+        // -off subtree may name its imports through variables that do not
+        // exist on this machine -- `import: "{{ linux_root }}/more.yml"` --
+        // and that file is not expected to be here either. Either failure
+        // just ends the descent. This is mooncake #191 in its last hiding
+        // place: the subtree is skipped, so it must not fail on what it reads.
+        let rendered = self.render_str(step.body, &ctx);
+        let rel = if self.shape_only {
+            rendered.ok()?
+        } else {
+            self.diags.absorb(rendered)?
+        };
         let path = load::resolve(step.body.file, &rel);
         if !path.exists() {
-            self.diags.push(load::missing(step.body, &path, key));
+            if !self.shape_only {
+                self.diags.push(load::missing(step.body, &path, key));
+            }
             return None;
         }
         self.enter(&path, step.body)?;
@@ -949,7 +1028,43 @@ impl Expander {
         }
         let defer_src = self.defers_file_src();
 
-        if step.mods.sudo.is_some_and(|n| n.as_bool().unwrap_or(false)) {
+        // The three typed modifiers §3.4's rule now covers are checked here,
+        // with the scope, because parsing could not check them: a template
+        // has no value until there is one (#35). Every read of them below is
+        // deliberately lenient -- `.ok()`, `unwrap_or` -- which was safe while
+        // parsing had already proved the type, and would silently turn a bad
+        // `sudo: "{{ s }}"` into `false` without this.
+        // `sudo` and `timeout` only when they hold a template -- a literal was
+        // already proved at parse time and re-reading it buys nothing.
+        // `retry` always, because it is a mapping whose two fields are checked
+        // individually and either may be a template.
+        let checks = [
+            step.mods
+                .sudo
+                .filter(|n| model::is_template(*n))
+                .map(|n| model::mod_bool(n, &self.engine, &ctx).map(|_| ())),
+            step.mods
+                .timeout
+                .filter(|n| model::is_template(*n))
+                .map(|n| model::mod_duration(n, &self.engine, &ctx).map(|_| ())),
+            step.mods
+                .retry
+                .map(|n| model::mod_retry(n, &self.engine, &ctx).map(|_| ())),
+        ];
+        for d in checks.into_iter().flatten().filter_map(Result::err) {
+            self.diags.push(d);
+        }
+
+        // Rendered, so a templated `sudo` is counted for what it resolves to
+        // and not skipped for not being a literal (#35). A sudo that cannot
+        // be read at all counts as root: spec §7's preflight over-approximates
+        // on purpose — asking for a password the run turns out not to need is
+        // recoverable, discovering root is needed halfway through is not.
+        if step
+            .mods
+            .sudo
+            .is_some_and(|n| model::mod_bool(n, &self.engine, &ctx).unwrap_or(true))
+        {
             self.needs_sudo = true;
             self.manifest.sudo += 1;
         }
@@ -1149,7 +1264,7 @@ impl Expander {
         let own_timeout = step
             .mods
             .timeout
-            .and_then(|n| model::parse_duration(n).ok())
+            .and_then(|n| model::mod_duration(n, &self.engine, ctx).ok())
             .unwrap_or(DEFAULT_TIMEOUT);
         let left = self.remaining();
         let timeout = left.map_or(own_timeout, |l| l.min(own_timeout));
@@ -1160,9 +1275,15 @@ impl Expander {
             creates: text(step.mods.creates),
             cwd,
             env,
-            sudo: step.mods.sudo.is_some_and(|n| n.as_bool().unwrap_or(false)),
+            sudo: step
+                .mods
+                .sudo
+                .is_some_and(|n| model::mod_bool(n, &self.engine, ctx).unwrap_or(false)),
             timeout,
-            retry: step.mods.retry.and_then(|n| model::parse_retry(n).ok()),
+            retry: step
+                .mods
+                .retry
+                .and_then(|n| model::mod_retry(n, &self.engine, ctx).ok()),
             has_changed_when: step.mods.changed_when.is_some(),
             deadline_bound: timeout < own_timeout,
             own_timeout,

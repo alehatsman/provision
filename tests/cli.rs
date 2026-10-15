@@ -27,6 +27,17 @@ fn run(args: &[&str]) -> Output {
         .expect("provision failed to start")
 }
 
+fn validate_with(fixture: &str, extra: &[&str]) -> (i32, String) {
+    let path = fixtures().join(fixture);
+    let mut args = vec!["validate", path.to_str().expect("fixture paths are UTF-8")];
+    args.extend_from_slice(extra);
+    let out = run(&args);
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stderr).into_owned() + &String::from_utf8_lossy(&out.stdout),
+    )
+}
+
 fn validate(fixture: &str) -> (i32, String) {
     let path = fixtures().join(fixture);
     let out = run(&["validate", path.to_str().expect("fixture paths are UTF-8")]);
@@ -968,6 +979,112 @@ fn help_and_version_are_not_usage_errors() {
         assert!(!out.stdout.is_empty(), "{args:?} should print to stdout");
         assert!(out.stderr.is_empty(), "{args:?} should not touch stderr");
     }
+}
+
+// ── a subtree this machine gates off (D27) ───────────────────────────────
+
+#[test]
+fn strict_reads_a_subtree_its_when_ruled_out_on_this_machine() {
+    // Before: `validate` evaluated `when`, so a `when: os == "linux"`
+    // component was invisible on a Mac and the same plan validated
+    // differently on different hosts. The ungated `shell` was found by
+    // whichever machine happened to match.
+    let (code, text) = validate("gated_subtree/root.yml");
+    assert_eq!(code, EXIT_VALIDATION, "{text}");
+    assert!(text.contains("no idempotency gate"), "{text}");
+    assert!(text.contains("bits.yml:15:3"), "{text}");
+}
+
+#[test]
+fn a_gated_off_subtree_is_read_for_shape_and_never_rendered() {
+    // The whole risk of walking in, and the reason it is shape-only. That
+    // fixture's other four steps each read something that does not exist on
+    // the validating machine -- an undefined variable, a missing `src`, a
+    // nested import named through that variable. Rendering any of them is
+    // mooncake #191, the failure D7's ordering exists to prevent: a step
+    // that is skipped must not fail on what it reads.
+    let (code, text) = validate("gated_subtree/root.yml");
+    assert_eq!(code, EXIT_VALIDATION, "{text}");
+    assert_eq!(
+        text.matches("error:").count(),
+        1,
+        "exactly one fault: {text}"
+    );
+    assert!(!text.contains("only_on_the_other_os"), "{text}");
+    assert!(!text.contains("not found"), "{text}");
+}
+
+#[test]
+fn an_os_gate_on_a_false_import_still_gates_the_defaults_inside_it() {
+    // The §6.10 rule asks what the plan says, not what this machine is. The
+    // import is false here and its `when` still names the os, so the
+    // `defaults` steps inside are gated.
+    let (code, text) = validate("gated_subtree/os_gated.yml");
+    assert_eq!(code, 0, "{text}");
+}
+
+#[test]
+fn the_three_verbs_agree_on_a_gated_off_subtree() {
+    // Spec §8: one file, one set of arguments, one verdict. The descent is
+    // gated on `strict` rather than on the verb precisely so this holds --
+    // restricting it to `validate` would make it refuse a file `plan`
+    // accepts, with the same arguments on the same machine.
+    let path = fixtures().join("gated_subtree/root.yml");
+    let path = path.to_str().unwrap();
+    for verb in ["validate", "plan", "apply"] {
+        let out = run(&[verb, path]);
+        assert_eq!(
+            out.status.code(),
+            Some(EXIT_VALIDATION),
+            "{verb} disagreed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
+// ── templated typed modifiers (#35, spec §3.4) ───────────────────────────
+
+#[test]
+fn the_typed_modifiers_take_a_template() {
+    // `sudo`, `timeout` and both `retry` fields, driven from typed props.
+    let (code, text) = validate_with("templated_mods/ok.yml", &["--prop", "root=false"]);
+    assert_eq!(code, 0, "{text}");
+}
+
+#[test]
+fn a_template_that_renders_to_the_wrong_type_is_still_refused() {
+    // The hole this could have left: every read of these three is lenient
+    // (`.ok()`, `unwrap_or`), which was safe only while parsing had already
+    // proved the type. Deferring the parse-time check without adding a
+    // render-time one would turn a bad `sudo` into a silent `false`.
+    let (code, text) = validate("templated_mods/bad_sudo.yml");
+    assert_eq!(code, EXIT_VALIDATION, "{text}");
+    assert!(text.contains("expected true or false"), "{text}");
+    assert!(text.contains("rendered to a string"), "{text}");
+    assert_positioned(&text);
+
+    let (code, text) = validate("templated_mods/bad_timeout.yml");
+    assert_eq!(code, EXIT_VALIDATION, "{text}");
+    // The rendered value is named, not the template text: `banana` is what
+    // is wrong, and `{{ props.t }}` is where to look.
+    assert!(text.contains("`banana` is not a duration"), "{text}");
+}
+
+#[test]
+fn a_literal_typed_modifier_is_still_checked_at_parse_time() {
+    // Deferring applies to templates only. A literal is proved when the file
+    // is parsed, as it always was, which is almost every one.
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("plan.yml");
+    std::fs::write(
+        &plan,
+        "- name: x\n  shell: \"true\"\n  changed_when: \"false\"\n  timeout: nope\n",
+    )
+    .unwrap();
+    let out = run(&["validate", &plan.display().to_string()]);
+    assert_eq!(out.status.code(), Some(EXIT_VALIDATION));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("`nope` is not a duration"), "{err}");
 }
 
 // ── `defaults` (spec §6.10) ───────────────────────────────────────────────
