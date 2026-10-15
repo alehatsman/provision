@@ -209,6 +209,41 @@ fn a_modifier_on_the_wrong_step_is_an_error() {
     assert_positioned(&out);
 }
 
+// `env` and `register` reach no command through a structural step: `use` and
+// `import` build a scope and walk it, and never reach `do_action`. The file's
+// own rule -- silently ignoring a misplaced modifier is how a typo becomes a
+// two-hour debug -- had been applied to `props` and `optional` but not to
+// these two.
+#[test]
+fn env_on_a_structural_step_is_an_error() {
+    let (code, out) = validate("structural_modifier.yml");
+    assert_eq!(code, EXIT_VALIDATION, "{out}");
+    assert!(
+        out.contains("`env` does not reach the steps `import` walks"),
+        "{out}"
+    );
+    assert_positioned(&out);
+}
+
+// The sharper half: D5 names `register` as the handler replacement, so this
+// is the prescribed recipe doing nothing. It was not even consistently
+// nothing -- a *skipped* `use` binds, because the skip paths run
+// `bind_register` and the success path does not.
+#[test]
+fn register_on_a_structural_step_is_an_error() {
+    let (code, out) = validate("structural_register.yml");
+    assert_eq!(code, EXIT_VALIDATION, "{out}");
+    assert!(
+        out.contains("`register` has nothing to bind on `use`"),
+        "{out}"
+    );
+    assert!(
+        out.contains("register the step inside the component"),
+        "{out}"
+    );
+    assert_positioned(&out);
+}
+
 #[test]
 fn a_modifier_bool_given_as_a_string_is_an_error() {
     // `sudo: "true"` read as false would run the step unprivileged.
