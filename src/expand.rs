@@ -1084,10 +1084,9 @@ impl Expander {
         }
 
         // §3.2: a prop `default` is taken as written, so a `{{` can survive
-        // rendering. A string may hold one; a path may not.
-        if !raw {
-            self.check_rendered_path(step, &ctx);
-        }
+        // rendering. A string may hold one; a path may not — and neither may
+        // hold a `$VAR`, which provision never expands.
+        self.check_rendered_path(step, &ctx, raw);
 
         // A source path rendered from a placeholder names a file that apply
         // alone knows.
@@ -1629,21 +1628,46 @@ impl Expander {
         self.resolved_path(step, key, ctx)
     }
 
-    /// §3.2: a prop's `default` is taken as written, never rendered, so a
-    /// default holding `{{ home }}/x` reaches a step as those characters.
-    /// That is legal for a string and never what anyone meant for a path —
-    /// `apply` would create a directory named `{{ home }}`, and both
-    /// read-only verbs used to report the file clean, which inverts what
-    /// they are for. Nothing else in the language leaves braces in a
-    /// rendered value, so the brace is the evidence.
-    fn check_rendered_path(&mut self, step: &Step<'static>, ctx: &Value) {
-        let keys: &[&str] = match step.key {
+    /// The paths provision reads **itself**, rather than handing to a shell.
+    /// The same set `expanduser_in` calls "a location on the target", plus
+    /// `creates`, which provision stats. `unless` is deliberately absent: it
+    /// is a shell command, where `$VAR` expands and is the right way to
+    /// write it.
+    ///
+    /// Two things cannot survive rendering in one of these:
+    ///
+    /// * `{{` — §3.2 takes a prop's `default` as written, never rendered, so
+    ///   a default holding `{{ home }}/x` arrives as those characters. Legal
+    ///   for a string, never meant for a path: `apply` would create a
+    ///   directory named `{{ home }}`.
+    /// * `$NAME` — shell syntax in a field no shell sees, so it is a literal
+    ///   path with a `$` in it. Correct by the rule and almost never meant:
+    ///   a `creates: $CACHE_DIR/hit` never matches, so the gate degrades to
+    ///   "always run" while `--strict` stays satisfied, because a `creates`
+    ///   is present.
+    ///
+    /// Both used to pass `validate` and `plan` in silence and show up only at
+    /// the verb that touches the machine, which inverts what the two
+    /// read-only verbs are for.
+    fn check_rendered_path(&mut self, step: &Step<'static>, ctx: &Value, raw: bool) {
+        let body_keys: &[&str] = match step.key {
+            // A `raw` body is not rendered, so braces in it are the author's.
+            _ if raw => &[],
             "file" => &["path"],
             "template" | "download" | "git" => &["dest"],
-            _ => return,
+            _ => &[],
         };
-        for key in keys {
-            let Some(at) = step.body.get(key) else {
+        let fields = body_keys
+            .iter()
+            .map(|k| ((*k).to_string(), step.body.get(k)))
+            // Modifiers are rendered whatever `raw` says, so they are checked
+            // whatever `raw` says.
+            .chain([
+                ("creates".to_string(), step.mods.creates),
+                ("cwd".to_string(), step.mods.cwd),
+            ]);
+        for (key, node) in fields {
+            let Some(at) = node else {
                 continue;
             };
             let Ok(rendered) = self.render_str(at, ctx) else {
@@ -1656,6 +1680,15 @@ impl Expander {
                             "a prop `default` is taken as written, never rendered — pass the \
                              value at the call site, or compute it in a `vars` step",
                         ),
+                );
+            }
+            if let Some(name) = shell_var(&rendered) {
+                self.diags.push(
+                    at.err(format!("`{key}` holds the shell variable `${name}`"))
+                        .with_note(format!(
+                            "provision renders this path itself and no shell sees it, so \
+                             `${name}` is a literal — write `{{{{ env.{name} }}}}`"
+                        )),
                 );
             }
         }
@@ -1855,6 +1888,43 @@ enum Cond {
     False,
     Unprobed,
     Error(Diag),
+}
+
+/// The first `$NAME` or `${NAME}` in a rendered path, if there is one.
+/// Deliberately not a general "contains a `$`" test: a lone `$`, and a `$`
+/// followed by anything that is not an identifier, is just a character in a
+/// filename.
+fn shell_var(s: &str) -> Option<String> {
+    // Byte-wise: every character that can be part of one of these — `$`,
+    // `{`, `}`, and an identifier — is ASCII, so a multi-byte character can
+    // only ever end a name, never split one.
+    let b = s.as_bytes();
+    for (i, _) in s.match_indices('$') {
+        let mut j = i + 1;
+        let braced = b.get(j) == Some(&b'{');
+        if braced {
+            j += 1;
+        }
+        let start = j;
+        while b
+            .get(j)
+            .is_some_and(|c| c.is_ascii_alphanumeric() || *c == b'_')
+        {
+            j += 1;
+        }
+        let closed = !braced || b.get(j) == Some(&b'}');
+        // A name cannot start with a digit: `$1` is a shell positional, not
+        // something `{{ env.… }}` could ever have been.
+        let first_is_digit = b.get(start).is_some_and(u8::is_ascii_digit);
+        if closed
+            && j > start
+            && !first_is_digit
+            && let Some(name) = b.get(start..j)
+        {
+            return Some(String::from_utf8_lossy(name).into_owned());
+        }
+    }
+    None
 }
 
 /// What a `register` holds. Spec §4 fixes the shape; with no output it is

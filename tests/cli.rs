@@ -1491,3 +1491,50 @@ fn an_unrendered_default_in_a_plain_string_is_still_legal() {
         String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(0), "{text}");
 }
+
+// #46: `$VAR` in a field provision reads itself is a literal — correct by
+// the rule, and almost never meant. A `creates` that never matches degrades
+// the gate to "always run" while `--strict` stays satisfied, because a
+// `creates` is present. Nothing said so at either read-only verb.
+#[test]
+fn a_shell_variable_in_a_provision_facing_path_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("cr.yml");
+    std::fs::write(
+        &path,
+        "description: a gate that never matches\n\
+         steps:\n\
+         \x20 - name: gated\n\
+         \x20   shell: \"true\"\n\
+         \x20   creates: \"$CACHE_DIR/hit\"\n",
+    )
+    .unwrap();
+    let out = run(&["validate", &path.display().to_string()]);
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(EXIT_VALIDATION), "{text}");
+    assert!(text.contains("shell variable `$CACHE_DIR`"), "{text}");
+    assert!(text.contains("{{ env.CACHE_DIR }}"), "{text}");
+}
+
+// The other side of the same rule, and the reason it is about which fields
+// reach a shell rather than which look like paths: `unless` *is* a shell
+// command, `$VAR` expands there, and it must not be flagged.
+#[test]
+fn a_shell_variable_in_unless_is_left_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("un.yml");
+    std::fs::write(
+        &path,
+        "description: a gate that is a shell command\n\
+         steps:\n\
+         \x20 - name: gated\n\
+         \x20   shell: \"true\"\n\
+         \x20   unless: \"test -f $CACHE_DIR/hit\"\n",
+    )
+    .unwrap();
+    let out = run(&["validate", &path.display().to_string()]);
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "{text}");
+}
