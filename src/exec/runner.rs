@@ -557,11 +557,28 @@ impl Runner {
                 // done" are not the same answer, and only one of them is safe
                 // to assume.
                 How::Exited if out.rc == 126 || out.rc == 127 => {
+                    // Name the fix, not only the fault (#42). On a fresh
+                    // machine this fires at the first thing the plan
+                    // installs — the gate asks the tool whether it is
+                    // there, and asking is what fails — so the reader most
+                    // likely to see it is the one least likely to know the
+                    // idiom. 126 and 127 are different faults with
+                    // different fixes and used to share one message: 127 is
+                    // "no such command", 126 is "found it, could not
+                    // execute it", where `command -v` would succeed and
+                    // change nothing.
+                    let first = cmd.lines().next().unwrap_or("");
+                    let msg = if out.rc == 127 {
+                        format!(
+                            "`unless` could not run: {first} — the command does not exist yet; \
+                             a gate for a tool the plan installs is \
+                             `command -v <tool> >/dev/null 2>&1`"
+                        )
+                    } else {
+                        format!("`unless` could not run: {first} — found, but not executable")
+                    };
                     return Err(Stop::Fail(Failure {
-                        msg: format!(
-                            "`unless` could not run: {}",
-                            cmd.lines().next().unwrap_or("")
-                        ),
+                        msg,
                         rc: Some(out.rc),
                         stderr: out.stderr,
                         interrupted: false,

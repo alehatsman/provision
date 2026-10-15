@@ -72,8 +72,20 @@ the hand fix before running it again.
 
 ## 4. Afterwards
 
-- `provision plan <file.yml>` exit 0 means the machine matches the plan.
-  Exit 2 lists what does not.
+- `provision plan <file.yml>` exit 2 lists what does not match the plan.
+  Read the list — do not read the code. **Exit 0 is not the converged
+  signal**, and on most real plans it is unreachable: a step gated on a
+  register (`when: unit.changed`) is reported `would run (unprobed)`
+  forever, because plan refuses to guess at a value that does not exist
+  until apply runs (D14). That is one of the exit-2 statuses, so a fully
+  converged machine running D5's own prescribed handler idiom exits 2 on
+  every plan. The README's Status block prints `6 would run (unprobed)` on
+  this repo and calls it green.
+
+  So the question after a recovery is not "did plan exit 0" but "is anything
+  in the list something I did not expect". `would run (unprobed)` on the
+  steps you know are register-gated is the converged reading; `would change`
+  on a `file` or `template` is not.
 - If you backed out with `git revert`, the fix still has to land. Re-apply it
   on a branch, and `plan` before `apply`.
 - If fail-fast and re-run destroyed something — a re-run made it worse, not
