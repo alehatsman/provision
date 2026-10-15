@@ -231,3 +231,36 @@ fn every_action_is_listed_and_every_listing_is_an_action() {
         );
     }
 }
+
+// Both layouts in one directory. `flat.yml` is a component named by its
+// stem; `palette/index.yml` is a component named by its *directory*, which
+// is the layout a component shipping its own `templates/` has to use.
+//
+// The two negatives are the point of reading one level and matching
+// `index.yml` by name rather than sweeping: `palette/vars/data.yml` is a
+// component's data and `no_index/` holds no component at all, and a sweep
+// would name both `(not a component)`.
+#[test]
+fn a_directory_lists_a_name_index_component_by_its_directory() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/list_nested");
+    let (code, out) = run(&["list", &dir.display().to_string()]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("flat"), "{out}");
+    assert!(out.contains("palette"), "{out}");
+    assert!(
+        out.contains("a component that ships its own templates"),
+        "the directory's `index.yml` supplies the description: {out}"
+    );
+    assert!(
+        !out.contains("index"),
+        "named by the directory, not the stem: {out}"
+    );
+    assert!(
+        !out.contains("data"),
+        "a component's data is not a component: {out}"
+    );
+    assert!(
+        !out.contains("no_index"),
+        "a directory with no index.yml is not one: {out}"
+    );
+}

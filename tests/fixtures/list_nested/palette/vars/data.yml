@@ -1,0 +1,5 @@
+---
+# A component's data, not a component. One level and `index.yml` by name is
+# what keeps this out of the listing; a recursive sweep would name it
+# `(not a component)`.
+some_key: some value
