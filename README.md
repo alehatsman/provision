@@ -297,7 +297,7 @@ and no support (D23).
 
 ## Status
 
-Version 0.9.1. Phases 0 through 7 are code complete ([docs/plan.md](docs/plan.md)).
+Version 0.9.2-dev. Phases 0 through 7 are code complete ([docs/plan.md](docs/plan.md)).
 `validate`, `plan`, `apply`, `list` and `facts` all work, and all ten
 actions — `shell`, `cmd`, `assert`, `file`, `template`, `pkg`, `service`,
 `git`, `download`, `defaults` — run for real, with `unless`, `creates`,
@@ -350,9 +350,24 @@ not a step it may call converged. `--plan-no-probe` inspects nothing, so it clai
 exits 0. A run stopped from outside exits `128 + signal` — 130 for Ctrl-C, 143
 for SIGTERM — and one that runs out of its `--deadline` exits 124.
 
-A plan is written for one machine and can say so. `examples/x1.yml` guards
-its own hostname with an `assert` tagged `always`, so on one of the machines
-it refuses, it refuses before touching anything:
+### A plan that refuses the wrong machine
+
+A plan is written for one machine and can say so. Make the first step an
+`assert` tagged `always`, so no `--tags` selection can skip it:
+
+```yaml
+- name: Refuse to run on the wrong machine
+  assert:
+    expr: hostname not in ["mainpc", "minipc", "mac"]
+    msg: "hostname {{ hostname }} belongs to another machine"
+  tags: [always]
+```
+
+`expr:` is evaluated, not run, so the guard costs no process and holds under
+`plan` as well as `apply`.
+
+`examples/x1.yml` opens with exactly that, so on one of the other machines it
+refuses before touching anything:
 
 ```
 $ provision apply examples/x1.yml        # run on mainpc
@@ -362,6 +377,13 @@ $ provision apply examples/x1.yml        # run on mainpc
 
   examples/x1.yml · 1 step · 1 failed · 1ms
 ```
+
+This is the whole of provision's answer to "pointed at the wrong file", and
+it is deliberately a convention rather than a checked field — a checked field
+is a noun, and a plan that names its own machine in its first step is
+something a reader of the plan can see (D25). It matters more than it used to:
+when something other than a person is deciding which plan to apply, this
+assert is the step that was not skimmed.
 
 That example is an Arch laptop's, it illustrates every construct in the spec
 once, and it is written to be **read rather than applied** — its second step
