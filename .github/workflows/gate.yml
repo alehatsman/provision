@@ -1,0 +1,164 @@
+# The gate, run the way D24 says a runner runs a job: one process,
+# `provision apply <component> --json`, with the stream read afterwards by
+# something that is not provision.
+#
+# No third-party actions. The runners ship a Rust toolchain and
+# actions/checkout and actions/cache are first-party, so there is nothing here
+# this repo would have to audit or pin against a supply chain it does not
+# control. Installing the gate's three tools from source is slow once and
+# cached after, which is cheaper than adding an installer to trust.
+name: gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  gate:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    # The outer bound, deliberately longer than the `--deadline` below: when a
+    # run overruns, provision's own clock should be what stops it, because that
+    # path still prints the summary. A runner SIGKILLing from outside loses the
+    # thing it came for (D19).
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux is where the fleet lives: tools, then the full rust-quality
+          # gate, composed into one job by `tasks/job.yml`.
+          - name: gate (linux)
+            os: ubuntu-latest
+            job: tasks/job.yml
+            deadline: 40m
+            timeout: 50
+            tools: true
+          # Windows is what README Status named as cross-compiled and never
+          # natively tested — `pkg` against winget, `service`, Ctrl-C. The
+          # suite is what closes that, and it needs no tool but cargo.
+          - name: tests (windows)
+            os: windows-latest
+            job: tasks/tests.yml
+            deadline: 30m
+            timeout: 40
+            tools: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache the build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ matrix.os }}-build-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ matrix.os }}-build-
+
+      # Separate from the build cache on purpose: the gate's tools follow the
+      # rust-quality pin in `tasks/tools.yml`, not `Cargo.lock`, so a
+      # dependency bump must not throw away six minutes of tool builds.
+      - name: Cache the gate's tools
+        if: matrix.tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cache/provision
+          key: ${{ matrix.os }}-tools-${{ hashFiles('tasks/tools.yml') }}
+
+      - name: Build provision
+        run: cargo build --release --locked
+
+      # The whole point: one process, one job file, the stream on stdout. The
+      # human output goes to stderr and is live in this log (spec §9.3), so
+      # redirecting stdout costs no visibility.
+      - name: Run the job in one process
+        shell: bash
+        run: |
+          bin=./target/release/provision
+          [ -x "$bin" ] || bin=./target/release/provision.exe
+          "$bin" apply '${{ matrix.job }}' --json --deadline ${{ matrix.deadline }} > gate.jsonl
+
+      # `always()`: a failed gate is exactly when the stream is worth reading,
+      # and a malformed stream on a red run is still a contract break.
+      - name: Read the stream as a runner would
+        if: always()
+        shell: bash
+        run: python3 .github/check-stream.py gate.jsonl
+
+      - name: Keep the stream
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stream-${{ matrix.os }}
+          path: gate.jsonl
+          if-no-files-found: warn
+
+  contract:
+    name: the runner's contract (D19)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The evidence half of D24. Phase 7 built cancellation and `--deadline`
+    # against a runner that had never used them; this job is a runner using
+    # them. It is evidence about *a* runner, not about moongit — see D19's
+    # reopen check, which this makes partial rather than settled.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache the build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ubuntu-latest-build-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ubuntu-latest-build-
+
+      - name: Build provision
+        run: cargo build --release --locked
+
+      - name: SIGTERM stops the walk and still prints the summary
+        run: |
+          set -u
+          ./target/release/provision apply .github/cancel-job.yml --json > cancel.jsonl &
+          pid=$!
+          sleep 3
+          kill -TERM "$pid"
+          set +e; wait "$pid"; rc=$?; set -e
+          if [ "$rc" != 143 ]; then
+            echo "expected exit 143 on SIGTERM, got $rc" >&2
+            exit 1
+          fi
+          python3 .github/check-stream.py cancel.jsonl \
+            --expect-interrupted \
+            --expect-unrun 'Must not run after the run is stopped'
+
+      - name: --deadline bounds the run and still prints the summary
+        run: |
+          set -u
+          set +e
+          ./target/release/provision apply .github/cancel-job.yml --json --deadline 5s > deadline.jsonl
+          rc=$?
+          set -e
+          if [ "$rc" != 124 ]; then
+            echo "expected exit 124 on an exceeded deadline, got $rc" >&2
+            exit 1
+          fi
+          python3 .github/check-stream.py deadline.jsonl \
+            --expect-deadline \
+            --expect-unrun 'Must not run after the run is stopped'
+
+      - name: A component says what it takes
+        run: |
+          ./target/release/provision list tasks/
+          ./target/release/provision list tasks/install.yml

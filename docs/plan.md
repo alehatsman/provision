@@ -26,6 +26,13 @@ applied twice — changed, then ok — covering the powershell interpreter,
 `failed_when`. Exit codes 0, 2 and 3 all correct. What is still untested
 there: `pkg` against winget, `service`, and Ctrl-C.
 
+Since 2026-10-15 the gate runs `tasks/tests.yml` natively on `windows-latest`
+(D24), which adds `cli.rs`, `component.rs`, `list.rs` and the unit tests on a
+real Windows host and catches a build break there on every push. It does not
+add the three above: `tests/apply.rs` is `#![cfg(unix)]`, so the suite that
+would exercise them does not compile on Windows, and closing that is a change
+to the suite rather than to a workflow file.
+
 Open, and all of it the owner's — none of it can close from this machine:
 
 - Apply to the remaining machines, x1 last (migration.md §7 steps 4–6).
@@ -66,6 +73,13 @@ rule (§4), that an `apt-get install` reporting success can install nothing
 (§6.5), and finally that the `run` verb itself was the wrong shape (phase
 5b), and none of that would have surfaced from the machine plans. Running the
 tool the way the README tells a reader to run it is what found all four.
+
+Since 2026-10-15 the same gate runs on GitHub Actions as one job in one
+process — `provision apply tasks/job.yml --json --deadline 40m` — with the
+stream read back by a checker that is not provision, and a second job that
+cancels a run with SIGTERM and bounds one with `--deadline` (D24). That is
+the first time the contract phase 7 built has been used by a runner. It is
+not moongit, so D19's reopen check reads it as partial credit.
 
 Rust, one crate, one binary, all ten actions, three platforms. **There is no
 line budget.** There was one — 6–9k lines in `src/`, stop and cut at 12k —

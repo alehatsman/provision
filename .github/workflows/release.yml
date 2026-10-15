@@ -1,0 +1,135 @@
+# Release binaries for the four targets D1 names as amended (D24).
+#
+# These exist to get the binary onto the owner's machines — a phone running
+# Termux and a CI image, neither of which should carry a Rust toolchain to
+# obtain one 2.4 MB file. They are not a product (D23), and the release notes
+# say so rather than leaving a reader to guess.
+#
+# Raw binaries, not archives: the thing that installs them is
+# `tasks/install.yml` or a one-line curl, and a `download` step with a
+# `sha256` is how a plan should fetch one — which is why SHA256SUMS is
+# published alongside (spec §6.9).
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          # Cross-built from Linux with mingw-w64, exactly as D1 settled it:
+          # `-msvc` would need xwin and a question about redistributing
+          # Microsoft's SDK headers that nothing here is asking us to answer.
+          - target: x86_64-pc-windows-gnu
+            os: ubuntu-latest
+            exe: .exe
+          - target: aarch64-linux-android
+            os: ubuntu-latest
+          # Native. The macOS runners are arm64, so this is not a cross build.
+          - target: aarch64-apple-darwin
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add the target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install the musl toolchain
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Install mingw-w64
+        if: matrix.target == 'x86_64-pc-windows-gnu'
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
+
+      # The NDK is preinstalled on the Linux runners. The linker goes in the
+      # environment rather than `.cargo/config.toml`, which is rust-quality's
+      # file and is copied in by `tasks/sync-config.yml` — a hand edit there
+      # would be reverted by the next sync and is not ours to make.
+      - name: Point cargo at the Android NDK
+        if: matrix.target == 'aarch64-linux-android'
+        run: |
+          ndk="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          test -x "$ndk/aarch64-linux-android24-clang"
+          {
+            echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$ndk/aarch64-linux-android24-clang"
+            echo "CC_aarch64_linux_android=$ndk/aarch64-linux-android24-clang"
+            echo "AR_aarch64_linux_android=$ndk/llvm-ar"
+          } >> "$GITHUB_ENV"
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      # `facts` walks nothing and touches no machine, so it is the one command
+      # that proves a binary runs without needing a plan. It cannot run for a
+      # target this runner is not — those are checked by being installed.
+      - name: Run it, where this host can
+        if: matrix.target == 'x86_64-unknown-linux-musl' || matrix.target == 'aarch64-apple-darwin'
+        run: ./target/${{ matrix.target }}/release/provision facts
+
+      - name: Name the artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/provision${{ matrix.exe }}" \
+             "dist/provision-${{ matrix.target }}${{ matrix.exe }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: provision-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: staged
+          merge-multiple: true
+
+      - name: Checksum every binary
+        working-directory: staged
+        run: |
+          sha256sum provision-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" \
+            --repo '${{ github.repository }}' \
+            --title "$TAG" \
+            --notes "$(cat <<'NOTES'
+          Binaries for the four targets D1 names as amended.
+
+          These exist so the owner's machines can install provision without a
+          Rust toolchain — a phone running Termux, a CI image. provision is
+          one person's tool for one person's machines, published so it can be
+          read and copied: there is no stability promise and no support. See
+          `docs/decisions.md` D23.
+
+          Verify with `SHA256SUMS`, or fetch one in a plan with a `download`
+          step carrying its `sha256`.
+          NOTES
+          )" \
+            staged/provision-* staged/SHA256SUMS
