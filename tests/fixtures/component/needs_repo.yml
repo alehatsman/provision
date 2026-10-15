@@ -1,0 +1,10 @@
+---
+description: a component with one required string prop
+props:
+  repo:
+    type: string
+    required: true
+steps:
+  - name: use it
+    shell: echo {{ props.repo }}
+    changed_when: "false"

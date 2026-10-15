@@ -1,0 +1,6 @@
+# The call site has the typo. Before, this produced two diagnostics: a type
+# error naming `repo`, and a fabricated "missing required prop `repo`"
+# pointing at the component's declaration -- neither of which named `nope`.
+- name: call with a typo'd variable
+  use: ./component/needs_repo.yml
+  props: { repo: "{{ nope }}" }

@@ -52,7 +52,22 @@ impl Engine {
         ctx: &Value,
     ) -> std::result::Result<Value, minijinja::Error> {
         match sole_expression(src) {
-            Some(expr) => self.eval(expr, ctx),
+            Some(expr) => match self.eval(expr, ctx) {
+                // Strict undefined (D6) only fires when a value is *used* --
+                // string-converted, iterated, or looked up a further level.
+                // A field that is one expression and nothing else does
+                // neither, so `{{ nope }}` came back as a successful
+                // `undefined` and was reported downstream by whatever
+                // happened to receive it: a prop said "is declared string but
+                // got nothing", naming the prop rather than the typo. Raise
+                // the error minijinja would have raised had the value been
+                // used. The kind is what `describe_with` reads, so the name
+                // comes back with it.
+                Ok(v) if v.is_undefined() => {
+                    Err(minijinja::Error::from(minijinja::ErrorKind::UndefinedError))
+                }
+                other => other,
+            },
             None => self.render(src, ctx).map(Value::from),
         }
     }
@@ -73,7 +88,20 @@ impl Engine {
         ctx: &Value,
         at: &dyn Fn(String) -> Diag,
     ) -> Result<bool> {
-        let v = self.eval(expr, ctx).map_err(|e| at(describe(&e)))?;
+        let v = self
+            .eval(expr, ctx)
+            .map_err(|e| at(self.describe_expr(expr, ctx, &e)))?;
+        // Same hole as `render_field`: `when: env.NOPE` evaluates to a
+        // successful undefined, which fell past the `Bool` arm below and
+        // reported "evaluated to  (undefined), not true or false" -- an empty
+        // value and the wrong diagnosis.
+        if v.is_undefined() {
+            return Err(at(self.describe_expr(
+                expr,
+                ctx,
+                &minijinja::Error::from(minijinja::ErrorKind::UndefinedError),
+            )));
+        }
         match v.kind() {
             Kind::Bool => Ok(v.is_true()),
             _ => Err(at(format!(
@@ -173,33 +201,102 @@ impl Engine {
     /// Spec §3.4 wants the *name* of the undefined variable, which minijinja's
     /// message omits. Recover it by asking the template what it reads and
     /// checking each name against the context.
+    ///
+    /// For template *text* — anything that may hold `{{ }}` among literal
+    /// characters. `describe_expr` is the same job for an expression.
     pub(crate) fn describe_with(&self, src: &str, ctx: &Value, e: &minijinja::Error) -> String {
-        let base = describe(e);
-        if e.kind() != minijinja::ErrorKind::UndefinedError {
-            return base;
-        }
-        let referenced = match sole_expression(src) {
+        let names = match sole_expression(src) {
             Some(expr) => self
                 .env
                 .compile_expression(expr)
-                .map(|c| c.undeclared_variables(false)),
+                .map(|c| c.undeclared_variables(true)),
             None => self
                 .env
                 .template_from_str(src)
-                .map(|t| t.undeclared_variables(false)),
+                .map(|t| t.undeclared_variables(true)),
         };
-        let Ok(names) = referenced else { return base };
-        let mut missing: Vec<String> = names
-            .into_iter()
-            .filter(|n| ctx.get_attr(n).map_or(true, |v| v.is_undefined()))
-            .collect();
-        missing.sort();
-        match missing.as_slice() {
-            [] => base,
-            [one] => format!("undefined variable `{one}`"),
-            _ => format!("undefined variables: {}", missing.join(", ")),
+        name_undefined(names.ok(), ctx, e)
+    }
+
+    /// `describe_with` for text that is an *expression* and not template
+    /// text. `when: branch == "main"` carries no braces, so `describe_with`
+    /// would take it for one literal string, find no names in it, and fall
+    /// back to the message with no name in it — which is the whole bug.
+    ///
+    /// Two functions rather than one with a flag, because the choice is not a
+    /// knob the caller tunes: it is a fact about which language the string is
+    /// written in, and the caller always knows it. `undeclared` and
+    /// `undeclared_in_template` above are the same pair for the same reason.
+    pub(crate) fn describe_expr(&self, expr: &str, ctx: &Value, e: &minijinja::Error) -> String {
+        let names = self
+            .env
+            .compile_expression(expr)
+            .map(|c| c.undeclared_variables(true))
+            .ok();
+        name_undefined(names, ctx, e)
+    }
+}
+
+/// The names are found differently for text and for an expression; the
+/// honesty rule is the same, so it lives here once.
+fn name_undefined(
+    names: Option<std::collections::HashSet<String>>,
+    ctx: &Value,
+    e: &minijinja::Error,
+) -> String {
+    let base = describe(e);
+    if e.kind() != minijinja::ErrorKind::UndefinedError {
+        return base;
+    }
+    let Some(names) = names else { return base };
+    let mut missing: Vec<String> = names
+        .iter()
+        .filter_map(|n| undefined_prefix(ctx, n))
+        .collect();
+    missing.sort();
+    // `palette.bg` and `palette.fg` are one typo, not two.
+    missing.dedup();
+    match missing.as_slice() {
+        // Nothing we can name. Say minijinja's words rather than guess:
+        // "I do not know" is the house answer (D11, D14).
+        [] => base,
+        [one] => format!("undefined variable `{one}`"),
+        _ => format!("undefined variables: {}", missing.join(", ")),
+    }
+}
+
+/// The shortest prefix of a dotted path the context does not define, or
+/// `None` when the whole path resolves.
+///
+/// `palette.bg` with no `palette` reports `palette`: naming a child of
+/// something that does not exist invents a level the plan never had, and the
+/// fix the reader has to make is to spell `palette`. `env.MYCACHE` with `env`
+/// bound reports `env.MYCACHE`, because `env` is right and the key is not —
+/// and that is the case this walk exists for. A flat check on the top-level
+/// name found `env` defined, concluded nothing was missing, and printed the
+/// nameless message.
+fn undefined_prefix(ctx: &Value, path: &str) -> Option<String> {
+    let mut cur = ctx.clone();
+    let mut seen = String::new();
+    for part in path.split('.') {
+        if !seen.is_empty() {
+            seen.push('.');
+        }
+        seen.push_str(part);
+        // A numeric segment is an index, the way minijinja's own path lookup
+        // reads one.
+        let next = match part.parse::<usize>() {
+            Ok(i) => cur.get_item_by_index(i),
+            Err(_) => cur.get_attr(part),
+        };
+        match next {
+            Ok(v) if !v.is_undefined() => cur = v,
+            // Undefined, or a scalar that has no keys to read: either way
+            // this is the segment that stops resolving.
+            _ => return Some(seen),
         }
     }
+    None
 }
 
 /// minijinja nests the useful part in the source of the error; surface both.
@@ -491,6 +588,94 @@ mod tests {
             e.render_field("{{ a }}{{ b }}", &c).unwrap().to_string(),
             "12"
         );
+    }
+
+    // The rule is the *shortest* prefix that is missing. Naming a child of
+    // something that does not exist invents a level the plan never had.
+    #[test]
+    fn an_undefined_attribute_names_the_key_and_a_missing_map_names_the_map() {
+        let e = Engine::new();
+        let err = |src: &str, c: &Value| {
+            let x = e.render(src, c).unwrap_err();
+            e.describe_with(src, c, &x)
+        };
+
+        // `env` is bound and the key is not: the key is the useful name, and
+        // a top-level-only check found `env` defined and said nothing.
+        let mut map = BTreeMap::new();
+        map.insert("OTHER".to_string(), Value::from("1"));
+        let c = ctx(&[("env", Value::from(map))]);
+        assert_eq!(
+            err("{{ env.MYCACHE }}/x", &c),
+            "undefined variable `env.MYCACHE`"
+        );
+
+        // `palette` is not bound at all, so `palette` is the fix, not
+        // `palette.bg`.
+        let c = ctx(&[]);
+        assert_eq!(err("{{ palette.bg }}", &c), "undefined variable `palette`");
+
+        // One typo, one name.
+        assert_eq!(
+            err("{{ palette.bg }}{{ palette.fg }}", &c),
+            "undefined variable `palette`"
+        );
+    }
+
+    // A subscript is where the analysis genuinely does not know the key:
+    // minijinja's walk recurses into the base and never builds a path, so it
+    // sees `t`, which is defined. Saying "undefined value" there is the
+    // correct answer (D11, D14) and this test exists so nobody later
+    // "fixes" it into a guess.
+    #[test]
+    fn a_subscript_keeps_minijinjas_words_rather_than_guessing() {
+        let e = Engine::new();
+        let map: BTreeMap<String, Value> = BTreeMap::new();
+        let c = ctx(&[("t", Value::from(map))]);
+        let x = e.render("{{ t['nope'] }}", &c).unwrap_err();
+        let msg = e.describe_with("{{ t['nope'] }}", &c, &x);
+        assert!(msg.contains("undefined value"), "{msg}");
+        assert!(!msg.contains('`'), "no name is claimed: {msg}");
+    }
+
+    // `when:` carries no braces, so the text path would read it as one
+    // literal string, find no names and print nothing useful.
+    #[test]
+    fn a_failing_condition_names_its_variable() {
+        let e = Engine::new();
+        let at = |m: String| Diag::new("t.yml", 1, 1, m);
+        let c = ctx(&[]);
+        let err = e.eval_bool("branch == 'main'", &c, &at).unwrap_err();
+        assert_eq!(err.msg, "undefined variable `branch`", "{}", err.msg);
+    }
+
+    // The regression guard for the root cause: a field that is one expression
+    // and nothing else never *used* the undefined value, so strict mode
+    // stayed quiet and handed back a successful `undefined`.
+    #[test]
+    fn a_sole_expression_that_is_undefined_is_an_error() {
+        let e = Engine::new();
+        let c = ctx(&[]);
+        let err = e.render_field("{{ nope }}", &c).unwrap_err();
+        assert_eq!(err.kind(), minijinja::ErrorKind::UndefinedError);
+        assert_eq!(
+            e.describe_with("{{ nope }}", &c, &err),
+            "undefined variable `nope`"
+        );
+    }
+
+    // `when: env.NOPE` reported "evaluated to  (undefined), not true or
+    // false" -- an empty value and the wrong diagnosis.
+    #[test]
+    fn a_condition_that_is_undefined_says_so_rather_than_not_a_boolean() {
+        let e = Engine::new();
+        let at = |m: String| Diag::new("t.yml", 1, 1, m);
+        let mut map = BTreeMap::new();
+        map.insert("OTHER".to_string(), Value::from("1"));
+        let c = ctx(&[("env", Value::from(map))]);
+        let err = e.eval_bool("env.NOPE", &c, &at).unwrap_err();
+        assert_eq!(err.msg, "undefined variable `env.NOPE`", "{}", err.msg);
+        assert!(!err.msg.contains("not true or false"), "{}", err.msg);
     }
 
     #[test]
