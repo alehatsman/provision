@@ -24,6 +24,16 @@ pub(crate) const STRUCTURAL_KEYS: &[&str] = &["vars", "vars_file", "import", "us
 /// because four of these are only legal on one kind of step.
 pub(crate) struct ModifierDoc {
     pub name: &'static str,
+    /// Where the modifier is **meaningful**, as prose for a reader. It is
+    /// deliberately *not* a rule the parser enforces: only structural steps
+    /// reject modifiers they cannot honour (`check_modifiers`), and every
+    /// action step accepts every modifier in this table. Several entries are
+    /// narrower than reality on purpose -- `changed_when` is documented for
+    /// command steps and a `file` step honours it too.
+    ///
+    /// Written down because this is a published contract (D25) and an
+    /// unenforced claim an agent cannot distinguish from an enforced one is
+    /// worse than no claim. §4 says the same thing in the same words.
     pub applies: &'static str,
     pub note: &'static str,
 }
@@ -60,12 +70,12 @@ pub(crate) static MODIFIERS: &[ModifierDoc] = &[
     m(
         "sudo",
         "any action",
-        "run as root. not templated; true or false as a literal",
+        "run as root; templated, and a sole expression must yield a bool. it cannot read a register: privilege is known before the run starts",
     ),
     m(
         "timeout",
-        "command steps",
-        "per attempt, not per step: `30s`, `5m`, `1h`",
+        "any action",
+        "per attempt, not per step: `30s`, `5m`, `1h`. bounds every command a typed action spawns, not only `shell`/`cmd`",
     ),
     m("retry", "command steps", "a mapping: `{attempts, delay}`"),
     m(
@@ -86,18 +96,18 @@ pub(crate) static MODIFIERS: &[ModifierDoc] = &[
     ),
     m(
         "changed_when",
-        "command steps",
-        "an expression deciding `changed`; also satisfies the gate",
+        "any action",
+        "an expression deciding `changed`; also satisfies the gate. most useful on a command step, honoured on every action",
     ),
     m(
         "failed_when",
-        "command steps",
+        "any action",
         "an expression deciding `failed`; `false` is `ignore_errors`",
     ),
     m(
         "raw",
-        "shell steps",
-        "do not render the script as a template",
+        "any action",
+        "do not render the action body as a template; written for `shell`, honoured by every action",
     ),
     m("props", "`use` only", "the component's declared arguments"),
     m(

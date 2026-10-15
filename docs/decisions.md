@@ -190,8 +190,21 @@ fail.
 
 **Amended 2026-10-15, on an unknown filter value.** Ansible accepts a tag no
 step carries and runs nothing. Provision does not: a `--tags` or `--skip-tags`
-value matching no step in the run is exit 3, named per value, with the plan's
-tags in the note. The amendment is not a style preference — `apply drift.yml
+value that **no step in the file declares** is exit 3, named per value, with
+the plan's tags in the note. A value that is declared but selects nothing on
+this host is *not* an error.
+
+That distinction is the whole of the rule and the first version did not have
+it. It asked "did this match anything in the run", which is a question about
+the machine, and so refused `--tags pacman` on a Mac where every pacman step
+is correctly gated to Linux — the ordinary state of a cross-platform plan.
+Worse, the tag set was collected by the walk, so the answer depended on the
+root's shape: visible on a plan root, invisible on a task root, for the same
+bytes. Whether a tag exists is a property of the file and must have one
+answer. The walk now descends into gated-off subtrees for that purpose (D27),
+and stands down entirely when it could not finish looking — a deadline, an
+interrupt, or an import path it could not render — because a false refusal of
+a tag that is really there is worse than the silence this check replaced. The amendment is not a style preference — `apply drift.yml
 --tags handlr` reported `2 steps · 2 skipped`, exit 0, which is an apply that
 touched nothing reporting success, and the inverse typo ran the whole plan.
 Neither is recoverable by reading the output, and `break-glass.md` §3b's

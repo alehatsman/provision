@@ -1396,8 +1396,16 @@ Tag selection (Ansible semantics, deliberately):
   `use` build the scope every later step reads; skipping them by tag would
   silently unset variables the selected steps depend on. A tag on an `import`
   or `use` still propagates to the steps inside it, which is the point.
-- **A filter value matching no step is a usage error** (exit 3), named per
-  value, with the plan's actual tags in the note. `--tags handlr` reported
+- **A filter value no step in the file declares is a usage error** (exit 3),
+  named per value, with the plan's actual tags in the note. **A value that is
+  declared but selects nothing on this host is not an error** — every
+  `pacman` step gated to Linux, read on a Mac, is the ordinary state of a
+  cross-platform plan. Those are two questions: whether the tag exists is a
+  property of the *file* and has the same answer on every host, under every
+  verb and every root shape; whether it selected anything is a property of
+  *this run*. Conflating them made a real tag read as a typo. The walk
+  descends into gated-off subtrees for shape (D27) so that the tag set is the
+  file's and not the machine's. `--tags handlr` reported
   `2 skipped`, exit 0 — an apply that did nothing reporting success — and
   `--skip-tags handlr` ran everything. This is a deliberate divergence from
   Ansible and from the rest of D7; the note doubles as the only way to ask a

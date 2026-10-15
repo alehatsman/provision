@@ -133,6 +133,11 @@ pub(crate) struct Expander {
     /// Spec §8 `--deadline`: when the run's wall clock runs out. `None` is no
     /// deadline, which is the default and every `validate`.
     deadline: Option<Instant>,
+    /// Set when a shape-only descent could not be entered — a templated
+    /// import path that cannot be rendered without the gated-off scope, or a
+    /// file that is not on this machine. The subtree's tags are then unknown,
+    /// so the unknown-tag check must not claim a tag is absent from the plan.
+    shape_incomplete: bool,
     /// Set while `validate` is inside a subtree its `when` ruled out. Spec
     /// §8: `validate` answers for the file, and a subtree gated off on *this*
     /// machine was simply invisible to it — a `when: os == "linux"`
@@ -179,6 +184,7 @@ impl Expander {
             keep_going: false,
             strict: false,
             deadline: None,
+            shape_incomplete: false,
             shape_only: false,
             os_gated: false,
             seen_tags: BTreeSet::new(),
@@ -353,13 +359,24 @@ impl Expander {
     /// walk already found problems: a plan that failed to load never reached
     /// its tags, and "no step is tagged `x`" would then be a guess.
     ///
-    /// The one blind spot, stated: a subtree behind a structural `when: false`
-    /// is never entered, so tags declared only inside it are not seen. The
-    /// steps are not in this run either way, so the refusal is still true of
-    /// the run — it is the wording "no step in the plan" that would overreach,
-    /// which is why the message says what it says.
+    /// **What this asks is whether the tag exists, not whether it selected
+    /// anything.** Those are two questions and conflating them was the bug in
+    /// the first version: a tag declared nowhere is a typo and is refused on
+    /// every host, while a tag that exists and selects nothing *here* — every
+    /// `pacman` step gated to Linux, read on a Mac — is the ordinary state of
+    /// a cross-platform plan and is not an error. The walk descends into
+    /// gated-off subtrees for shape (D27), so the tag set is the file's and
+    /// not this machine's.
     fn check_selection(&mut self) {
-        if !self.diags.is_empty() || self.mode.executes() {
+        // Stand down when the walk did not finish looking. A diagnostic may
+        // have aborted it, a deadline or a Ctrl-C may have cut it short
+        // (`stopped`), or a shape-only descent may have been abandoned
+        // because an import path could not be rendered without the very
+        // scope the gate ruled out (`shape_incomplete`). In all three the
+        // tag set is partial, and "no step declares `x`" would be a guess —
+        // and a false refusal of a tag that is really there is worse than
+        // the silence this check replaced.
+        if !self.diags.is_empty() || self.mode.executes() || self.stopped || self.shape_incomplete {
             return;
         }
         let known: Vec<&str> = self.seen_tags.iter().map(String::as_str).collect();
@@ -463,7 +480,16 @@ impl Expander {
                 // Go in anyway, shape only. The step is still reported
                 // skipped above — this adds checks, not work or output.
                 //
-                // Gated on `strict` rather than on the verb, which decides
+                // The descent itself is unconditional; only the *strict
+                // gate* inside it is gated on `strict`. It used to be gated
+                // as a whole, which made a tag declared inside a gated-off
+                // subtree visible on a plan root and invisible on a task
+                // root — so `--tags pacman` was accepted on one and refused
+                // on the other for the same bytes. Whether a tag exists is a
+                // property of the file (§8); it cannot depend on the root's
+                // shape.
+                //
+                // Formerly gated on `strict` rather than on the verb, which decides
                 // two things at once. It is the honest trigger: the strict
                 // gate is the only thing a shape-only walk checks, so with
                 // strict off there is nothing to go in for. And it keeps
@@ -475,7 +501,7 @@ impl Expander {
                 // machine, which is the one thing §8 promises cannot happen.
                 // The executing `apply` walk has strict off and so skips it;
                 // its preflight does not.
-                if self.strict && step.is_structural() {
+                if step.is_structural() {
                     let outer = (self.shape_only, self.os_gated);
                     self.shape_only = true;
                     self.os_gated = outer.1 || self.when_names_os(step);
@@ -788,13 +814,19 @@ impl Expander {
         // place: the subtree is skipped, so it must not fail on what it reads.
         let rendered = self.render_str(step.body, &ctx);
         let rel = if self.shape_only {
-            rendered.ok()?
+            let Ok(r) = rendered else {
+                self.shape_incomplete = true;
+                return None;
+            };
+            r
         } else {
             self.diags.absorb(rendered)?
         };
         let path = load::resolve(step.body.file, &rel);
         if !path.exists() {
-            if !self.shape_only {
+            if self.shape_only {
+                self.shape_incomplete = true;
+            } else {
                 self.diags.push(load::missing(step.body, &path, key));
             }
             return None;
@@ -1069,6 +1101,50 @@ impl Expander {
         // already proved at parse time and re-reading it buys nothing.
         // `retry` always, because it is a mapping whose two fields are checked
         // individually and either may be a template.
+        //
+        // First, though: a typed modifier that reads a register is refused
+        // outright, not rendered. D14's placeholder makes the preflight render
+        // a value the real walk will not see, and these three are consumed in
+        // places where a wrong value is not a wrong *verdict* but a wrong
+        // *run*:
+        //
+        //   `sudo`    decides whether the step escalates, and §7 promises the
+        //             preflight finds every sudo step so the password is asked
+        //             for once, before anything happens. Rendered from a
+        //             placeholder it came out `false`, the manifest counted
+        //             `sudo: 0`, `Sudo::preflight` returned without proving
+        //             root, and the step then ran unprivileged. Privilege is a
+        //             precondition and part of the shape of the run, like a
+        //             `use:` path (§3.2) -- not something a run discovers
+        //             about itself halfway through.
+        //
+        //   `timeout` feeds §8's deadline arithmetic, which is done in the
+        //   `retry`   preflight too, and both are read leniently at execution,
+        //             so a value that failed to resolve became the 10m default
+        //             and no-retry with nothing said.
+        //
+        // The fix is the same one D27 and #27 already chose for the other
+        // undecidable-before-the-run questions: refuse, rather than defer. A
+        // step whose privilege depends on an earlier step's output is two
+        // plans, and says so.
+        for (node, name) in [
+            (step.mods.sudo, "sudo"),
+            (step.mods.timeout, "timeout"),
+            (step.mods.retry, "retry"),
+        ] {
+            let Some(n) = node else { continue };
+            if self.node_reads_a_register(n, scope) {
+                self.diags.push(
+                    n.err(format!("`{name}` cannot read a register"))
+                        .with_note(match name {
+                            "sudo" => "whether a step needs root must be known before the run starts (§7); gate the step with `when:` instead, or split the plan",
+                            _ => "it is read before the first step runs, so a value that does not exist yet would silently become the default",
+                        }),
+                );
+                return;
+            }
+        }
+
         let checks = [
             step.mods
                 .sudo
@@ -1213,7 +1289,21 @@ impl Expander {
         // `--keep-going` carries on past a failed step, but never past an
         // interrupt: Ctrl-C is the operator saying stop, not a step saying it
         // could not do its work.
-        if done.status.failed() && self.mode.executes() && (!self.keep_going || done.interrupted())
+        //
+        // Nor past a failed `assert`. The flag exists so one run reports
+        // everything broken, which holds because failed *work* is
+        // independent -- one package that would not install says nothing
+        // about the next. A failed assert is not work: it is a claim about
+        // the machine that turned out false, and every step after it would
+        // run on premises the plan has already said it does not understand.
+        // This is load-bearing rather than tidy: D25's answer to pointing
+        // `apply` at the wrong machine is a host guard written as an `assert`
+        // tagged `always`, and `--keep-going` disarmed it -- the guard failed
+        // and the work it guards ran anyway.
+        let premise_failed = done.status.failed() && step.key == "assert";
+        if done.status.failed()
+            && self.mode.executes()
+            && (!self.keep_going || done.interrupted() || premise_failed)
         {
             self.stopped = true;
         }

@@ -599,6 +599,56 @@ fn one_good_tag_does_not_excuse_a_typo_beside_it() {
     assert!(!out.contains("`x` matches"), "x is a real tag: {out}");
 }
 
+// Whether a tag exists is a property of the FILE; whether it selected
+// anything is a property of THIS RUN. The first version of the check asked
+// the second question and reported the answer as a typo.
+#[test]
+fn a_declared_tag_that_selects_nothing_here_is_not_a_typo() {
+    // `otheros` is real, declared in a subtree gated off on this machine.
+    // Selecting it does nothing, which is the ordinary state of a
+    // cross-platform plan, and is not an error.
+    for root in ["tag_scope/plan.yml", "tag_scope/task.yml"] {
+        let path = fixtures().join(root);
+        let out = run(&[
+            "plan",
+            "--plan-no-probe",
+            path.to_str().unwrap(),
+            "--tags",
+            "otheros",
+        ]);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{root}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
+#[test]
+fn tag_existence_does_not_depend_on_the_roots_shape() {
+    // The same bytes under a list root and a mapping root. Before the split,
+    // the tag set was a walk artifact and the descent was gated on `strict`,
+    // so `otheros` was visible on the plan root and invisible on the task
+    // root -- one file, two answers to a question about the file.
+    for root in ["tag_scope/plan.yml", "tag_scope/task.yml"] {
+        let path = fixtures().join(root);
+        let out = run(&[
+            "plan",
+            "--plan-no-probe",
+            path.to_str().unwrap(),
+            "--tags",
+            "handlr",
+        ]);
+        let text = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert_eq!(out.status.code(), Some(EXIT_VALIDATION), "{root}: {text}");
+        assert!(text.contains("`handlr` matches no step"), "{root}: {text}");
+        // And the note names the whole file's tags, both subtrees included.
+        assert!(text.contains("here"), "{root}: {text}");
+        assert!(text.contains("otheros"), "{root}: {text}");
+    }
+}
+
 #[test]
 fn tags_always_is_not_exempt_from_the_unknown_tag_check() {
     // The exemption was granted to both flags; §8 only ever justified it for
