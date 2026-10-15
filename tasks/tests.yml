@@ -1,0 +1,15 @@
+---
+description: run the test suite, with no tool but cargo
+
+# The gate (`ci.yml`) is the full answer and needs three installed tools. This
+# is the subset that needs none, which is what a platform with no gate tooling
+# can still run — on Windows that is the whole of the native coverage README
+# Status calls missing, so it is a task rather than a line in a workflow file.
+#
+# `cargo test`, not `cargo t`: the nextest alias in `.cargo/config.toml` is
+# rust-quality's and needs cargo-nextest. The point here is the run with
+# nothing installed.
+steps:
+  - name: tests
+    shell: cargo test --locked --workspace --all-features
+    timeout: 30m

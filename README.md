@@ -236,12 +236,43 @@ The `[workspace.lints]` block in `Cargo.toml` is its canonical lint block;
 cargo has no include mechanism for manifests, so `tasks/lints-check.yml`
 reports drift instead of copying.
 
-**There is no CI for this repo yet.** No `mgitci.yml`, no Rust CI image; both
-wait on moongit's runner running a job as `provision apply job.yml --json`.
-Provision's half of that contract is finished — the runner can read the
-stream, cancel a job and bound it (D19) — so what is left is the moongit
-side. Until then the gate is a local one, and running it before a push is the
-whole of it.
+The same gate runs on GitHub Actions, as one job in one process — which is
+the shape a CI runner is supposed to use it in (D19, D24):
+
+```
+$ provision apply tasks/job.yml --json --deadline 40m
+```
+
+`tasks/job.yml` is two `use:` lines, `tools.yml` then `ci.yml`, so CI runs
+what a push runs and neither restates the other. The workflow redirects the
+stream to a file and reads it back with `.github/check-stream.py`, which
+asserts what spec §9.3 promises: one object per step as it finishes, a
+summary that says whether the run was stopped, and counts that agree with the
+steps that produced them. A second job exercises the rest of the contract —
+SIGTERM gives exit 143, `--deadline` gives 124, and both still print the
+summary.
+
+Windows runs `tasks/tests.yml` — the suite with no tool but cargo — natively,
+which is new and is less than it sounds. `tests/apply.rs` is `#![cfg(unix)]`,
+so what runs there is `cli.rs`, `component.rs`, `list.rs` and the unit tests:
+parsing, validation, `list`, components, the CLI and every exit code they
+reach, on a real Windows host. `pkg` against winget, `service` and Ctrl-C
+stay untested, because the suite that would test them does not compile there.
+Closing that is a change to the suite, not to this workflow.
+
+That is evidence about **a** runner, not about moongit. The `mgitci.yml` and
+the Rust CI image still wait on moongit's runner switching to `provision apply
+job.yml --json`, and D19's reopen check reads this as partial credit rather
+than settled.
+
+Tagged binaries come from the same place: `.github/workflows/release.yml`
+builds `x86_64-unknown-linux-musl`, `aarch64-apple-darwin`,
+`x86_64-pc-windows-gnu` and `aarch64-linux-android` on a `v*` tag and
+publishes them with a `SHA256SUMS`, so a machine with no Rust toolchain —
+a phone running Termux, a CI image — can install one with
+`tasks/install.yml` or a `download` step carrying the checksum. They exist
+for the owner's machines, not as a product: there is no stability promise
+and no support (D23).
 
 ## Documents
 

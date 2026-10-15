@@ -1,0 +1,18 @@
+---
+description: a job that never finishes, for exercising cancellation and the deadline
+
+# D19's contract is "die cleanly when told to, and bound the whole walk when
+# asked to". Both need a run that would otherwise not end. The second step is
+# the assertion that matters: a stopped run must stop the *walk*, not merely
+# fail the step it was in, so a `Must not run` that reports anything at all is
+# the failure this file exists to catch.
+#
+# Bare steps on purpose. An exit code is the whole contract of each (D20), and
+# this is a component root, so `--strict` is off by default (D21) and nothing
+# here is pretending to converge a machine.
+steps:
+  - name: Sleeps until something stops it
+    shell: sleep 60
+
+  - name: Must not run after the run is stopped
+    shell: "true"
