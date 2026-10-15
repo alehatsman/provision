@@ -3407,6 +3407,79 @@ exit 2
     assert!(out.contains("the database is locked"), "{out}");
 }
 
+// The same rule one command further in. A typed action runs several — a
+// `pkg` step queries, then installs — and the budget used to be taken once,
+// before the first of them, then handed to each in turn. So the step could
+// spend the whole remaining deadline on the query and the whole of it again
+// on the install. Here the query answers slowly but successfully, so the
+// install is reached with the clock nearly out and must not get a fresh
+// second of it.
+#[test]
+fn a_typed_actions_second_command_gets_what_is_left_after_its_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    // Answers "nothing installed" after two seconds, so the install is next
+    // with most of the budget gone. The gap the assertion reads is two seconds
+    // wide by construction: reclamped, the install is killed with the ~1s that
+    // is left and the run ends near 3s; given the budget again, it is killed
+    // after another 3s and the run ends near 5s.
+    fake_manager(
+        &bin,
+        "dpkg-query",
+        "sleep 2
+exit 0
+",
+    );
+    // And the install hangs. With the budget reclamped it is killed with
+    // what little is left; without, it was given the whole of it again.
+    fake_manager(
+        &bin,
+        "apt-get",
+        "sleep 20
+",
+    );
+    let path = dir.path().join("pkg.yml");
+    std::fs::write(
+        &path,
+        "- name: An install behind a slow query
+  pkg:
+    names: [yarn]
+    manager: apt
+",
+    )
+    .unwrap();
+
+    let started = std::time::Instant::now();
+    let out = Command::new(env!("CARGO_BIN_EXE_provision"))
+        .args([
+            "apply",
+            path.to_str().expect("temp paths are UTF-8"),
+            "--deadline",
+            "3s",
+        ])
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                bin.display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("provision failed to start");
+    let elapsed = started.elapsed();
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+
+    assert_eq!(out.status.code(), Some(124), "{text}");
+    assert!(
+        elapsed < std::time::Duration::from_millis(4000),
+        "the second command was given the budget the first had already spent: {elapsed:?}\n{text}"
+    );
+}
+
 // Spec §8: each step's effective timeout is the lesser of its own and the
 // time left, so no step runs past the deadline it was admitted under. A typed
 // action took the timeout computed before its `unless` ran — so the gate's
@@ -3439,10 +3512,21 @@ fn a_typed_action_after_its_gate_gets_only_the_time_left() {
     let path = dir.path().join("pkg.yml");
     std::fs::write(
         &path,
-        "- name: A query that hangs behind a slow gate\n  pkg:\n    names: [yarn]\n    manager: apt\n  unless: \"sleep 2; exit 1\"\n",
+        format!(
+            "- name: A query that hangs behind a slow gate\n  pkg:\n    names: [yarn]\n    manager: apt\n  unless: \"echo gate $(date +%s.%N) >> '{0}'; sleep 2; exit 1\"\n",
+            log.display()
+        ),
     )
     .unwrap();
 
+    // Wall clock as well as the monotonic one: the log below is stamped in
+    // epoch seconds, and the question the probe has to answer is *where* the
+    // time goes — before the gate, between the gate and the query, or after
+    // the kill. Only an absolute start makes those three distinguishable.
+    let wall = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or_default();
     let started = std::time::Instant::now();
     let out = Command::new(env!("CARGO_BIN_EXE_provision"))
         .args([
@@ -3470,7 +3554,7 @@ fn a_typed_action_after_its_gate_gets_only_the_time_left() {
     let calls = std::fs::read_to_string(&log).unwrap_or_default();
     assert!(
         elapsed < std::time::Duration::from_millis(4500),
-        "the query ran past the deadline: {elapsed:?}\ncommands the step ran:\n{calls}\n{text}"
+        "the query ran past the deadline: {elapsed:?}\nstarted at {wall:.3}\ncommands the step ran:\n{calls}\n{text}"
     );
     assert!(
         text.contains("deadline exceeded after"),
