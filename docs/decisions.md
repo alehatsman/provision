@@ -610,6 +610,31 @@ against them — then the rule can name the producing step instead of any
 command at all. Not worth building for `shell`, which would still declare
 nothing.
 
+**Amendment, 2026-10-15 — the overturn clause, taken up for the steps that
+do declare.** As shipped, the deferral was a per-walk flag rather than a
+per-path judgement: only `shell` and `cmd` set it, and they set it for every
+later `src`. So `git` with `dest: ./dotfiles` followed by a `file` step whose
+`src` was `./dotfiles/gitconfig` was refused at `validate` with exit 3 — for a
+path the plan itself creates, two lines above — while inserting a `shell:
+"true"` anywhere earlier made the identical plan pass. The rule blocked
+exactly the authors who did not know the trick.
+
+A `git`, `download` or `template` step's `dest`, and a `file` step's `path`,
+are declarations: the step says where it writes before it writes there. A
+later `src` at or under one of them is pending, not missing, and is deferred
+the same way. This is not the guess D18 rejected — "could an earlier step
+plausibly have created this path" is a guess; "an earlier step said it would
+create this path" is a reading. The two deferrals differ only in how much
+they cover: a command declares nothing and so defers everything after it; a
+declaration names one subtree and defers only what is inside it, which is why
+adding this makes the *narrow* case narrower rather than widening the hole —
+`git dest: ./dotfiles` no longer needs a `shell` step to unlock it, and a
+typo anywhere outside `./dotfiles` is still caught before the run.
+
+`file: {state: absent}` declares a removal and is not a declaration of an
+output. A `shell` step still declares nothing, exactly as the original entry
+said, and its blanket deferral is unchanged.
+
 ## D19 — provision owns one job's clock and its own death; the runner owns the rest
 
 **Decision.** As a CI execution engine provision takes on exactly three

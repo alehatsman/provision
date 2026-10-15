@@ -116,6 +116,12 @@ pub(crate) struct Expander {
     /// steps whose effects provision cannot describe, so after one of them a
     /// `file` step's missing `src` may be a path the plan itself builds (D18).
     walked_a_command: bool,
+    /// D18's overturn clause: the paths earlier steps *declared* they would
+    /// write — a `git`, `download` or `template` step's `dest`, a `file`
+    /// step's `path`. A later `src` inside one of these is pending, not
+    /// missing. Unlike `walked_a_command` this is a per-path judgement: a
+    /// declaration names one subtree and defers only what is inside it.
+    declared: Vec<PathBuf>,
     stack: Vec<PathBuf>,
     runner: Option<Runner>,
     sink: Box<dyn Sink>,
@@ -176,6 +182,7 @@ impl Expander {
             manifest: Manifest::default(),
             registers: BTreeSet::new(),
             walked_a_command: false,
+            declared: Vec::new(),
             stack: Vec::new(),
             runner: None,
             sink: Box::new(crate::output::Silent),
@@ -1081,15 +1088,24 @@ impl Expander {
         if step.key == "template" && !derived {
             derived = self.check_template_sources(step, &ctx, scope);
         }
-        if step.key == "file" && !derived {
-            self.check_file_source(step, &ctx);
+        if step.key == "file" && !derived && !self.check_file_source(step, &ctx) {
+            // The source is named and is not there. `prepare` would reach the
+            // same file and say `cannot read … No such file`, one fault
+            // reported twice in two wordings — and the one above is the one
+            // that carries the note about how paths resolve (§9.3).
+            renderable = false;
         }
         // Set after this step's own check: the rule reads "earlier in the
-        // walk", and a step is not earlier than itself.
+        // walk", and a step is not earlier than itself. Same for the path
+        // this step declares — a `file` step's `src` under its own `path` is
+        // still missing.
         if matches!(step.key, "shell" | "cmd") {
             self.walked_a_command = true;
         }
-        let defer_src = self.defers_file_src();
+        let defer_src = self.defers_file_src(step, &ctx);
+        if let Some(out) = self.declared_output(step, &ctx) {
+            self.declared.push(out);
+        }
 
         // The three typed modifiers §3.4's rule now covers are checked here,
         // with the scope, because parsing could not check them: a template
@@ -1553,25 +1569,75 @@ impl Expander {
     }
 
     /// D18: whether a `file` step's missing `src` is unresolved rather than
-    /// wrong. True on a walk that runs nothing, once a `shell` or `cmd` step
-    /// has been walked — that step can create any path, and it has not created
-    /// it yet. The walk that executes reaches the `file` step after it has run,
-    /// so it never defers and a missing source is still an error there.
-    fn defers_file_src(&self) -> bool {
-        !self.mode.executes() && self.walked_a_command
+    /// wrong. The walk that executes reaches the step after the earlier steps
+    /// have run, so it never defers and a missing source is still an error
+    /// there. On a walk that runs nothing there are two reasons to defer, and
+    /// they differ in how much they cover:
+    ///
+    /// * a `shell` or `cmd` step has been walked — it declares nothing, so it
+    ///   defers every later `src`;
+    /// * this `src` is at or under a path an earlier step declared it would
+    ///   write — that names one subtree, so it defers only what is inside it.
+    fn defers_file_src(&self, step: &Step<'static>, ctx: &Value) -> bool {
+        if self.mode.executes() {
+            return false;
+        }
+        if self.walked_a_command {
+            return true;
+        }
+        let Some(path) = self.resolved_path(step, "src", ctx) else {
+            return false;
+        };
+        self.declared.iter().any(|d| path.starts_with(d))
+    }
+
+    /// The path a step's `key` field names, rendered and resolved against the
+    /// file that wrote it. Silent: every one of these fields was already
+    /// rendered by the field check, so a failure here has been reported.
+    fn resolved_path(&self, step: &Step<'static>, key: &str, ctx: &Value) -> Option<PathBuf> {
+        let at = step.body.get(key)?;
+        let rel = self.render_str(at, ctx).ok()?;
+        Some(load::resolve(at.file, &crate::template::expanduser(&rel)))
+    }
+
+    /// D18's overturn clause: the path this step says it will write, if it
+    /// says. `file: {state: absent}` declares a removal, which is not an
+    /// output — and `shell` and `cmd` declare nothing at all, which is the
+    /// whole reason they defer everything instead.
+    fn declared_output(&self, step: &Step<'static>, ctx: &Value) -> Option<PathBuf> {
+        let key = match step.key {
+            "git" | "download" | "template" => "dest",
+            "file" => {
+                let absent = step
+                    .body
+                    .get("state")
+                    .and_then(|s| s.as_str().ok())
+                    .is_some_and(|s| s == "absent");
+                if absent {
+                    return None;
+                }
+                "path"
+            }
+            _ => return None,
+        };
+        self.resolved_path(step, key, ctx)
     }
 
     /// Spec §8: `src` is one of the paths existence is checked for before
     /// anything runs — unless the plan itself is what puts it there (D18).
-    fn check_file_source(&mut self, step: &Step<'static>, ctx: &Value) {
-        if self.defers_file_src() {
-            return;
+    ///
+    /// Returns whether the step can still be prepared. A `src` that is named
+    /// and absent cannot, and saying so here is what keeps the fault to one
+    /// diagnostic.
+    fn check_file_source(&mut self, step: &Step<'static>, ctx: &Value) -> bool {
+        if self.defers_file_src(step, ctx) {
+            return true;
         }
         let Some(src_at) = step.body.get("src") else {
-            return;
+            return true;
         };
         let Some(rel) = self.diags.absorb(self.render_str(src_at, ctx)) else {
-            return;
+            return false;
         };
         // A `link` target need not exist on this machine.
         let is_link = step
@@ -1580,12 +1646,14 @@ impl Expander {
             .and_then(|s| s.as_str().ok())
             .is_some_and(|s| s == "link");
         if is_link {
-            return;
+            return true;
         }
         let path = load::resolve(src_at.file, &rel);
         if !path.exists() {
             self.diags.push(load::missing(src_at, &path, "file src"));
+            return false;
         }
+        true
     }
 
     // ── helpers ───────────────────────────────────────────────────────────

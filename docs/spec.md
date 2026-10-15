@@ -626,7 +626,12 @@ reaches the `file` step after that command has run: `validate` says nothing
 about the source, `plan` reports the step `would run (unprobed)`, and `apply`
 copies it or fails naming it. Build-then-install is the shape this is for — a
 `shell: cargo build --release` followed by a `file` step copying the binary
-out of `target/` cannot pass a check made on a clean checkout (D18).
+out of `target/` cannot pass a check made on a clean checkout (D18). The same
+holds for a `src` under a path an earlier step *declared* — `git` with
+`dest: ./dotfiles` followed by a `file` step whose `src` is
+`./dotfiles/gitconfig`. There the walk knows which subtree is pending and
+defers only that, so a typo anywhere else in the plan is still caught before
+anything runs.
 
 `mode` is a **quoted** string. Unquoted, `0644` is a number, and which number
 depends on whether the reader believes it is YAML 1.1 (octal, 420) or YAML
@@ -1189,11 +1194,16 @@ gates, so it has a wall clock worth bounding too. There is no
   (D21): a convergence plan's own CI runs plain `validate` and already has
   it.
 
-  One exception, and only one: a `file` step's `src` after a `shell` or `cmd`
-  step in the same walk. That command can create any path and nothing has run,
-  so a source that is not there yet is unresolved rather than missing, and the
-  check moves to the walk that executes (§6.3, D18). Every other path — and a
-  `src` with no command before it — is checked here.
+  Two exceptions, and only two: a `file` step's `src` after a `shell` or `cmd`
+  step in the same walk, and a `file` step's `src` **at or under a path an
+  earlier step declared it would write** — a `git`, `download` or `template`
+  step's `dest`, or another `file` step's `path`. Nothing has run, so in both
+  cases a source that is not there yet is unresolved rather than missing, and
+  the check moves to the walk that executes (§6.3, D18). The difference
+  between them is only how the walk knows: a command declares nothing, so it
+  defers every later `src`; a declared `dest` names exactly one subtree, so it
+  defers only sources inside it. Every other path — and a `src` with neither a
+  command nor a declaration before it — is checked here.
 
   `validate` is the subset of `plan` that runs nothing — not a weaker check,
   and not a stricter one. One file, one set of arguments, one verdict: the
