@@ -723,6 +723,27 @@ impl Expander {
             return;
         };
 
+        // D27: inside a subtree this machine gates off, the descent is shape
+        // only. `bind_props` renders every prop value against the live scope
+        // and type-checks the result, which is exactly what must not happen
+        // here — a gated-off `use:` legitimately passes
+        // `props: {session: "{{ desktop_session }}"}` from an os-gated
+        // `vars_file` that was never loaded. `open()` above was already
+        // shape-aware and this was not, so the two disagreed one line apart.
+        //
+        // Worse than a spurious error: `bind_props` returning `Err` means the
+        // component's steps are never walked, so the strict gate never runs
+        // on them. A templated prop silently disabled the very check D27
+        // exists to perform. Walk with empty props instead — nothing inside
+        // is rendered under `shape_only`, so nothing reads them.
+        if self.shape_only {
+            let dir = component.path.parent().unwrap_or(Path::new("."));
+            let mut child = scope.child_with_props(Map::new(), dir);
+            self.walk(&component.steps, &mut child, depth + 1, tags);
+            self.stack.pop();
+            return;
+        }
+
         match self.bind_props(step, &component, scope) {
             Ok(props) => {
                 // `use` runs in a child scope: the parent is visible read-only
@@ -1323,8 +1344,12 @@ impl Expander {
         step.mods
             .when
             .and_then(|n| n.as_str().ok())
-            .and_then(|w| self.engine.undeclared(w))
-            .is_some_and(|names| names.contains("os"))
+            .and_then(|w| self.engine.undeclared_nested(w))
+            // `facts.os` as well as `os`. The namespace is the *unshadowable*
+            // spelling (§5) and `examples/x1.yml` uses it for the host guard,
+            // so refusing it here demanded the weaker form — the tool telling
+            // an author to write the one a `vars` step can defeat.
+            .is_some_and(|names| names.iter().any(|n| n == "os" || n == "facts.os"))
     }
 
     fn check_strict_gate(&mut self, step: &Step<'static>) {

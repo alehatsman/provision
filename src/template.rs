@@ -122,6 +122,21 @@ impl Engine {
             .map(|e| e.undeclared_variables(false))
     }
 
+    /// The same question with dotted paths kept, so `facts.os` reports
+    /// `facts.os` and not `facts`. §6.10's os-gate rule needs this: `os` and
+    /// `facts.os` name the same fact, and a rule that could only see the
+    /// top-level name demanded the shadowable spelling (§5) while the repo's
+    /// own guard pattern uses the other one.
+    pub(crate) fn undeclared_nested(
+        &self,
+        expr: &str,
+    ) -> Option<std::collections::HashSet<String>> {
+        self.env
+            .compile_expression(expr)
+            .ok()
+            .map(|e| e.undeclared_variables(true))
+    }
+
     /// The same question for a template string rather than an expression: the
     /// top-level names any `{{ … }}` or `{% … %}` in it reads.
     pub(crate) fn undeclared_in_template(

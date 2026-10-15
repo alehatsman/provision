@@ -1,0 +1,9 @@
+# A component whose prop is required, reached only from a gated-off `use:`.
+# The step inside is deliberately ungated so the strict gate has something to
+# find -- the point is that it IS found, even though the prop value could not
+# be rendered.
+props:
+  session: {type: string, required: true}
+steps:
+  - name: an ungated shell behind a gated use
+    shell: "echo {{ props.session }}"
