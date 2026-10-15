@@ -248,13 +248,49 @@ a string that happens to parse.
 | `env` | mapping | {} | Extra environment for every command the step runs: `shell`, `cmd`, `assert`'s `command`, `unless`, and the commands a typed action spawns (`pkg`, `service`, `git`, …). Templated. |
 | `cwd` | path | the invocation directory | Working directory for `shell`, `cmd`, `assert`'s `command`, `unless`, under every command and for every step, including one inside a `use`d component. A command runs where the operator is standing; a shared gate checked out elsewhere must not gate its own checkout. An explicit `cwd:` resolves against the step's own file, like every other path a plan names, and `component_dir` (§3.2) names a component's own directory for a path inside a shell string. Phase 5b, 2026-09-08: this used to be the step's file directory under `apply` and the invocation directory under `run`. Measured against the fleet, no step depended on the old default — zero `cwd:` modifiers, zero relative paths in shell strings — and one rule beats two. |
 | `tags` | list | [] | For `--tags` selection (§8). |
-| `register` | identifier | — | Store the step result as a variable: `{rc, stdout, stderr, changed, skipped, timed_out}`. |
+| `register` | identifier | — | Store the step result as a variable: `{rc, stdout, stderr, changed, skipped, timed_out}`. The shape is fixed, and it binds even when the step did not run — see "a register for a step that never ran" below. |
 | `changed_when` | expr | action-defined | Override the changed verdict. `result` is in scope. |
 | `failed_when` | expr | `result.rc != 0` | Override the failure verdict. `result` is in scope. |
 | `raw` | bool | false | Do not template the action body. |
 
 Order of evaluation: `when` → `unless` → `creates` → action → `failed_when`
 → `changed_when` → `register`.
+
+**A register for a step that never ran.** A step skipped by `when`, by
+`unless`, by `creates` or by tags still binds its `register` — that is what
+makes a later `when: x.skipped` readable instead of a failure on an undefined
+name. The whole shape binds, and the fields that describe a command that was
+never spawned hold their zero values:
+
+| Field | A step that ran | A step that was skipped |
+|---|---|---|
+| `rc` | the command's exit code | `0` |
+| `stdout`, `stderr` | the command's output | `""` |
+| `changed` | the step's verdict | `false` |
+| `skipped` | `false` | `true` |
+| `timed_out` | whether provision killed it (D22) | `false` |
+
+**`rc == 0` therefore does not mean "it passed".** It means "it did not exit
+non-zero", and a step that never ran did not. So the obvious fan-in
+
+```yaml
+when: build.rc == 0 and test.rc == 0
+```
+
+is **true for stages that never ran**, and a plan whose `build` was gated off
+proceeds to deploy. The correct spelling names both halves:
+
+```yaml
+when: not build.skipped and build.rc == 0
+```
+
+`rc` is not given some other value for a skipped step because every candidate
+is worse: a non-zero code would make the step look *failed* to the same
+expression, and `none` would make `x.rc == 0` an error rather than a wrong
+answer — moving the problem from a plan that misreads a register to a plan
+that cannot read one defensively at all. The shape is fixed (§4) and the zero
+values are the honest reading of "no command ran"; `skipped` is the field that
+carries the distinction, and this is what it is for.
 
 ## 5. Facts
 
@@ -1318,7 +1354,7 @@ and nothing else.
 | A step's own command times out (its `timeout`) versus provision's `--deadline` kills it | Both report `rc: 124` — `timeout(1)`'s code (see `--deadline` above) — because either way the step was killed, not exited. `register.timed_out` is `true` in both; it does not distinguish the two, only "killed" from "exited". A step whose own command legitimately runs `timeout(1)` internally and exits 124 on its own reports `timed_out: false`, because it exited (D22) |
 | Non-UTF-8 in stdout | Lossy in both the display and the `register`. Exact bytes were the earlier rule and were dropped: a `register` holding bytes breaks `result.stdout == "yes"`, which is the only thing a register is for |
 | provision's own stdout is closed early — `provision list tasks/ \| head -3` | The write is dropped and the run exits `0`. Piping into `head` is ordinary use, and the reader asking for less is not an error. Rust ignores `SIGPIPE`, so a closed pipe arrives as an `EPIPE` write error and the `println!` macro *panics* on it — which is what this used to do, with a backtrace, on a command a person had every reason to pipe. **The signal stays ignored rather than being restored to its default**, which is the usual one-line fix: this process also writes a sudo password into a child's stdin and depends on that write returning `EPIPE` instead of killing the run (§7), so the printing is what changes. The step sinks (§9.1, §9.3) already dropped failed writes. `--stream`'s copy of a step's own output did not — it went through `print!` and panicked the same way, killing the child with SIGPIPE and losing the capture — and now drops them too; the capture is whole either way |
-| A step is skipped by `when` or by tags | Its `register`, if it declares one, still binds — with `skipped: true`. That field exists precisely so a later `when` can read it rather than fail on an undefined name |
+| A step is skipped by `when`, `unless`, `creates` or by tags | Its `register`, if it declares one, still binds — with `skipped: true`, and `rc: 0`, empty `stdout`/`stderr`, `changed: false`, `timed_out: false`. That field exists precisely so a later `when` can read it rather than fail on an undefined name. Note what `rc: 0` means here: a fan-in gate spelled `build.rc == 0` is **true for a stage that never ran**. §4 has the table and the correct spelling, `not build.skipped and build.rc == 0` |
 | Ctrl-C mid-step | Current step killed, summary printed with `interrupted`, exit 130 |
 | SIGTERM mid-step | The same path and the same word, exit **143**. A CI runner cancelling a job sends TERM, and so does systemd stopping a unit; with no handler provision died where it stood and left the step's process group running, which is the one thing the process-group discipline of §10's timeout row exists to prevent. `--keep-going` does not apply, for the reason it does not apply to Ctrl-C (D19) |
 | Ctrl-C or SIGTERM while no child is running — between steps, or during a step that spawns nothing, like a `file` write | The same stop: the walk reads the signal before the next step starts, no later step runs, and the run exits 130 or 143 with `interrupted` in the summary. The handler only records a signal, and the wait on a child used to be the one place that read it, so a signal that arrived between children was lost and the run exited 0 |

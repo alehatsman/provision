@@ -1,0 +1,23 @@
+description: what a register holds for a step that never ran
+steps:
+  - { name: skipped by when,    shell: "echo hi", register: w, when: false }
+  - { name: skipped by creates, shell: "echo hi", register: c, creates: /etc/hosts }
+  - { name: skipped by unless,  shell: "echo hi", register: u, unless: "true" }
+
+  - name: every field of a skipped register
+    assert:
+      expr: >-
+        w.rc == 0 and w.stdout == "" and w.stderr == "" and
+        w.changed == false and w.skipped and w.timed_out == false
+      msg: a skipped register is not the shape spec 4 documents
+
+  # The same for the other two skip kinds -- the table says "a step that was
+  # skipped", not "a step with when: false".
+  - { name: creates binds too, assert: { expr: "c.skipped and c.rc == 0", msg: creates did not bind } }
+  - { name: unless binds too,  assert: { expr: "u.skipped and u.rc == 0", msg: unless did not bind } }
+
+  # The trap, asserted as a trap. This is the fan-in gate everybody writes,
+  # and it is true for a stage that never ran.
+  - { name: the naive gate passes, assert: { expr: "w.rc == 0", msg: x } }
+  # And the spelling the spec names, which correctly refuses.
+  - { name: the documented gate refuses, assert: { expr: "not (not w.skipped and w.rc == 0)", msg: x } }
