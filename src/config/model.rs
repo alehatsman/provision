@@ -624,6 +624,35 @@ pub(crate) fn check_modifiers(step: &Step<'_>) -> Result<()> {
         )));
     }
 
+    // The same rule, applied to the two modifiers that most need it. `use`
+    // and `import` build a scope and walk it; they never reach `do_action`,
+    // so `env` never reaches a command and `register` never binds. Both were
+    // accepted and dropped on the floor.
+    //
+    // `register` is the sharper one: D5 names it as the replacement for
+    // handlers, so `register` on a `use` is the prescribed recipe, silently
+    // doing nothing across a component boundary and surfacing one step later
+    // as an undefined variable in the `when` that reads it. Worse, it is not
+    // even consistently nothing — a *skipped* `use` does bind, because the
+    // skip paths run `bind_register` and the success path does not.
+    //
+    // `when` and `tags` do propagate, and still do: they gate the subtree
+    // before the walk descends, which is a different thing from being handed
+    // to a command that a structural step never runs.
+    if let Some(n) = m.env.filter(|_| step.is_structural()) {
+        return Err(n
+            .err(format!(
+                "`env` does not reach the steps `{}` walks",
+                step.key
+            ))
+            .with_note("put `env` on the steps that run commands"));
+    }
+    if let Some(n) = m.register.filter(|_| step.is_structural()) {
+        return Err(n
+            .err(format!("`register` has nothing to bind on `{}`", step.key))
+            .with_note("register the step inside the component whose result you want"));
+    }
+
     // Spec §4: sudo is root or nothing, and Windows has no sudo (D8).
     if let Some(n) = m
         .sudo

@@ -1,0 +1,6 @@
+# `env` and `register` on a structural step. Both parse, and neither ever
+# reaches a command: `use` and `import` build a scope and walk it, and never
+# reach `do_action`. Before they were errors they were dropped on the floor.
+- name: env on an import
+  import: ./component/plain.yml
+  env: { MARKER: "yes" }

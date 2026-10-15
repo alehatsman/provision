@@ -1,0 +1,7 @@
+# D5 names `register` as the replacement for handlers, which makes this the
+# prescribed recipe -- silently binding nothing across a component boundary,
+# and surfacing one step later as an undefined variable in the `when` that
+# reads it.
+- name: register on a use
+  use: ./component/plain.yml
+  register: inner
