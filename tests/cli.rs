@@ -27,6 +27,17 @@ fn run(args: &[&str]) -> Output {
         .expect("provision failed to start")
 }
 
+fn validate_with(fixture: &str, extra: &[&str]) -> (i32, String) {
+    let path = fixtures().join(fixture);
+    let mut args = vec!["validate", path.to_str().expect("fixture paths are UTF-8")];
+    args.extend_from_slice(extra);
+    let out = run(&args);
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stderr).into_owned() + &String::from_utf8_lossy(&out.stdout),
+    )
+}
+
 fn validate(fixture: &str) -> (i32, String) {
     let path = fixtures().join(fixture);
     let out = run(&["validate", path.to_str().expect("fixture paths are UTF-8")]);
@@ -968,6 +979,51 @@ fn help_and_version_are_not_usage_errors() {
         assert!(!out.stdout.is_empty(), "{args:?} should print to stdout");
         assert!(out.stderr.is_empty(), "{args:?} should not touch stderr");
     }
+}
+
+// ── templated typed modifiers (#35, spec §3.4) ───────────────────────────
+
+#[test]
+fn the_typed_modifiers_take_a_template() {
+    // `sudo`, `timeout` and both `retry` fields, driven from typed props.
+    let (code, text) = validate_with("templated_mods/ok.yml", &["--prop", "root=false"]);
+    assert_eq!(code, 0, "{text}");
+}
+
+#[test]
+fn a_template_that_renders_to_the_wrong_type_is_still_refused() {
+    // The hole this could have left: every read of these three is lenient
+    // (`.ok()`, `unwrap_or`), which was safe only while parsing had already
+    // proved the type. Deferring the parse-time check without adding a
+    // render-time one would turn a bad `sudo` into a silent `false`.
+    let (code, text) = validate("templated_mods/bad_sudo.yml");
+    assert_eq!(code, EXIT_VALIDATION, "{text}");
+    assert!(text.contains("expected true or false"), "{text}");
+    assert!(text.contains("rendered to a string"), "{text}");
+    assert_positioned(&text);
+
+    let (code, text) = validate("templated_mods/bad_timeout.yml");
+    assert_eq!(code, EXIT_VALIDATION, "{text}");
+    // The rendered value is named, not the template text: `banana` is what
+    // is wrong, and `{{ props.t }}` is where to look.
+    assert!(text.contains("`banana` is not a duration"), "{text}");
+}
+
+#[test]
+fn a_literal_typed_modifier_is_still_checked_at_parse_time() {
+    // Deferring applies to templates only. A literal is proved when the file
+    // is parsed, as it always was, which is almost every one.
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("plan.yml");
+    std::fs::write(
+        &plan,
+        "- name: x\n  shell: \"true\"\n  changed_when: \"false\"\n  timeout: nope\n",
+    )
+    .unwrap();
+    let out = run(&["validate", &plan.display().to_string()]);
+    assert_eq!(out.status.code(), Some(EXIT_VALIDATION));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("`nope` is not a duration"), "{err}");
 }
 
 // ── `defaults` (spec §6.10) ───────────────────────────────────────────────

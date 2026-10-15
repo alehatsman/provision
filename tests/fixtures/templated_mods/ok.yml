@@ -1,0 +1,14 @@
+# The three typed modifiers §3.4 now covers, driven from typed props. The
+# point of the `sudo` one is the sole-expression rule: it has to yield the
+# bool the prop holds, not the string "true" -- a step cannot be half root.
+props:
+  root: {type: bool, required: true}
+  secs: {type: string, default: 45s}
+  tries: {type: int, default: 3}
+steps:
+  - name: every typed modifier from a prop
+    shell: echo hi
+    changed_when: "false"
+    sudo: "{{ props.root }}"
+    timeout: "{{ props.secs }}"
+    retry: {attempts: "{{ props.tries }}", delay: "{{ props.secs }}"}

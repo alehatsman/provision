@@ -6,7 +6,9 @@
 //! here — that needs a scope, which arrives at expansion.
 
 use crate::error::Result;
+use crate::template::Engine;
 use crate::yaml::N;
+use minijinja::Value;
 use std::time::Duration;
 
 pub(crate) const ACTION_KEYS: &[&str] = &[
@@ -621,6 +623,82 @@ pub(crate) fn duration_from_str(s: &str) -> std::result::Result<Duration, BadDur
 }
 
 /// The same grammar, positioned.
+/// Is this node a template rather than a literal? Spec §3.4 says every string
+/// value in a step is templated; `sudo`, `timeout` and `retry.attempts` are
+/// typed rather than textual, so they are read as YAML and used to reject a
+/// template outright — the error blaming the *value* for not being a bool or a
+/// duration, rather than saying the field would not render it (#35).
+///
+/// They are templated now, which makes §3.4's claim true instead of retracting
+/// it. That costs one thing: the type can no longer be checked at parse time,
+/// because the value does not exist until there is a scope. So parsing defers
+/// exactly the nodes that hold a template and keeps checking every literal,
+/// which is what almost every step writes.
+pub(crate) fn is_template(at: N<'_>) -> bool {
+    at.as_str().is_ok_and(|s| s.contains("{{"))
+}
+
+/// Render a typed modifier and read it as a bool. §3.4's sole-expression rule
+/// applies, so `sudo: "{{ props.root }}"` yields the bool the prop holds and
+/// not the string "true" — which is the whole point, since a step cannot be
+/// half root.
+pub(crate) fn mod_bool(at: N<'_>, engine: &Engine, ctx: &Value) -> Result<bool> {
+    if !is_template(at) {
+        return at.as_bool();
+    }
+    let src = at.as_str()?;
+    let v = engine
+        .render_field(src, ctx)
+        .map_err(|e| at.err(format!("`{src}` could not be rendered: {e}")))?;
+    // `is_true()` is not the test: it would take "no", 0 and [] for false and
+    // a non-empty string for true, which is the silent coercion §3.4's typed
+    // rule exists to avoid. The value has to *be* a bool.
+    if !matches!(v.kind(), minijinja::value::ValueKind::Bool) {
+        return Err(at
+            .err(format!(
+                "expected true or false, `{src}` rendered to {}",
+                describe_kind(&v)
+            ))
+            .with_note("a sole `{{ expr }}` keeps its type, so point it at a bool"));
+    }
+    Ok(v.is_true())
+}
+
+/// The same for a field read as text and then parsed: `timeout` and
+/// `retry.delay` take §4's duration grammar, `retry.attempts` a whole number.
+/// Rendered with `render`, not `render_field`: the result is parsed from text
+/// either way, and a duration is not a minijinja type.
+fn rendered_text(at: N<'_>, engine: &Engine, ctx: &Value) -> Result<String> {
+    let src = at.as_str()?;
+    engine
+        .render(src, ctx)
+        .map_err(|e| at.err(format!("`{src}` could not be rendered: {e}")))
+}
+
+pub(crate) fn mod_duration(at: N<'_>, engine: &Engine, ctx: &Value) -> Result<Duration> {
+    if !is_template(at) {
+        return parse_duration(at);
+    }
+    let text = rendered_text(at, engine, ctx)?;
+    duration_from_str(&text).map_err(|e| {
+        at.err(format!("`{text}` is not a duration"))
+            .with_note(e.note())
+    })
+}
+
+fn describe_kind(v: &Value) -> &'static str {
+    use minijinja::value::ValueKind as K;
+    match v.kind() {
+        K::String => "a string",
+        K::Number => "a number",
+        K::Seq => "a list",
+        K::Map => "a mapping",
+        K::Undefined => "nothing",
+        K::None => "null",
+        _ => "something else",
+    }
+}
+
 pub(crate) fn parse_duration(at: N<'_>) -> Result<Duration> {
     let raw = at.as_scalar_string()?;
     let s = raw.trim();
@@ -640,17 +718,40 @@ pub(crate) struct Retry {
 }
 
 pub(crate) fn parse_retry(at: N<'_>) -> Result<Retry> {
+    parse_retry_with(at, None)
+}
+
+/// `retry` with a scope, so `attempts` and `delay` may be templates (#35).
+/// `None` is parse time, where a template is deferred rather than read.
+pub(crate) fn mod_retry(at: N<'_>, engine: &Engine, ctx: &Value) -> Result<Retry> {
+    parse_retry_with(at, Some((engine, ctx)))
+}
+
+fn parse_retry_with(at: N<'_>, scope: Option<(&Engine, &Value)>) -> Result<Retry> {
     at.deny_unknown_keys(&["attempts", "delay"], "`retry`")?;
     let attempts_at = at.require("attempts")?;
-    let attempts: u32 = attempts_at
-        .as_scalar_string()?
-        .parse()
-        .map_err(|e| attempts_at.err(format!("`attempts` must be a whole number: {e}")))?;
+    let attempts = match (is_template(attempts_at), scope) {
+        // A template with no scope yet: parse time. Checked when rendered.
+        (true, None) => 1,
+        (true, Some((engine, ctx))) => {
+            let text = rendered_text(attempts_at, engine, ctx)?;
+            text.parse()
+                .map_err(|e| attempts_at.err(format!("`attempts` must be a whole number: {e}")))?
+        }
+        (false, _) => attempts_at
+            .as_scalar_string()?
+            .parse()
+            .map_err(|e| attempts_at.err(format!("`attempts` must be a whole number: {e}")))?,
+    };
     if attempts < 1 {
         return Err(attempts_at.err("`attempts` must be at least 1"));
     }
     let delay = match at.get("delay") {
-        Some(d) => parse_duration(d)?,
+        Some(d) => match (is_template(d), scope) {
+            (true, None) => Duration::ZERO,
+            (true, Some((engine, ctx))) => mod_duration(d, engine, ctx)?,
+            (false, _) => parse_duration(d)?,
+        },
         None => Duration::ZERO,
     };
     Ok(Retry { attempts, delay })
@@ -661,13 +762,17 @@ pub(crate) fn parse_retry(at: N<'_>) -> Result<Retry> {
 pub(crate) fn check_modifiers(step: &Step<'_>) -> Result<()> {
     let m = &step.mods;
 
-    if let Some(n) = m.timeout {
+    // A template has no value until there is a scope, so its type is checked
+    // when it is rendered (see `mod_bool` / `mod_duration`) and not here.
+    // Every literal is still checked at parse time, which is almost all of
+    // them.
+    if let Some(n) = m.timeout.filter(|n| !is_template(*n)) {
         parse_duration(n)?;
     }
     if let Some(n) = m.retry {
         parse_retry(n)?;
     }
-    if let Some(n) = m.sudo {
+    if let Some(n) = m.sudo.filter(|n| !is_template(*n)) {
         n.as_bool()?;
     }
     if let Some(n) = m.raw {

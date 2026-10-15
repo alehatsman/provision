@@ -118,7 +118,10 @@ pub(crate) fn parse_metadata(
     };
 
     // Spec §6.3: owner and group are independent, and both need sudo.
-    let sudo = step.mods.sudo.is_some_and(|n| n.as_bool().unwrap_or(false));
+    let sudo = step
+        .mods
+        .sudo
+        .is_some_and(|n| crate::config::model::mod_bool(n, engine, ctx).unwrap_or(false));
     for (name, node) in [("owner", body.get("owner")), ("group", body.get("group"))] {
         if let Some(n) = node.filter(|_| !sudo) {
             return Err(n

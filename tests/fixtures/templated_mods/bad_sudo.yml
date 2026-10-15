@@ -1,0 +1,4 @@
+props:
+  s: {type: string, default: "yes"}
+steps:
+  - {name: x, shell: echo hi, changed_when: "false", sudo: "{{ props.s }}"}

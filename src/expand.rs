@@ -949,7 +949,43 @@ impl Expander {
         }
         let defer_src = self.defers_file_src();
 
-        if step.mods.sudo.is_some_and(|n| n.as_bool().unwrap_or(false)) {
+        // The three typed modifiers §3.4's rule now covers are checked here,
+        // with the scope, because parsing could not check them: a template
+        // has no value until there is one (#35). Every read of them below is
+        // deliberately lenient -- `.ok()`, `unwrap_or` -- which was safe while
+        // parsing had already proved the type, and would silently turn a bad
+        // `sudo: "{{ s }}"` into `false` without this.
+        // `sudo` and `timeout` only when they hold a template -- a literal was
+        // already proved at parse time and re-reading it buys nothing.
+        // `retry` always, because it is a mapping whose two fields are checked
+        // individually and either may be a template.
+        let checks = [
+            step.mods
+                .sudo
+                .filter(|n| model::is_template(*n))
+                .map(|n| model::mod_bool(n, &self.engine, &ctx).map(|_| ())),
+            step.mods
+                .timeout
+                .filter(|n| model::is_template(*n))
+                .map(|n| model::mod_duration(n, &self.engine, &ctx).map(|_| ())),
+            step.mods
+                .retry
+                .map(|n| model::mod_retry(n, &self.engine, &ctx).map(|_| ())),
+        ];
+        for d in checks.into_iter().flatten().filter_map(Result::err) {
+            self.diags.push(d);
+        }
+
+        // Rendered, so a templated `sudo` is counted for what it resolves to
+        // and not skipped for not being a literal (#35). A sudo that cannot
+        // be read at all counts as root: spec §7's preflight over-approximates
+        // on purpose — asking for a password the run turns out not to need is
+        // recoverable, discovering root is needed halfway through is not.
+        if step
+            .mods
+            .sudo
+            .is_some_and(|n| model::mod_bool(n, &self.engine, &ctx).unwrap_or(true))
+        {
             self.needs_sudo = true;
             self.manifest.sudo += 1;
         }
@@ -1149,7 +1185,7 @@ impl Expander {
         let own_timeout = step
             .mods
             .timeout
-            .and_then(|n| model::parse_duration(n).ok())
+            .and_then(|n| model::mod_duration(n, &self.engine, ctx).ok())
             .unwrap_or(DEFAULT_TIMEOUT);
         let left = self.remaining();
         let timeout = left.map_or(own_timeout, |l| l.min(own_timeout));
@@ -1160,9 +1196,15 @@ impl Expander {
             creates: text(step.mods.creates),
             cwd,
             env,
-            sudo: step.mods.sudo.is_some_and(|n| n.as_bool().unwrap_or(false)),
+            sudo: step
+                .mods
+                .sudo
+                .is_some_and(|n| model::mod_bool(n, &self.engine, ctx).unwrap_or(false)),
             timeout,
-            retry: step.mods.retry.and_then(|n| model::parse_retry(n).ok()),
+            retry: step
+                .mods
+                .retry
+                .and_then(|n| model::mod_retry(n, &self.engine, ctx).ok()),
             has_changed_when: step.mods.changed_when.is_some(),
             deadline_bound: timeout < own_timeout,
             own_timeout,

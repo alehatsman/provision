@@ -1,0 +1,4 @@
+props:
+  t: {type: string, default: banana}
+steps:
+  - {name: x, shell: echo hi, changed_when: "false", timeout: "{{ props.t }}"}
