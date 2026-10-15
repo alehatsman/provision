@@ -1007,6 +1007,63 @@ fn a_vars_step_cannot_shadow_the_facts_namespace() {
     assert!(!text.contains("skipped"), "{text}");
 }
 
+#[test]
+fn a_gated_off_use_does_not_render_its_props() {
+    // Found by an adversarial review of D27. `open()` was shape-aware and
+    // `bind_props` two lines later was not, so a gated-off `use:` still
+    // rendered and type-checked its prop values -- mooncake #191 in the one
+    // place the guard was missed.
+    //
+    // The assertion is the second-order damage, which is the worse half:
+    // `bind_props` returning Err meant the component's steps were never
+    // walked, so a templated prop silently disabled the strict gate for that
+    // whole component. The ungated `shell` inside MUST be the one and only
+    // thing reported.
+    let (code, text) = validate("gated_subtree/props.yml");
+    assert_eq!(code, EXIT_VALIDATION, "{text}");
+    assert_eq!(text.matches("error:").count(), 1, "{text}");
+    assert!(text.contains("no idempotency gate"), "{text}");
+    assert!(text.contains("comp/gui.yml:8:5"), "{text}");
+    // The prop value and the missing vars_file are both un-rendered and
+    // un-resolved: a gated-off subtree is read for what it says, never for
+    // what it would do (D27).
+    assert!(!text.contains("other_os_session"), "{text}");
+    assert!(!text.contains("nonexistent-vars"), "{text}");
+}
+
+#[test]
+fn the_defaults_os_gate_accepts_the_unshadowable_spelling() {
+    // `facts.os` is the spelling §5 makes unshadowable and the one
+    // examples/x1.yml uses for its host guard. The gate asked
+    // `undeclared_variables(false)`, which returns top-level names, so it saw
+    // `facts` and refused -- the tool demanding the weaker form a `vars` step
+    // can defeat.
+    let dir = tempfile::tempdir().unwrap();
+    let step = "  defaults: {domain: com.apple.dock, key: a, type: bool, value: true}\n";
+
+    for gate in ["facts.os == \"darwin\"", "os == \"darwin\""] {
+        let p = dir.path().join("g.yml");
+        std::fs::write(&p, format!("- name: dock\n{step}  when: {gate}\n")).unwrap();
+        let out = run(&["validate", &p.display().to_string()]);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "`when: {gate}` was refused: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    // A name that merely contains "os" is still not the os fact.
+    let p = dir.path().join("lk.yml");
+    std::fs::write(
+        &p,
+        format!("- vars: {{hostos: darwin}}\n- name: dock\n{step}  when: hostos == \"darwin\"\n"),
+    )
+    .unwrap();
+    let out = run(&["validate", &p.display().to_string()]);
+    assert_eq!(out.status.code(), Some(EXIT_VALIDATION));
+}
+
 // ── `pkg` version floor (D28, spec §6.5) ─────────────────────────────────
 
 #[test]

@@ -1,0 +1,15 @@
+# The canonical cross-platform shape: an os-gated `vars_file` feeding an
+# os-gated `use:`. On a machine that is not plan9, `other_os_session` is
+# never defined -- which is precisely why the subtree is gated.
+#
+# Rendering the prop value here was the bug: it errored on a branch that
+# will never run, AND the error meant the component's steps were never
+# walked, so the strict gate silently did not run on them.
+- name: other-os variables
+  vars_file: ./nonexistent-vars.yml
+  when: os == "plan9"
+- name: other-os desktop
+  use: ./comp/gui.yml
+  props:
+    session: "{{ other_os_session }}"
+  when: os == "plan9"

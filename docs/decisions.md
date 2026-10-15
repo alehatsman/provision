@@ -1071,10 +1071,22 @@ is the point and is also mildly annoying. The `defaults` os-gate rule reads
 the plan rather than the machine, so a `defaults` step inside an
 `os == "darwin"` import is gated when validated on Linux, where the import is
 false and the steps will never run; that is correct — the rule asks what the
-plan says, not what this host is.
+plan says, not what this host is. The gate reads `os` and `facts.os`
+alike: `facts.os` is the spelling §5 makes unshadowable and the one the
+repo's own host-guard pattern uses, and a rule that accepted only the bare
+name was the tool demanding the weaker form.
 
 **What stays un-checked, on purpose.** Everything that needs a value: types,
-undefined variables, missing files, prop arity. A gated-off subtree is
+undefined variables, missing files, prop arity. **A `use:`'s `props:` are not
+rendered either** — this was written as a claim before it was true: `open()`
+honoured `shape_only` and `bind_props` one line later did not, so a gated-off
+`use` still rendered and type-checked every prop value, which is mooncake
+#191 in the one place the guard was missed. Worse, a prop that failed to
+render meant the component's steps were never walked, so a templated prop
+silently disabled the strict gate for that whole component — the descent
+reporting nothing precisely where it was most needed. Found by an adversarial
+review the same day and fixed; the subtree is now walked with empty props,
+which is safe because nothing inside is rendered. A gated-off subtree is
 checked for what it *says*, never for what it would *do*. Nobody should read
 a clean `validate` as proof that the other OS's half of a plan will run.
 
