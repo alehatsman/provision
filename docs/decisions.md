@@ -378,6 +378,23 @@ rejected because it is magic, and because it puts back the false verdict
 this decision exists to prevent: `when: port > 0` would answer for a port
 nobody computed.
 
+**Amended 2026-10-15, on where "every template" stops.** It stopped at the
+boundary between a step's *fields* and a file's *bytes*. `content: "{{
+fp.stdout }}"` was correctly reported unprobed; the identical expression
+inside a `.j2` rendered from the placeholder and the step came out `would
+change`, with the placeholder's empty string baked into the printed diff.
+
+That is the worst of the three possible answers. `unprobed` claims nothing,
+an error claims too much, and a fabricated diff claims to know a thing it
+invented — the false verdict the paragraph above rejects a typed placeholder
+for allowing. A reader comparing `+fingerprint: ` against the file has no way
+to tell it apart from a real pending change.
+
+A `.j2` body that reads a register in reach now makes its step unprobed, the
+same as a field, and is not rendered. The boundary was never intentional;
+nothing could see a file's bytes except the code that reads them, and that
+code reported diagnostics rather than deriving a verdict.
+
 ## D15 — `unknown` counts as a change for `plan`'s exit code
 
 **Decision.** `plan` exits 2 for any step that is not `ok` or `skipped` —
