@@ -14,6 +14,9 @@ pub(crate) trait Sink {
     fn start(&mut self, _name: &str, _depth: usize) {}
     fn step(&mut self, ev: &Event);
     fn summary(&mut self, plan: &Path, s: &Summary);
+    /// The shape of the run, printed once before the first step. See
+    /// `Manifest`: how much is about to happen, not what it will change.
+    fn manifest(&mut self, _plan: &Path, _m: &crate::expand::Manifest) {}
     /// A problem found while walking. Default is to do nothing: the text
     /// renderer has its own path for these (`report`), because a diagnostic
     /// is the one thing provision prints that is not a step. `--json` wants
@@ -50,6 +53,10 @@ impl Sink for Both {
     fn diagnostic(&mut self, d: &crate::error::Diag, base: &Path) {
         self.0.diagnostic(d, base);
         self.1.diagnostic(d, base);
+    }
+    fn manifest(&mut self, plan: &Path, m: &crate::expand::Manifest) {
+        self.0.manifest(plan, m);
+        self.1.manifest(plan, m);
     }
 }
 

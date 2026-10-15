@@ -500,6 +500,15 @@ fn run() -> Result<u8, Diag> {
                 .with_deadline(deadline)
                 .with_sink(run.sink(base.clone(), verbose, stream));
 
+            // The shape of the run, from the preflight that already visited
+            // every step. Printed before the first one, so an operator sees
+            // how much is about to happen while it still has not, and so a
+            // postmortem finds it at the top of the log. It claims nothing
+            // about what will *change*: `plan` is best-effort by D11 and
+            // explicitly unprobed for a register-gated step by D14, so a diff
+            // promised before the run is one provision cannot keep.
+            ex.manifest(&plan, &check.manifest);
+
             let started = Instant::now();
             walk_root(&mut ex, &plan, &props)?;
 

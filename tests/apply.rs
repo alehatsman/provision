@@ -4735,3 +4735,61 @@ fn without_a_sha256_an_existing_dest_is_ok_and_is_never_fetched() {
     assert_eq!(code, 0, "{second}");
     assert_eq!(verdict(&second, "The artifact"), "ok", "{second}");
 }
+
+// #30: one line before the first step saying how much is about to happen.
+// Free, because apply's preflight (§7) already visits every step to find the
+// sudo ones. It reports *shape*, never a diff: `plan` is best-effort by D11
+// and explicitly unprobed for a register-gated step by D14, so a promise
+// about what would change, made before the run, is one provision cannot
+// keep.
+#[test]
+fn apply_prints_the_shape_of_the_run_before_the_first_step() {
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("plan.yml");
+    std::fs::write(
+        &plan,
+        "description: a task\nsteps:\n  \
+         - name: one\n    shell: \"true\"\n  \
+         - name: two\n    shell: \"true\"\n  \
+         - name: three\n    shell: \"true\"\n",
+    )
+    .unwrap();
+
+    let out = run_in(dir.path(), &["apply", &plan.display().to_string()]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    let first = text.lines().next().unwrap_or_default();
+    assert!(first.contains("3 steps"), "{text}");
+    // It is the root file's header, not a second line repeating the name.
+    assert_eq!(
+        text.matches("plan.yml").count(),
+        2,
+        "once at the top, once in the summary: {text}"
+    );
+    // No claim about what would change.
+    assert!(!first.contains("would"), "{first}");
+}
+
+// On the stream too, as its own event (D25). A runner reading the stream
+// learns the size of the job before the first step's result arrives.
+#[test]
+fn the_manifest_is_an_event_before_any_step_event() {
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("plan.yml");
+    std::fs::write(
+        &plan,
+        "description: a task\nsteps:\n  - name: one\n    shell: \"true\"\n",
+    )
+    .unwrap();
+
+    let out = run_in(
+        dir.path(),
+        &["apply", "--json", &plan.display().to_string()],
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let first: serde_json::Value =
+        serde_json::from_str(stdout.lines().next().unwrap()).expect("an event");
+    assert_eq!(first["event"], "manifest");
+    assert_eq!(first["steps"], 1);
+    assert_eq!(first["files"], 1);
+    assert_eq!(first["sudo"], 0);
+}

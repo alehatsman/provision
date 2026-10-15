@@ -59,6 +59,21 @@ impl Mode {
     }
 }
 
+/// The shape of a run, not its outcome: how many steps, spread over how many
+/// files, how many of them ask for root.
+///
+/// Deliberately not a diff. `plan`'s verdicts are best-effort by D11 and
+/// explicitly unprobed for a register-gated step by D14, so a summary of
+/// *what would change* is a promise provision cannot keep before it starts.
+/// How much is about to happen, and whether any of it is root, is a promise
+/// it can.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct Manifest {
+    pub steps: usize,
+    pub sudo: usize,
+    pub files: BTreeSet<PathBuf>,
+}
+
 pub(crate) struct Selection {
     pub tags: Vec<String>,
     pub skip_tags: Vec<String>,
@@ -89,6 +104,10 @@ pub(crate) struct Expander {
     /// Set by the walk `apply` runs before executing anything, so the sudo
     /// preflight can happen before the first step (spec §7).
     pub needs_sudo: bool,
+    /// What the preflight learned about the shape of the run, for the line
+    /// `apply` prints before the first step (D25). Counted on the walk that
+    /// already visits every step, so it costs nothing and probes nothing.
+    pub manifest: Manifest,
     /// Names bound by `register`, and `vars` names computed from one. At plan
     /// time they hold a placeholder, so a template that reads one cannot be
     /// trusted. The step is reported unprobed rather than judged (D14).
@@ -127,6 +146,7 @@ impl Expander {
             diags: Diags::new(),
             summary: Summary::default(),
             needs_sudo: false,
+            manifest: Manifest::default(),
             registers: BTreeSet::new(),
             walked_a_command: false,
             stack: Vec::new(),
@@ -173,6 +193,11 @@ impl Expander {
     pub(crate) fn with_sink(mut self, sink: Box<dyn Sink>) -> Expander {
         self.sink = sink;
         self
+    }
+
+    /// Emitted once before the first step's line.
+    pub(crate) fn manifest(&mut self, plan: &Path, m: &Manifest) {
+        self.sink.manifest(plan, m);
     }
 
     /// Emitted once at the end, after the last step's line.
@@ -847,7 +872,10 @@ impl Expander {
 
         if step.mods.sudo.is_some_and(|n| n.as_bool().unwrap_or(false)) {
             self.needs_sudo = true;
+            self.manifest.sudo += 1;
         }
+        self.manifest.steps += 1;
+        self.manifest.files.insert(step.at.file.to_path_buf());
 
         // D26: strict is a property of the file, not of the verb. Checked
         // here, after `needs_sudo` and `walked_a_command` are set and after

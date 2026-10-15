@@ -2,6 +2,7 @@
 source: tests/apply.rs
 expression: stdout
 ---
+{"event":"manifest","files":1,"plan":"tests/fixtures/apply/verdicts.yml","steps":5,"sudo":0}
 {"duration_ms":0,"event":"step","file":"tests/fixtures/apply/verdicts.yml","index":1,"line":6,"name":"An ungated shell is its own exit code","rc":0,"status":"ok","stderr":"","stdout":""}
 {"duration_ms":0,"event":"step","file":"tests/fixtures/apply/verdicts.yml","index":2,"line":9,"name":"A gate that says the work is done","reason":"unless","status":"skipped"}
 {"duration_ms":0,"event":"step","file":"tests/fixtures/apply/verdicts.yml","index":3,"line":13,"name":"changed_when decides","rc":0,"status":"changed","stderr":"","stdout":"hello\n"}

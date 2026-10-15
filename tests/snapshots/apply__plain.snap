@@ -1,9 +1,8 @@
 ---
 source: tests/apply.rs
-assertion_line: 609
 expression: out
 ---
-  tests/fixtures/apply/verdicts.yml
+  tests/fixtures/apply/verdicts.yml · 5 steps
   ✓ An ungated shell is its own exit code            ok  [t]
   - A gate that says the work is done                skipped   unless  [t]
   ~ changed_when decides                             changed  [t]
