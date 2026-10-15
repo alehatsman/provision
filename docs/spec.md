@@ -240,7 +240,7 @@ a string that happens to parse.
 |---|---|---|---|
 | `name` | string | action key + first arg | Shown in output. Templated. |
 | `when` | expr | true | Skip the step when false. Evaluated before `unless`/`creates`. |
-| `unless` | string | — | A shell command, run through the interpreter `shell` defaults to (bash on unix, powershell on Windows), and with the step's own `sudo`, `env` and `cwd` — a root step's gate has to see root's view. Exit 0 means "already done", step skipped. Non-zero means run, **except** a gate that could not run at all: a spawn failure, `126`/`127` from the interpreter, or the gate hitting the step's timeout. Those fail the step (§10). |
+| `unless` | string | — | A shell command, run through the interpreter `shell` defaults to (bash on unix, powershell on Windows), and with the step's own `sudo`, `env` and `cwd` — a root step's gate has to see root's view. Exit 0 means "already done", step skipped. Non-zero means run, **except** a gate that could not run at all: a spawn failure, `126`/`127` from the interpreter, or the gate hitting the step's timeout. Those fail the step (§10). A gate for a tool the plan has not installed yet must therefore ask whether the tool exists, not ask the tool: `command -v <tool> >/dev/null 2>&1`. `<tool> --version` is `127` on a fresh machine, which is a failed step, not a step that needs to run. |
 | `creates` | path | — | Skip when the path exists. |
 | `sudo` | bool | false | Run the action as root (§7). Windows: error; use `shell` from an elevated prompt. |
 | `timeout` | duration | 10m | Kill the step and fail. `30s`, `5m`, `1h`. |
@@ -856,6 +856,24 @@ download:
   unpacked by a `creates`-gated shell step after it; a `sha256` on the
   archive is what makes that pair sound. Unarchiving is deferred with its
   own reopen condition (plan.md).
+- **Gate the unpack on the version, not on the path.** The natural `creates`
+  for that pair — `creates: {{ bin_dir }}/{{ tool }}` — is version-independent,
+  so bumping `version` re-downloads the archive (the `dest` name carries the
+  version, so the digest is checked and the fetch happens) and then *skips the
+  unpack*, because the old binary is still sitting at the gated path. The
+  machine keeps the old version and `plan` reports converged. This is the one
+  way the blessed recipe fails silently, and it fails on the only event that
+  ever makes anyone touch it. The gate has to name the version:
+
+  ```yaml
+  unless: test "$({{ bin_dir }}/{{ tool }} --version)" = "{{ version }}"
+  ```
+
+  That runs the installed binary to decide whether to replace it, which is
+  more than `creates` does and is the cost of a correct answer. Where the
+  binary cannot be asked its version, a version-stamped path
+  (`{{ bin_dir }}/{{ tool }}-{{ version }}`) and a symlink is the other
+  spelling.
 - Plan: never fetches. `would change` when `dest` is missing or the hash
   differs; nothing else is knowable without the network and nothing else is
   claimed.
