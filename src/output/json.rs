@@ -89,6 +89,27 @@ impl Sink for Json {
         Self::emit(&o);
     }
 
+    /// D25: a problem is something the program said, so it rides the same
+    /// stream under the same discriminator. `col` is carried because a
+    /// diagnostic has one and a step does not — the walk knows which key on
+    /// the line is wrong, and dropping that is the difference between a
+    /// consumer that can jump to the fault and one that has to re-find it.
+    fn diagnostic(&mut self, d: &crate::error::Diag, _base: &Path) {
+        let mut o = json!({
+            "event": "diagnostic",
+            "file": self.rel(&d.file),
+            "line": d.line,
+            "col": d.col,
+            "message": d.msg,
+        });
+        if let Some(n) = &d.note {
+            o.as_object_mut()
+                .expect("built as an object")
+                .insert("note".into(), json!(n));
+        }
+        Self::emit(&o);
+    }
+
     fn summary(&mut self, plan: &Path, s: &Summary) {
         Self::emit(&json!({
             "event": "summary",

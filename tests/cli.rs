@@ -437,6 +437,72 @@ fn skip_tags_wins_over_everything() {
     );
 }
 
+// D25: a problem is something the program said, so under `--json` it rides
+// the same stream as everything else. Before this the stream carried steps
+// and a summary and nothing about why a run was refused, so a consumer had
+// to regex the prose on stderr.
+#[test]
+fn validate_json_emits_one_diagnostic_event_per_problem() {
+    let path = fixture_arg("three_problems_a.yml");
+    let out = run(&["validate", "--json", &path]);
+    assert_eq!(out.status.code(), Some(EXIT_VALIDATION));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let events: Vec<serde_json::Value> = stdout
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str(l).expect("each line is one object"))
+        .collect();
+    assert_eq!(events.len(), 3, "{stdout}");
+    for e in &events {
+        assert_eq!(e["event"], "diagnostic");
+        assert!(e["file"].is_string(), "{e}");
+        assert!(e["line"].is_number(), "{e}");
+        // A diagnostic knows which key on the line is wrong; a step does not.
+        assert!(e["col"].is_number(), "{e}");
+        assert!(e["message"].is_string(), "{e}");
+    }
+    assert!(
+        events[0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("unknown key `creats`"),
+        "{stdout}"
+    );
+    assert_eq!(events[0]["note"], "did you mean `creates`?");
+
+    // The human text is unchanged and still on stderr.
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("3 problems validating"), "{stderr}");
+}
+
+// The actual bug behind the issue: apply's preflight runs before the apply
+// expander and its sink exist, so `apply --json` on a bad file put nothing
+// at all on the stream a runner was reading.
+#[test]
+fn apply_json_emits_its_preflight_diagnostics() {
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("plan.yml");
+    std::fs::write(&plan, "- name: ungated\n  shell: \"true\"\n").unwrap();
+
+    let out = run(&["apply", "--json", &plan.display().to_string()]);
+    assert_eq!(out.status.code(), Some(EXIT_VALIDATION));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let first: serde_json::Value =
+        serde_json::from_str(stdout.lines().next().unwrap_or("")).expect("a diagnostic event");
+    assert_eq!(first["event"], "diagnostic");
+    assert!(
+        first["message"]
+            .as_str()
+            .unwrap()
+            .contains("no idempotency gate"),
+        "{stdout}"
+    );
+    // Nothing ran, so there is no step event and no summary to mislead a
+    // consumer that reads the last line.
+    assert!(!stdout.contains("\"event\":\"summary\""), "{stdout}");
+    assert!(!stdout.contains("\"event\":\"step\""), "{stdout}");
+}
+
 // ── strict ────────────────────────────────────────────────────────────────
 
 // `strict_gate.yml` is a plan (list root), so `--strict` is on by default

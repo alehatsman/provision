@@ -892,7 +892,7 @@ defaults:
 ## 8. Commands
 
 ```
-provision validate <file.yml> [--strict] [--prop k=v]... [--var k=v]... [--vars-file f]...
+provision validate <file.yml> [--strict] [--json] [--prop k=v]... [--var k=v]... [--vars-file f]...
 provision plan     <file.yml> [--prop k=v]... [--tags t,u] [--skip-tags t] [--var k=v]... [--vars-file f]... [--plan-no-probe] [--no-diff] [--json] [--hide-skipped] [--color when] [--deadline 30m]
 provision apply    <file.yml> [same as plan] [--ask-sudo-pass] [--verbose] [--stream] [--keep-going]
 provision list     <dir>/ | <component.yml> | <action>
@@ -1238,6 +1238,23 @@ The summary also carries `interrupted` and `deadline_exceeded`, both always
 present and both booleans. A runner reading only the summary has to be able
 to tell a job that finished from one that was stopped, and an absent key is
 not that answer.
+
+A problem found while walking is its own event, carrying `file`, `line`,
+`col`, `message` and an optional `note` — the same words the terminal
+prints, with the column the text form also has:
+
+```json
+{"event":"diagnostic","file":"job.yml","line":3,"col":3,"message":"unknown key `creats` in a step","note":"did you mean `creates`?"}
+```
+
+`validate` takes `--json` too, where the diagnostics are the whole of the
+stream and silence means it passed (D25). Diagnostics come **before** the
+summary, and a walk that produced any emits no summary at all under every
+verb: a summary of a walk that failed is a summary of nothing, and a
+consumer reading the last line would have drawn its conclusion from it. That
+matters most under `apply`, whose preflight (§7) runs before the executing
+walk — a plan it refuses has run no step, so the stream holds diagnostics
+and nothing else.
 
 ## 10. Edge cases
 

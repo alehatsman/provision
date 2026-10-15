@@ -67,6 +67,11 @@ enum Command {
         /// value is an error here too, and nothing stands in for it.
         #[arg(long = "prop", value_name = "KEY=VALUE")]
         prop: Vec<String>,
+        /// One JSON object per line on stdout; human output stays on stderr.
+        /// `validate` produces no step list, so this is the diagnostics and
+        /// nothing else (D25).
+        #[arg(long)]
+        json: bool,
         #[command(flatten)]
         vars: VarArgs,
     },
@@ -313,6 +318,7 @@ fn run() -> Result<u8, Diag> {
             plan,
             strict,
             prop,
+            json,
             vars,
         } => {
             let plan = check_exists(&plan)?;
@@ -331,8 +337,16 @@ fn run() -> Result<u8, Diag> {
             walk_root(&mut ex, &plan, &props)?;
             let base = cwd();
             if ex.diags.is_empty() {
-                output::line(format_args!("  ok  {}", rel(&plan, &base)));
+                // Nothing to say on the stream: no diagnostics is the whole
+                // of what `validate` reports, and silence plus exit 0 is the
+                // answer. The human line still goes to stderr's side.
+                if !json {
+                    output::line(format_args!("  ok  {}", rel(&plan, &base)));
+                }
                 return Ok(EXIT_OK);
+            }
+            if json {
+                report_json(&ex, &base);
             }
             report(&ex, &base, Some(&plan));
             Ok(EXIT_USAGE)
@@ -377,13 +391,20 @@ fn run() -> Result<u8, Diag> {
             exec::process::catch_interrupts();
             let started = Instant::now();
             walk_root(&mut ex, &plan, &props)?;
-            ex.summarize(&plan, started.elapsed());
 
+            // Before `summarize`, not after. A summary of a walk that found
+            // problems is a summary of nothing, and under `--json` a
+            // consumer reading the summary first would have drawn its
+            // conclusion before the problems arrived. `validate` already
+            // reports this way; this is `plan` agreeing with it.
             if !ex.diags.is_empty() {
-                eprintln!();
+                if run.json {
+                    report_json(&ex, &base);
+                }
                 report(&ex, &base, None);
                 return Ok(EXIT_USAGE);
             }
+            ex.summarize(&plan, started.elapsed());
             // Spec §8, the exit-code precedence: a stop from outside beats
             // the clock, which beats a failed step — "the reason the run
             // ended", the same rule `apply` reads.
@@ -441,6 +462,13 @@ fn run() -> Result<u8, Diag> {
                 .strict(strict_by_root(&plan)?);
             walk_root(&mut check, &plan, &props)?;
             if !check.diags.is_empty() {
+                // The preflight runs before the apply expander and its sink
+                // exist, which is why `apply --json` on a bad file used to
+                // emit nothing at all on stdout — exit 3 and prose on
+                // stderr, and the stream a runner was reading stayed empty.
+                if run.json {
+                    report_json(&check, &base);
+                }
                 report(&check, &base, Some(&plan));
                 return Ok(EXIT_USAGE);
             }
@@ -462,13 +490,15 @@ fn run() -> Result<u8, Diag> {
 
             let started = Instant::now();
             walk_root(&mut ex, &plan, &props)?;
-            ex.summarize(&plan, started.elapsed());
 
             if !ex.diags.is_empty() {
-                eprintln!();
+                if run.json {
+                    report_json(&ex, &base);
+                }
                 report(&ex, &base, None);
                 return Ok(EXIT_USAGE);
             }
+            ex.summarize(&plan, started.elapsed());
             // Spec §8, the exit-code precedence: a stop from outside beats the
             // clock, which beats a failed step. Read down, the rule is "the
             // reason the run ended", and a signal is always a better answer
@@ -509,6 +539,16 @@ fn walk_root(ex: &mut Expander, root: &Path, props: &[(String, String)]) -> Resu
         .with_note("props are declared at a component's root; a plan takes `--var`"));
     }
     ex.run(root)
+}
+
+/// D25: under `--json` every problem rides the stream as its own event,
+/// before the summary, because a consumer that reads the summary first and
+/// finds a clean one has already drawn the wrong conclusion.
+fn report_json(ex: &Expander, base: &Path) {
+    let mut sink: Box<dyn Sink> = Box::new(output::json::Json::new(base.to_path_buf()));
+    for d in ex.diags.iter() {
+        sink.diagnostic(d, base);
+    }
 }
 
 fn report(ex: &Expander, base: &Path, plan: Option<&Path>) {
