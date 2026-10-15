@@ -50,7 +50,10 @@ usually the five-minute answer.
 
 **b. Step around it.** If the broken step is not what the machine needs
 right now, comment it out and `apply` again — or, if it is tagged, pass
-`--skip-tags <tag>`. Put it back once the machine works.
+`--skip-tags <tag>`. Put it back once the machine works. A tag you
+misremember is refused (exit 3) and the error lists the plan's real tags, so
+the wrong guess costs you one run and tells you the right one — it does not
+silently run the whole plan, which is what it used to do.
 
 **c. Back out the change.** `git revert` (or `git checkout` the plan file
 from the last good commit) and `apply` again. Read what this does and does

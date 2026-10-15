@@ -1150,6 +1150,17 @@ Tag selection (Ansible semantics, deliberately):
   `use` build the scope every later step reads; skipping them by tag would
   silently unset variables the selected steps depend on. A tag on an `import`
   or `use` still propagates to the steps inside it, which is the point.
+- **A filter value matching no step is a usage error** (exit 3), named per
+  value, with the plan's actual tags in the note. `--tags handlr` reported
+  `2 skipped`, exit 0 — an apply that did nothing reporting success — and
+  `--skip-tags handlr` ran everything. This is a deliberate divergence from
+  Ansible and from the rest of D7; the note doubles as the only way to ask a
+  plan what tags it has, since `list` on a plan refuses. `always` is a
+  keyword here, not a tag the plan must declare, so `--skip-tags always` is
+  accepted either way. Checked at the end of the walk, because tags are only
+  known once `import`/`use` have expanded — and stood down when the walk
+  already found problems, since a plan that failed to load never reached its
+  tags.
 
 Exit codes: `0` ok / nothing to do · `1` failure · `2` plan found changes ·
 `3` usage or validation error · `124` deadline exceeded · `130` interrupted

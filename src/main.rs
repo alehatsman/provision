@@ -133,9 +133,14 @@ enum Command {
 
 #[derive(clap::Args, Default)]
 struct RunArgs {
-    #[arg(long, value_delimiter = ',')]
+    /// Run only steps carrying one of these tags, comma-separated. Untagged
+    /// steps are skipped; steps tagged `always` run anyway. A tag no step in
+    /// the plan carries is an error, not an empty run.
+    #[arg(long, value_delimiter = ',', value_name = "TAG,...")]
     tags: Vec<String>,
-    #[arg(long, value_delimiter = ',')]
+    /// Run everything except steps carrying one of these tags,
+    /// comma-separated. Wins over `--tags`, and over `always`.
+    #[arg(long, value_delimiter = ',', value_name = "TAG,...")]
     skip_tags: Vec<String>,
     /// Drop skipped steps from the output. The summary still counts them.
     #[arg(long)]
