@@ -192,6 +192,19 @@ is negative value. `--json` to a file gives an audit trail on demand.
 **Overturned by.** Asking "what changed last time" twice and having no
 answer.
 
+**Amended 2026-10-15.** Saying what the audit trail *is*, because the
+question kept coming back from careful readers who took "no run log" to mean
+the answer was unavailable rather than unwritten. `provision apply plan.yml
+--json > run.jsonl` **is** the run log: every step's status, exit code,
+stdout, stderr, duration and `file:line`, plus the summary, in a schema that
+is stable by construction because the words come from `Status::key` and never
+from the terminal wording (§9.3). It is a better record than a built-in one
+would be — the operator chooses when to keep it, tests cannot corrupt a file
+the tool never opens, and retention is the runner's by D19. The condition
+above reopens only for a question the stream does not already answer. A
+stateless reader re-asking it every session is not that: it is a consumer
+that did not keep the file, and the fix is to keep the file.
+
 ## D10 — No task runner
 
 **Decision.** `provision` does not run project tasks. The nine repos using
@@ -815,6 +828,78 @@ Mac, which happens, and `defaults` stays unit-tested against captured
 **Overturned by.** GitHub Actions becoming a thing the language has to serve.
 Then the gate goes back to local and D19's check reads unvalidated, which is
 a worse answer honestly stated rather than a better one bought with nouns.
+
+## D25 — an agent reads the output and writes the plan; it is not a runtime
+
+**Decided by the owner 2026-10-15**, when a review asked who the `--json`
+stream is for and found the answer had been written down once, for a
+consumer that is not the only one.
+
+**Decision.** An agent — a model writing plan files and reading what
+provision says back — is a named consumer of the output, the way D19 names
+the CI runner. Being *legible to* one is in scope. *Being* one is not, and
+nothing in README's "Not an agent runtime. No MCP, no SDK, no LLM loop"
+moves.
+
+Concretely, one rule about shape: **verbs that walk stream, verbs that answer
+return a document.** `validate`, `plan` and `apply` emit one JSON object per
+line as the walk proceeds; `list` and `facts` answer one question and return
+one document. `facts --json` already returns a document, so a single-stream
+rule would be a breaking change to a contract that exists, bought for
+symmetry nobody asked for.
+
+**Why an agent is not a user.** D23 says this is one person's tool and there
+are no users. That still holds: an agent is not a second machine owner whose
+case reopens a non-goal. It is a reader and a writer — it reads diagnostics
+and verdicts, and it writes YAML. Neither of those wants inventory, a
+daemon, a registry, a plugin economy or a fifth noun. The thing it wants is
+the thing the README already claims to be good at, which is saying what
+happened in a form something else can act on.
+
+**The precedent is already in this repo and was never generalised.**
+`tasks/findings.yml` exists to "write every gate finding to
+`.gate/findings.jsonl` for an agent to read", with fingerprints for dedup.
+The decision that a machine reader deserves a structured answer was made for
+the quality gate's output. provision's own diagnostics never got it: a
+config error emits prose on stderr under every verb, including `--json`, and
+`apply` emits nothing at all because its preflight runs before the sink is
+built.
+
+**What this does not buy.** The no-list, in D19's spirit, because the whole
+value of naming a consumer is naming what it does not get to ask for:
+
+- No MCP server, no SDK, no LLM loop, no long-lived process.
+- No `mcp:` action or other agent-host typed action. An agent host is a set
+  of files, and `file`, `template`, `git` and `download` already own files.
+  An action earns its place by needing state inspection (D4), not by naming
+  a popular category.
+- No run log and no state directory. D9 holds, and the redirect is the log.
+- **No merged-scope dump**, and this one is refused on D19's own reasoning
+  rather than on taste. The scope holds `{{ env.TOKEN }}` in clear, and D19
+  already declined to promise masking because a promise a step can defeat by
+  base64-ing a token is worse than no promise. A dump of the whole scope is
+  that same undefendable promise wearing a debugging hat. If the gap ever
+  has to close, it closes on a named variable, not a dump.
+- No structured before/after on diffs. The unified diff is what a reader
+  wants, and a second representation is a second thing to keep true.
+- No `json_version` field and no schema negotiation. The binary's
+  `--version` is the version and spec §9.3 is the contract; D19 added no
+  such field and did not need one.
+- Parallel steps, `use` deduplication, secret masking: D19's list, restated.
+  A third consumer reopens none of them.
+
+**Blast radius, and why it stays a convention.** An agent holding the trigger
+raises the cost of pointing `apply` at the wrong plan: nobody eyeballed the
+file first. The answer is the one `examples/x1.yml` already shows — the plan
+declares its own machine in its first step, an `assert` tagged `always`, and
+refuses before touching anything. That stays a convention and does not become
+a checked field. A checked field is a noun, the convention already works, and
+the failure it guards against is one a reader of the plan can see. What
+changed is that the pattern is now written down as a pattern rather than left
+to be inferred from an example.
+
+**Overturned by.** Wanting the tool to *be* an agent runtime, which is a
+different project and should be named as one.
 
 ## D26 — the gate fires under every verb that walks the plan
 
