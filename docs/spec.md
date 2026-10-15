@@ -1518,8 +1518,13 @@ and costs nothing.
 **`manifest.steps` and `summary.total` count different sets, on purpose.**
 `steps` is what the run will *attempt*: the preflight evaluates `when` and
 the tag filter, so the steps those rule out are not in it. `total` is every
-step the walk reached, skipped ones included. So `steps` is at most `total`,
-and the difference is exactly the steps `when` or tags excluded. `unless`
+step the walk reached, skipped ones included. **For a run that finished**,
+`steps` is at most `total`, and the difference is exactly the steps `when` or
+tags excluded. For a run that did not — `interrupted` or `deadline_exceeded`
+— the relation inverts: the walk stopped early, so `total` counts only what
+it reached while `steps` counts what it meant to attempt, and `steps` is then
+legitimately the larger. A consumer comparing the two has to read
+`interrupted` and `deadline_exceeded` first. `unless`
 and `creates` are **not** probed by the preflight — it is read-only and
 cheap by design (§7) — so a step gated by one of those is counted in
 `steps` and may still skip. The text form says `N steps to run` in the
