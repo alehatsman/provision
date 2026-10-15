@@ -20,7 +20,7 @@ use crate::template::{Engine, expanduser_in};
 use crate::yaml::Doc;
 use crate::yaml::N;
 use minijinja::Value;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -424,11 +424,7 @@ impl Expander {
         })
     }
 
-    fn any_register(
-        &self,
-        names: Option<std::collections::HashSet<String>>,
-        scope: &Scope,
-    ) -> bool {
+    fn any_register(&self, names: Option<HashSet<String>>, scope: &Scope) -> bool {
         names.is_some_and(|names| {
             names
                 .iter()
@@ -607,6 +603,13 @@ impl Expander {
     ) -> std::result::Result<Map, Vec<Diag>> {
         let mut errors = Vec::new();
         let mut out = Map::new();
+        // Props whose value was given and rejected. `fill_defaults` would
+        // otherwise see the name absent from `out`, find it required, and
+        // add a second diagnostic reading "missing required prop" that
+        // points at the component's declaration -- which is not a second
+        // problem, it is the first one told backwards, sending the reader to
+        // the wrong file.
+        let mut errored: HashSet<String> = HashSet::new();
         let ctx = scope.ctx();
 
         let given = match step.mods.props {
@@ -648,15 +651,19 @@ impl Expander {
                             schema.ty.name(),
                             describe_value(&value)
                         )));
+                        errored.insert(name);
                         continue;
                     }
                     out.insert(name, value);
                 }
-                Err(d) => errors.push(d),
+                Err(d) => {
+                    errors.push(d);
+                    errored.insert(name);
+                }
             }
         }
 
-        fill_defaults(component, &mut out, &mut errors, &|schema| {
+        fill_defaults(component, &mut out, &errored, &mut errors, &|schema| {
             step.at
                 .err(format!("missing required prop `{}`", schema.name))
         });
@@ -679,6 +686,9 @@ impl Expander {
     ) -> std::result::Result<Map, Vec<Diag>> {
         let mut errors = Vec::new();
         let mut out = Map::new();
+        // See `bind_props`: a prop that was given and rejected is not also
+        // missing.
+        let mut errored: HashSet<String> = HashSet::new();
         let scope = Scope::root(Rc::clone(&self.globals));
         let ctx = scope.ctx();
 
@@ -706,13 +716,25 @@ impl Expander {
                     Ok(value) => {
                         out.insert(name.clone(), value);
                     }
-                    Err(d) => errors.push(d),
+                    Err(d) => {
+                        errors.push(d);
+                        errored.insert(name.clone());
+                    }
                 },
-                Err(e) => errors.push(Diag::file_level("--prop", e.to_string())),
+                // A `--prop` value is a template (§8), and this threw away
+                // the context the way `eval_bool` used to, so an undefined
+                // name in one had no name in the error.
+                Err(e) => {
+                    errors.push(Diag::file_level(
+                        "--prop",
+                        self.engine.describe_with(raw, &ctx, &e),
+                    ));
+                    errored.insert(name.clone());
+                }
             }
         }
 
-        fill_defaults(component, &mut out, &mut errors, &|schema| {
+        fill_defaults(component, &mut out, &errored, &mut errors, &|schema| {
             Diag::file_level("--prop", format!("missing required prop `{}`", schema.name))
         });
 
@@ -1472,11 +1494,15 @@ fn typed_prop(schema: &load::PropSchema, text: &str) -> std::result::Result<Valu
 fn fill_defaults(
     component: &Component,
     out: &mut Map,
+    // Props the caller gave a value for that did not survive. They are not
+    // missing -- they are wrong, and that has already been reported at the
+    // line the reader has to edit.
+    errored: &HashSet<String>,
     errors: &mut Vec<Diag>,
     missing_at: &dyn Fn(&load::PropSchema) -> Diag,
 ) {
     for schema in &component.props {
-        if out.contains_key(&schema.name) {
+        if out.contains_key(&schema.name) || errored.contains(&schema.name) {
             continue;
         }
         match schema.default {

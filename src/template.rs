@@ -576,7 +576,7 @@ mod tests {
 
         // `env` is bound and the key is not: the key is the useful name, and
         // a top-level-only check found `env` defined and said nothing.
-        let mut map = std::collections::BTreeMap::new();
+        let mut map = BTreeMap::new();
         map.insert("OTHER".to_string(), Value::from("1"));
         let c = ctx(&[("env", Value::from(map))]);
         assert_eq!(
@@ -604,7 +604,7 @@ mod tests {
     #[test]
     fn a_subscript_keeps_minijinjas_words_rather_than_guessing() {
         let e = Engine::new();
-        let map: std::collections::BTreeMap<String, Value> = std::collections::BTreeMap::new();
+        let map: BTreeMap<String, Value> = BTreeMap::new();
         let c = ctx(&[("t", Value::from(map))]);
         let x = e.render("{{ t['nope'] }}", &c).unwrap_err();
         let msg = e.describe_with("{{ t['nope'] }}", &c, &x);
