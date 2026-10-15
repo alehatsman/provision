@@ -326,8 +326,8 @@ fn run() -> Result<u8, Diag> {
             // the whole point, so it is on by default there. A task or
             // component file legitimately has none, and stays opt-in. The
             // flag only ever forces it on, never off.
-            let strict = strict || !is_component(&plan)?;
-            let mut ex = expander(&vars, Mode::Validate { strict }, selection)?;
+            let strict = strict || strict_by_root(&plan)?;
+            let mut ex = expander(&vars, Mode::Validate, selection)?.strict(strict);
             walk_root(&mut ex, &plan, &props)?;
             let base = cwd();
             if ex.diags.is_empty() {
@@ -352,6 +352,11 @@ fn run() -> Result<u8, Diag> {
                 probe: !plan_no_probe,
             };
             let mut ex = expander(&run.vars, mode, run.selection())?
+                // D26. Plan does not need a preflight the way apply does: it
+                // executes nothing, so a diag is non-fatal mid-walk and the
+                // report after it turns the walk into exit 3, which is the
+                // path every other plan-time diagnostic already takes.
+                .strict(strict_by_root(&plan)?)
                 // Gates run with their step's sudo (§4), so plan has to know
                 // whether root is reachable. Unlike apply it must not fail
                 // when it is not: plan is the read-only command, and a root
@@ -426,7 +431,14 @@ fn run() -> Result<u8, Diag> {
             // Spec §7: the walk that finds the sudo steps also validates the
             // whole plan, so a typo in the last step fails before the first
             // step runs. It renders everything and touches nothing.
-            let mut check = expander(&run.vars, Mode::Validate { strict: false }, run.selection())?;
+            // D26: the gate check belongs to this walk and not to the one
+            // that executes. A diag raised during the apply walk only stops
+            // it at the *next* step, so the ungated command would already
+            // have run — which is the regression D20 named. Here it lands
+            // before `Sudo::preflight`, before `catch_interrupts`, and
+            // before the apply expander exists.
+            let mut check = expander(&run.vars, Mode::Validate, run.selection())?
+                .strict(strict_by_root(&plan)?);
             walk_root(&mut check, &plan, &props)?;
             if !check.diags.is_empty() {
                 report(&check, &base, Some(&plan));
@@ -539,6 +551,15 @@ fn pairs(given: &[String], flag: &str) -> Result<Vec<(String, String)>, Diag> {
 /// D17: a component is a mapping and a plan is a sequence. Reading the root
 /// node is enough to tell, and it is the same distinction both parsers make
 /// in their own error messages.
+/// D21, D26: a plan has state to declare, and `--strict` catching a
+/// forgotten gate is the whole point there, so it is on by default for a
+/// list root under every verb that walks it. A task or component file
+/// legitimately has none and stays opt-in. `--strict` on the command line
+/// only ever turns it on, never off.
+fn strict_by_root(path: &Path) -> Result<bool, Diag> {
+    Ok(!is_component(path)?)
+}
+
 fn is_component(path: &Path) -> Result<bool, Diag> {
     Ok(yaml::Doc::load(path)?.node().as_map().is_ok())
 }

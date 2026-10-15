@@ -473,6 +473,106 @@ fn strict_defaults_off_for_a_task_or_component() {
     assert!(text.contains("no idempotency gate"), "{text}");
 }
 
+// D26: the gate is a property of the file, so every verb that walks a plan
+// runs it. Before this, `strict_gate.yml` was exit 3 from `validate` and
+// exit 0 from both `plan` and `apply` — the regression D20 named in writing,
+// live on the only verb that touches the machine.
+#[test]
+fn the_gate_fires_under_plan_and_apply_too() {
+    let path = fixture_arg("strict_gate.yml");
+    for verb in [
+        vec!["validate"],
+        vec!["plan", "--plan-no-probe"],
+        vec!["apply"],
+    ] {
+        let mut args = verb.clone();
+        args.push(&path);
+        let out = run(&args);
+        let text = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(
+            out.status.code(),
+            Some(EXIT_VALIDATION),
+            "{verb:?} must refuse an ungated plan: {text}"
+        );
+        assert_eq!(
+            text.matches("no idempotency gate").count(),
+            1,
+            "{verb:?}: {text}"
+        );
+        assert!(text.contains("strict_gate.yml:7:3"), "{verb:?}: {text}");
+    }
+}
+
+// The load-bearing half of D26. A gate error raised during the walk that
+// *executes* arrives too late: `walk` only re-reads `diags` at the top of the
+// next step, so the ungated command has already run. The check belongs to
+// apply's preflight, and this is the test that says so — without it a later
+// refactor could move it into the apply walk and everything else would still
+// pass.
+#[test]
+fn apply_refuses_before_the_first_step_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    let marker = dir.path().join("marker");
+    let plan = dir.path().join("plan.yml");
+    std::fs::write(
+        &plan,
+        format!(
+            "- name: writes a marker\n  \
+               shell: touch {}\n  \
+               changed_when: \"false\"\n\n\
+             - name: ungated\n  \
+               shell: \"true\"\n",
+            marker.display()
+        ),
+    )
+    .unwrap();
+
+    let out = run(&["apply", &plan.display().to_string()]);
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(EXIT_VALIDATION), "{text}");
+    assert!(text.contains("no idempotency gate"), "{text}");
+    assert!(
+        !marker.exists(),
+        "apply must refuse before running step 1, not after"
+    );
+}
+
+// The check answers for the steps the run would run. `validate` takes no tag
+// flags, so it answers for the whole file; `plan` and `apply` do, so a
+// filtered run is judged on its own selection. Checking steps the run has
+// excluded would make `apply --tags db` refuse over work it will not do, and
+// the invariant D20 names is pointwise over executed commands anyway: a
+// violation `--skip-tags` hides from the operator is hidden from the machine
+// too.
+#[test]
+fn a_filtered_run_is_judged_on_the_steps_it_would_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("plan.yml");
+    std::fs::write(
+        &plan,
+        "- name: gated\n  shell: \"true\"\n  changed_when: \"false\"\n\n\
+         - name: ungated\n  shell: \"true\"\n  tags: [slow]\n",
+    )
+    .unwrap();
+    let path = plan.display().to_string();
+
+    let out = run(&["apply", &path]);
+    assert_eq!(
+        out.status.code(),
+        Some(EXIT_VALIDATION),
+        "unfiltered, the ungated step is in the run: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let out = run(&["apply", "--skip-tags", "slow", &path]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "skipped out of the run, so not this run's problem: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 // ── the documented example ────────────────────────────────────────────────
 
 #[test]

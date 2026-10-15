@@ -41,7 +41,7 @@ const NOT_SELECTED: &str = "not selected by tags";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Mode {
     /// Check everything; run nothing; produce no step list.
-    Validate { strict: bool },
+    Validate,
     /// Check everything and report what would run. `probe` runs the read-only
     /// questions — `unless`, `creates`, `assert` — and is off under
     /// `--plan-no-probe`, where no verdict is claimed at all.
@@ -55,7 +55,7 @@ impl Mode {
         matches!(self, Mode::Apply)
     }
     fn reports(self) -> bool {
-        !matches!(self, Mode::Validate { .. })
+        !matches!(self, Mode::Validate)
     }
 }
 
@@ -107,6 +107,10 @@ pub(crate) struct Expander {
     /// Spec §8 `--keep-going`: carry on past a failed step, so one run
     /// reports everything broken instead of the first thing.
     keep_going: bool,
+    /// D26: on for a plan root under every verb that walks it. Orthogonal to
+    /// `Mode`, because the question it answers is about the file and the
+    /// three verbs are about how far the walk goes.
+    strict: bool,
     /// Spec §8 `--deadline`: when the run's wall clock runs out. `None` is no
     /// deadline, which is the default and every `validate`.
     deadline: Option<Instant>,
@@ -131,6 +135,7 @@ impl Expander {
             index: 0,
             stopped: false,
             keep_going: false,
+            strict: false,
             deadline: None,
         }
     }
@@ -139,6 +144,15 @@ impl Expander {
     /// failure, so there is nothing for the flag to change there.
     pub(crate) fn keep_going(mut self, yes: bool) -> Expander {
         self.keep_going = yes;
+        self
+    }
+
+    /// D3, D21, D26: reject a `shell`/`cmd` step with no idempotency gate,
+    /// and a `defaults` step that does not say which os it is for. On for a
+    /// plan root under every verb that walks it; off for a task or component
+    /// root unless `validate --strict` asks.
+    pub(crate) fn strict(mut self, on: bool) -> Expander {
+        self.strict = on;
         self
     }
 
@@ -813,7 +827,11 @@ impl Expander {
             self.needs_sudo = true;
         }
 
-        if let Mode::Validate { strict: true } = self.mode {
+        // D26: strict is a property of the file, not of the verb. Checked
+        // here, after `needs_sudo` and `walked_a_command` are set and after
+        // the `when: false` return above, because this position is what gives
+        // a gated-off step its exemption.
+        if self.strict {
             self.check_strict_gate(step);
         }
 

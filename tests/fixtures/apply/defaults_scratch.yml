@@ -8,26 +8,29 @@
 # com.apple.finder, com.apple.screencapture, NSGlobalDomain — and is applied
 # only by the test that is gated off macOS, where `defaults` does not exist
 # and nothing can be written.
-- vars:
-    plist: "{{ env.PROVISION_SCRATCH }}/provision-test"
+description: defaults against a scratch domain
 
-- name: A bool
-  defaults:
-    domain: "{{ plist }}"
-    key: SomeFlag
-    type: bool
-    value: true
+steps:
+  - vars:
+      plist: "{{ env.PROVISION_SCRATCH }}/provision-test"
 
-- name: A string
-  defaults:
-    domain: "{{ plist }}"
-    key: SomePath
-    type: string
-    value: "{{ env.PROVISION_SCRATCH }}/where"
+  - name: A bool
+    defaults:
+      domain: "{{ plist }}"
+      key: SomeFlag
+      type: bool
+      value: true
 
-- name: An int
-  defaults:
-    domain: "{{ plist }}"
-    key: SomeCount
-    type: int
-    value: 3
+  - name: A string
+    defaults:
+      domain: "{{ plist }}"
+      key: SomePath
+      type: string
+      value: "{{ env.PROVISION_SCRATCH }}/where"
+
+  - name: An int
+    defaults:
+      domain: "{{ plist }}"
+      key: SomeCount
+      type: int
+      value: 3

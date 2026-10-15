@@ -815,3 +815,62 @@ Mac, which happens, and `defaults` stays unit-tested against captured
 **Overturned by.** GitHub Actions becoming a thing the language has to serve.
 Then the gate goes back to local and D19's check reads unvalidated, which is
 a worse answer honestly stated rather than a better one bought with nouns.
+
+## D26 — the gate fires under every verb that walks the plan
+
+**Decided by the owner 2026-10-15**, after a review found a one-step plan
+that `validate` refused and `apply` ran.
+
+**Decision.** The idempotency-gate check (D3, D20, D21) runs under `plan` and
+`apply` as well as `validate`, on the same root-shape test: a list root is a
+convergence plan and the check is on; a mapping root is a task or component
+and it stays off unless `validate --strict` asks. Under `apply` it runs in
+the preflight walk (spec §7), so a plan that fails it has run nothing.
+`--strict` stays a `validate`-only flag: it only ever turns the check on, and
+under `plan` and `apply` there is nothing left for it to turn on.
+
+**Why.** D20 named its own cost in writing — nothing stops a convergence plan
+carrying an ungated `sed -i /etc/pacman.conf` — and D21 installed
+`--strict`-on-by-default as the guard D20 asked for. But the guard only fired
+if the operator independently typed `validate`. A one-step list-root file
+with an ungated `shell` was exit 3 from `validate` and exit 0 from both
+`plan` and `apply`, so the regression D20 named was live on the only verb
+that touches the machine. D21 was the right decision applied in one of the
+three places it had to hold.
+
+**Why the preflight and not the walk.** This is forced, not stylistic. The
+walk re-reads its diagnostics at the top of each step, so a gate error raised
+during the walk that executes arrives *after* the ungated command has already
+run. Apply's preflight already existed for the sudo scan (§7) and already
+lands before `Sudo::preflight`, before the interrupt handler and before the
+executing expander exists. `plan` needs no preflight: it executes nothing, so
+the diagnostic is non-fatal mid-walk and the report after it turns the walk
+into exit 3, which is the path every other plan-time diagnostic already
+takes. A preflight there would buy an ordering nicety on a verb that cannot
+touch anything, and cost a second full render of every step, every template
+and every `vars_file` on every invocation.
+
+**What this costs, stated plainly.** A file that applied yesterday can exit 3
+today, and there is no flag to make it apply again — the fix is to declare
+the gate, or to say the file is a task by giving it a `description:` and a
+`steps:` root. Nine fixtures in this repo paid exactly that, and every one of
+them was a task wearing a plan's shape. And the check answers for the steps
+the run would run: `apply --tags db` does not report an ungated step in
+`web`, because the whole-file question is `validate`'s, which takes no
+filter. The alternative — checking steps the run excluded — would make a
+tag-filtered apply refuse over work it will not do, and the invariant D20
+names is pointwise over executed commands anyway: a violation `--skip-tags`
+hides from the operator is hidden from the machine too.
+
+**What this does not overturn.** D20: a bare `shell` step's exit code is
+still its whole contract, `ok` on exit 0, under every verb, and a task or CI
+job file still pays nothing. D21: the default and the root-shape test are
+unchanged. Only the set of verbs that read it moved. Spec §8's claim that a
+generated CI job file is "one line per command" was stale and is corrected
+rather than honoured — the shape it describes is a mapping root, which
+`tasks/ci.yml` already is.
+
+**Overturned by.** A convergence plan whose CI cannot ship because a
+legitimately ungated step has no honest gate to declare and no task root to
+move to. The fix then is a per-step `verdict:` escape hatch, which D20
+already weighed and closed.
