@@ -916,7 +916,10 @@ defaults:
   `validate --strict` a `defaults` step with no `when` naming the os is an
   **error**, the way an ungated `shell` is (D3). Strict has one severity;
   a second one is a bigger idea than this rule pays for. The action does
-  not skip itself; a plan says where it runs.
+  not skip itself; a plan says where it runs. The `when` may be on the step
+  or on the `import`/`use` that brought it in — §3.1 makes those the same
+  thing, so one gate on a macOS component gates every `defaults` step inside
+  it, and the gate does not reach the component's siblings.
 - The write takes effect for the running user. An app that caches its
   preferences (Finder, Dock, SystemUIServer) needs a restart, which is a
   shell step gated on the register of the `defaults` steps before it, not

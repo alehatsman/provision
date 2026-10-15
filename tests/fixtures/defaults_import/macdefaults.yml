@@ -1,0 +1,8 @@
+# No `when` on either step. Spec §3.1 says the gate on the `import`/`use`
+# that brings them in applies to them, so whether this file is legal depends
+# entirely on who brought it in -- which is the point of the fixtures beside
+# it.
+- name: dock autohide
+  defaults: {domain: com.apple.dock, key: autohide, type: bool, value: true}
+- name: dock tilesize
+  defaults: {domain: com.apple.dock, key: tilesize, type: int, value: 48}

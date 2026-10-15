@@ -1,0 +1,6 @@
+# An os-gated import gates the steps inside it and nothing after it.
+- name: mac only
+  import: ./macdefaults.yml
+  when: os == "darwin"
+- name: a sibling the import does not gate
+  defaults: {domain: com.apple.dock, key: orientation, type: string, value: left}

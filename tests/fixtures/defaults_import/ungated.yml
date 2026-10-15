@@ -1,0 +1,4 @@
+# Nothing gates these. Still refused: the rule is not weakened, only read in
+# the right scope.
+- name: brought in with no gate at all
+  import: ./macdefaults.yml
