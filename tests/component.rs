@@ -273,6 +273,22 @@ fn a_bare_step_means_the_same_thing_under_every_verb() {
     assert!(!out.contains("unknown"), "{out}");
 }
 
+/// The value a `{{ component_dir }}` or `cwd` probe printed, as a `Path`.
+///
+/// Compared with `Path::ends_with`, which matches whole components, so the
+/// assertion is about the directory and not about which separator the host
+/// spells it with. `component_dir` is a value a plan *reads*, not a path
+/// provision prints, so D29's `/` rule deliberately does not reach it and
+/// the test has to meet it where it is.
+#[expect(clippy::panic, reason = "a test helper's assertion failure")]
+fn probed<'a>(text: &'a str, key: &str) -> &'a Path {
+    let line = text
+        .lines()
+        .find_map(|l| l.split_once(key).map(|(_, rest)| rest.trim()))
+        .unwrap_or_else(|| panic!("no `{key}` line in:\n{text}"));
+    Path::new(line)
+}
+
 // ── component_dir and the one cwd rule ────────────────────────────────────
 
 // Spec §3.2 and §4, the two things a shared quality gate needs, and the two
@@ -300,8 +316,13 @@ fn a_component_named_bare_still_knows_its_own_directory() {
     let text =
         String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(0), "{text}");
+    let got = probed(&text, "dir=");
     assert!(
-        text.contains(&format!("dir={}", dir.display())),
+        got.is_absolute(),
+        "component_dir is not absolute: {got:?}\n{text}"
+    );
+    assert!(
+        got.ends_with(Path::new("tests/fixtures/component/nested")),
         "component_dir should be the directory the file is in:\n{text}"
     );
     assert!(
@@ -323,15 +344,21 @@ fn a_used_component_knows_its_own_directory_and_runs_in_the_invocation_one() {
 
     // §3.2: absolute, and the component's own directory — not the caller's,
     // and not where provision was invoked.
+    let dir = probed(&out, "dir=");
     assert!(
-        out.contains(&format!("dir={root}/tests/fixtures/component/nested")),
+        dir.is_absolute(),
+        "component_dir is not absolute: {dir:?}\n{out}"
+    );
+    assert!(
+        dir.ends_with(Path::new("tests/fixtures/component/nested")),
         "component_dir should be the component's own directory:\n{out}"
     );
     // §4: the invocation directory, even for a step inside a `use`. A shared
     // gate checked out under ~/.cache must gate the repo you are standing in,
     // not `cd` to its own toplevel and gate itself.
-    assert!(
-        out.contains(&format!("cwd={root}\n")),
+    assert_eq!(
+        probed(&out, "cwd="),
+        Path::new(root),
         "a step should default to the invocation directory:\n{out}"
     );
 }
