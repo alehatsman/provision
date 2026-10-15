@@ -131,7 +131,30 @@ already use Jinja syntax (`not in [0, 2]`, `and`, `==`). One engine, no
 second expression language. Strict undefined because a silently empty
 `{{ palette.bg }}` in a config file is the worst kind of bug.
 
-**Overturned by.** minijinja being abandoned. Then vendor it.
+**Overturned by.** minijinja being abandoned. Then vendor it — but priced,
+not assumed.
+
+**The exit ramp, measured 2026-10-15** (issue #5 asked for this to be a tested
+claim rather than a sentence). It is not D13's situation and should not be
+read as it. `minijinja` is named in **15 files**, and the reason is
+`minijinja::Value`: it is this project's value type by adoption. Scope entries,
+facts, props, register results and every action's rendered field are all
+`Value`, so "vendor minijinja" is not a swap behind one module — it is
+vendoring a template engine *and* owning the type system the whole codebase
+passes around.
+
+What the ramp actually is, in order: a `Value` newtype of our own at the scope
+boundary first, which is the change that makes the engine replaceable at all,
+and only then a vendored or substituted engine behind it. That is a real piece
+of work and nobody should discover its size on the day minijinja is archived.
+It is not being done now — minijinja is maintained, 2.x, and widely used, and
+doing it today would spend the week to buy nothing. Writing down what it costs
+is the part that was missing.
+
+**Why the smaller fence was not built instead.** One engine for values and
+conditions is this decision, and the single shared `Value` is what makes it
+one engine. A newtype today would add a conversion at every field render to
+protect against an event that has not happened.
 
 ## D7 — Ansible tag semantics
 
@@ -244,6 +267,15 @@ is the only file that would change if it has to be swapped or vendored.
 
 **Overturned by.** saphyr breaking its API twice in a way that costs more than
 vendoring `src/yaml.rs`'s dependency surface. Then vendor it.
+
+**Confinement verified 2026-10-15** (issue #5). The claim above holds as
+written: `saphyr` is named in `src/yaml.rs` and in one line of a `template.rs`
+test, nowhere else, and the surface is four items — `LoadableYamlNode`,
+`MarkedYaml`, `Scalar`, `YamlData`. Nothing downstream of `yaml.rs` knows the
+parser exists; the walk receives typed accessors and spans. This ramp is cheap
+and stays cheap as long as that stays true, which is worth re-checking the day
+a second file imports `saphyr`. Contrast D6, where the same sentence costs
+something very different.
 
 ## D14 — plan binds registers to a placeholder and says "unprobed"
 

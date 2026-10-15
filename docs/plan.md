@@ -128,20 +128,41 @@ src/
     sudo.rs
     process.rs     spawn, capture, kill process group
   actions/
-    shell.rs cmd.rs file.rs template.rs pkg.rs service.rs assert.rs
-    mod.rs         trait Action { fn plan(&self, ctx) -> Probe; fn apply(&self, ctx) -> Outcome }
+    mod.rs         enum Action, the parse dispatch, shell/cmd/assert inline
+    file.rs template.rs pkg.rs service.rs git.rs download.rs defaults.rs
   output/
-    tty.rs plain.rs json.rs
+    mod.rs         trait Sink
+    text.rs json.rs
     event.rs       one event type both apply and plan emit
 tests/
-  fixtures/        small plans
-  idempotency/     one per action
-  snapshots/       output
+  fixtures/        small plans, one directory per command
+  snapshots/       output (insta)
+  apply.rs cli.rs component.rs list.rs
 ```
 
 A `Probe` is what `plan` prints; an `Outcome` is what `apply` prints. Both
 carry `status` ∈ {ok, changed, skipped, unknown, failed} and an optional
 diff or message. The output layer knows nothing about actions.
+
+**Where this differs from the sketch it started as**, because the shape the
+code took is the one worth describing:
+
+- **There is no `trait Action`.** `Action` is an `enum` and the dispatch is a
+  `match` on the step's key, which is what "actions are a Rust `enum`; the
+  dispatcher is a `match`" above already said. A trait would buy dynamic
+  dispatch for a closed set of ten.
+- **`shell`, `cmd` and `assert` have no file.** They parse to an `Action`
+  variant in `actions/mod.rs` and are executed by `exec/`, because none of
+  them inspects state — which is the whole of D4's rule for what gets a typed
+  action, applied to the file layout.
+- **One `output/text.rs`, not `tty.rs` plus `plain.rs`.** `anstream` makes the
+  TTY and the pipe the same code path with a different style resolution, which
+  is why that crate was picked (above).
+- **The traits that do exist** are `Sink` (`output/mod.rs`) — what a
+  command writes events to — and `Judge` (`exec/runner.rs`) — what turns a
+  finished process into a verdict.
+- **No `tests/idempotency/`.** The run-twice tests live beside the rest in
+  `tests/apply.rs`; the ground rule that every action has one is unchanged.
 
 ## Phases
 
