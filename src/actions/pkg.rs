@@ -263,6 +263,70 @@ pub(crate) struct Spec {
     /// `--adopt` on the brew cask install call (spec §6.5).
     pub adopt: bool,
     pub update_cache: bool,
+    /// Spec §6.5: a `>=` floor. `None` is plain presence. It changes the
+    /// question the step asks, never the call it makes — which is what lets
+    /// it work on pacman, which has no floor syntax, and winget, whose
+    /// `--version` is exact rather than a range.
+    pub floor: Option<Floor>,
+}
+
+/// A `>=` version floor, parsed once. Spec §6.5 defines the comparison, and
+/// `Floor::satisfied_by` is the whole of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Floor {
+    /// As written, for the error message. The numbers are what is compared.
+    pub text: String,
+    want: Vec<u64>,
+}
+
+impl Floor {
+    /// Spec §6.5: `>=` and nothing else. An exact pin is not a floor and
+    /// would need the manager's own syntax; `<=` is not something a plan can
+    /// act on.
+    fn parse(src: &str) -> std::result::Result<Floor, String> {
+        let Some(rest) = src.trim().strip_prefix(">=") else {
+            return Err(format!("`{src}` is not a version floor"));
+        };
+        let text = rest.trim().to_string();
+        let want = numeric_parts(&text);
+        if want.is_empty() {
+            return Err(format!("`{src}` names no version to compare"));
+        }
+        Ok(Floor { text, want })
+    }
+
+    /// `None` when the installed version has no leading number at all, which
+    /// spec §6.5 makes a failure rather than a guess.
+    fn satisfied_by(&self, installed: &str) -> Option<bool> {
+        let have = numeric_parts(installed);
+        if have.is_empty() {
+            return None;
+        }
+        // Component by component, left to right, stopping where either side
+        // runs out: a floor of `24` is about the major version and says
+        // nothing about what follows it, so `24.0.0` clears `>=24` on the
+        // first component and is not then failed for having no second one.
+        for (h, w) in have.iter().zip(self.want.iter()) {
+            if h != w {
+                return Some(h > w);
+            }
+        }
+        // Every shared component equal. `24.1` clears `>=24`; `24` clears
+        // `>=24`; `24` does not clear `>=24.1`, because the floor asked for a
+        // component the installed version does not reach.
+        Some(have.len() >= self.want.len())
+    }
+}
+
+/// Spec §6.5: drop a leading `epoch:`, split on `.` and `-`, and take whole
+/// numbers from the left until one is not. Deliberately not Debian or rpm
+/// ordering — a floor is a coarse question, those orderings disagree with
+/// each other, and implementing either badly is worse than naming the rule.
+fn numeric_parts(v: &str) -> Vec<u64> {
+    let body = v.split_once(':').map_or(v, |(_, rest)| rest);
+    body.split(['.', '-'])
+        .map_while(|c| c.parse::<u64>().ok())
+        .collect()
 }
 
 pub(crate) fn parse(
@@ -337,6 +401,21 @@ pub(crate) fn parse(
         Some(n) => n.as_bool()?,
         None => false,
     };
+    // Spec §6.5. Parsed here so the form is a validation error at the step's
+    // own line, not a surprise at apply.
+    let floor = match body.get("version") {
+        Some(n) => {
+            let Some(text) = render(n.as_str()?) else {
+                return Ok(None);
+            };
+            Some(Floor::parse(&text).map_err(|e| {
+                n.err(e)
+                    .with_note("a floor is `>=` and a version, like `>=24` or `>=1.21.0`")
+            })?)
+        }
+        None => None,
+    };
+
     let update_cache = match body.get("update_cache") {
         Some(n) => n.as_bool()?,
         None => false,
@@ -415,6 +494,22 @@ pub(crate) fn parse(
         }
     }
 
+    // Spec §6.5: a floor belongs to `present` and nowhere else. `absent` has
+    // no version; `latest` already takes the newest the manager offers, so a
+    // floor on top either restates it or contradicts it.
+    if let Some(n) = body.get("version").filter(|_| state != State::Present) {
+        let (word, why) = match state {
+            State::Absent => ("absent", "a package that is not there has no version"),
+            _ => (
+                "latest",
+                "`latest` already takes the newest the manager offers",
+            ),
+        };
+        return Err(n
+            .err(format!("`version` does not apply to `state: {word}`"))
+            .with_note(why));
+    }
+
     Ok(Some(Spec {
         names,
         state,
@@ -422,6 +517,7 @@ pub(crate) fn parse(
         cask,
         adopt,
         update_cache,
+        floor,
     }))
 }
 
@@ -465,18 +561,56 @@ impl Spec {
         match self.state {
             State::Present => {
                 let missing = self.subset(&before, false);
-                if missing.is_empty() {
+                // Spec §6.5: with a floor the declared state is "installed,
+                // and at least N", so a name that is installed below the
+                // floor is work too. It is not missing, so it is upgraded
+                // rather than installed -- the same call `latest` uses, on
+                // that name alone.
+                let stale = match self.below_floor(&before) {
+                    Ok(v) => v,
+                    Err(bad) => return bad,
+                };
+                if missing.is_empty() && stale.is_empty() {
                     return Effect::Ok;
                 }
                 if act {
-                    if let Err(bad) = self.run_on(ctx, m.install, &missing) {
+                    if !missing.is_empty() {
+                        if let Err(bad) = self.run_on(ctx, m.install, &missing) {
+                            return bad;
+                        }
+                        if let Some(bad) = self.verify(ctx, &missing, true) {
+                            return bad;
+                        }
+                    }
+                    if !stale.is_empty()
+                        && let Err(bad) = self.run_on(ctx, m.upgrade, &stale)
+                    {
                         return bad;
                     }
-                    if let Some(bad) = self.verify(ctx, &missing, true) {
+                    // Spec §6.5: the floor is verified after, and failing it
+                    // fails the step. `apt-get install -y nodejs` exits 0
+                    // having installed a version still below the floor when
+                    // the repository offering a newer one was never
+                    // registered -- the plan asked for something this
+                    // machine's sources cannot provide, and silently
+                    // reporting `changed` would hide that forever.
+                    let ran = match (missing.is_empty(), stale.is_empty()) {
+                        (false, false) => "install/upgrade",
+                        (false, true) => "install",
+                        _ => "upgrade",
+                    };
+                    if let Some(bad) = self.verify_floor(ctx, ran) {
                         return bad;
                     }
                 }
-                Effect::Changed(Some(format!("install {}", missing.join(" "))))
+                let mut what = Vec::new();
+                if !missing.is_empty() {
+                    what.push(format!("install {}", missing.join(" ")));
+                }
+                if !stale.is_empty() {
+                    what.push(format!("upgrade {}", stale.join(" ")));
+                }
+                Effect::Changed(Some(what.join(", ")))
             }
             State::Absent => {
                 let present = self.subset(&before, true);
@@ -554,6 +688,67 @@ impl Spec {
                 }
             }
         }
+    }
+
+    /// Installed names that do not clear the floor (spec §6.5). Empty when
+    /// there is no floor. `Err` when a version has no leading number at all,
+    /// which the spec makes a failure rather than a guess.
+    fn below_floor(
+        &self,
+        installed: &BTreeMap<String, String>,
+    ) -> std::result::Result<Vec<String>, Effect> {
+        let Some(floor) = &self.floor else {
+            return Ok(Vec::new());
+        };
+        let mut out = Vec::new();
+        for n in &self.names {
+            let Some(have) = installed.get(key(n)) else {
+                continue;
+            };
+            match floor.satisfied_by(have) {
+                Some(true) => {}
+                Some(false) => out.push(n.clone()),
+                None => {
+                    return Err(Effect::fail(format!(
+                        "cannot compare `{n}` version `{have}` against `>={}`: no leading number",
+                        floor.text
+                    )));
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Spec §6.5: after the calls, every name must clear the floor. The
+    /// message names the version it got and the floor it wanted, because
+    /// those two numbers are the whole diagnosis -- almost always a missing
+    /// repository rather than a wrong plan.
+    fn verify_floor(&self, ctx: &Ctx<'_>, ran: &str) -> Option<Effect> {
+        let floor = self.floor.as_ref()?;
+        let after = match self.installed(ctx) {
+            Ok(map) => map,
+            Err(bad) => return Some(bad),
+        };
+        let short: Vec<String> = self
+            .names
+            .iter()
+            .filter_map(|n| {
+                let have = after.get(key(n))?;
+                (floor.satisfied_by(have) != Some(true)).then(|| format!("{n} is {have}"))
+            })
+            .collect();
+        if short.is_empty() {
+            return None;
+        }
+        // Names the call that actually ran: a package below the floor is
+        // upgraded, not installed, and an error should name the command a
+        // reader can retype -- the same rule as `verify` above.
+        Some(Effect::fail(format!(
+            "{} after `{} {ran}` reported success, below `>={}`",
+            short.join(", "),
+            self.manager.bin,
+            floor.text,
+        )))
     }
 
     /// Spec §6.5: `changed` means the query said missing before *and present
@@ -695,6 +890,62 @@ fn key(name: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
+    use super::Floor;
+
+    fn floor(src: &str) -> Floor {
+        Floor::parse(src).expect("a valid floor")
+    }
+
+    // Spec §6.5 defines this comparison exactly, so it is pinned exactly.
+    #[test]
+    fn a_floor_compares_leading_numeric_components() {
+        let f = floor(">=24");
+        // The case this feature exists for: Ubuntu noble ships 18.19.1 and a
+        // plan that registered NodeSource wants 24.
+        assert_eq!(f.satisfied_by("18.19.1"), Some(false));
+        assert_eq!(f.satisfied_by("24.1.0"), Some(true));
+        assert_eq!(f.satisfied_by("24"), Some(true));
+        assert_eq!(f.satisfied_by("25.0.0"), Some(true));
+        // Comparison has already decided before it reaches the non-numeric
+        // tail, which is what makes a distro version string usable at all.
+        assert_eq!(f.satisfied_by("24.0.0-1nodesource1"), Some(true));
+        assert_eq!(f.satisfied_by("23.9.9-1nodesource1"), Some(false));
+        // apt epochs are dropped, so `1:8.2` is read as 8.2 -- without this
+        // the epoch would be compared as the major version and everything
+        // with one would clear every floor.
+        assert_eq!(floor(">=8").satisfied_by("1:8.2.3"), Some(true));
+        assert_eq!(floor(">=9").satisfied_by("1:8.2.3"), Some(false));
+    }
+
+    #[test]
+    fn a_floor_with_more_components_than_the_version_is_not_met() {
+        // `24` does not clear `>=24.1`: the floor asked for a component the
+        // installed version does not reach. The converse is fine -- `24.1`
+        // clears `>=24`, which is the ordinary major-version floor.
+        assert_eq!(floor(">=24.1").satisfied_by("24"), Some(false));
+        assert_eq!(floor(">=24").satisfied_by("24.1"), Some(true));
+        assert_eq!(floor(">=24.1").satisfied_by("24.1"), Some(true));
+    }
+
+    #[test]
+    fn an_unreadable_version_is_not_guessed() {
+        // Spec §6.5: no leading number means the step fails rather than
+        // guessing. `None` is how that is signalled.
+        assert_eq!(floor(">=24").satisfied_by("stable"), None);
+        assert_eq!(floor(">=24").satisfied_by(""), None);
+    }
+
+    #[test]
+    fn only_a_ge_floor_parses() {
+        Floor::parse("24").unwrap_err();
+        Floor::parse("<=24").unwrap_err();
+        Floor::parse("==24").unwrap_err();
+        Floor::parse(">=").unwrap_err();
+        Floor::parse(">=stable").unwrap_err();
+        // Whitespace either side of the operator is accepted.
+        Floor::parse(" >= 24 ").expect("whitespace either side is accepted");
+    }
+
     use super::*;
 
     // dpkg's status is three words: what was asked for (`install`, `hold`,

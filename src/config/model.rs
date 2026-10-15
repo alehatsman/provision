@@ -246,6 +246,11 @@ static ACTIONS: &[(&str, ActionDoc)] = &[
                     "present | absent | latest (default: present)",
                 ),
                 f(
+                    "version",
+                    "optional",
+                    "a `>=` floor, `present` only: `>=24`",
+                ),
+                f(
                     "manager",
                     "optional",
                     "apt | pacman | yay | brew | winget; default: first available",
