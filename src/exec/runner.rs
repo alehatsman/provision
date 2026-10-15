@@ -425,6 +425,9 @@ impl Runner {
             deadline_bound,
             deadline: p.deadline,
             env: &p.env,
+            // Until a command runs, the step's own ceiling is the honest
+            // answer: that is what the first one will get.
+            last: std::cell::Cell::new(timeout),
         };
         let (effect, mut note) = match &p.action {
             Action::File(spec) => (

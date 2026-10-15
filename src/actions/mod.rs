@@ -407,6 +407,12 @@ pub(crate) struct Ctx<'a> {
     /// budget in turn and the step overran the deadline by a multiple of it.
     pub deadline: Option<Instant>,
     pub env: &'a BTreeMap<String, String>,
+    /// What the last command actually got, for the wording of a kill. The
+    /// clamp above means the second command of an action is bound by less
+    /// than `timeout`, and a message that still named `timeout` would name a
+    /// number no command was given — the same fault §8 names a step timeout
+    /// the file does not contain to avoid.
+    pub last: std::cell::Cell<Duration>,
 }
 
 impl Ctx<'_> {
@@ -439,6 +445,7 @@ impl Ctx<'_> {
         // the way §8 wants, and inventing a second shape for the same event
         // would be a second wording for one thing.
         let Some(timeout) = self.budget() else {
+            self.last.set(Duration::ZERO);
             return Ok(process::Raw {
                 rc: 124,
                 stdout: Vec::new(),
@@ -446,6 +453,7 @@ impl Ctx<'_> {
                 how: process::How::TimedOut,
             });
         };
+        self.last.set(timeout);
         let argv: Vec<String> = argv.iter().map(|s| (*s).to_string()).collect();
         let (argv, stdin) = if as_root {
             // The step's own `env` keys, exactly as the shell path passes
@@ -517,7 +525,7 @@ impl Ctx<'_> {
                     } else {
                         "timed out"
                     },
-                    crate::output::event::human(self.timeout)
+                    crate::output::event::human(self.last.get())
                 ),
                 detail: got.stderr_text(),
                 interrupted: false,
