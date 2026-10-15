@@ -984,6 +984,41 @@ fn strict_asks_a_defaults_step_where_it_runs() {
     assert!(text.contains("defaults_strict.yml:19:3"), "{text}");
 }
 
+// #40c. Spec §3.1: a `when` on an `import`/`use` "applies to every imported
+// step". §6.10's `defaults` gate is the only rule that reads a step's `when`
+// directly, and it read only the step's own — so the shape the spec
+// recommends (one os gate on the import) was refused, while the same `when`
+// pasted onto every step inside it was accepted. The rule disagreed with the
+// spec about what "gated" means, in the direction that punishes the tidier
+// plan.
+#[test]
+fn an_os_gate_on_the_import_gates_the_defaults_steps_inside_it() {
+    let (code, text) = validate("defaults_import/gated.yml");
+    assert_eq!(code, 0, "{text}");
+}
+
+#[test]
+fn the_defaults_gate_is_read_in_a_wider_scope_not_weakened() {
+    // Still refused when nothing gates them: both steps, each at its own
+    // position in the imported file.
+    let (code, text) = validate("defaults_import/ungated.yml");
+    assert_eq!(code, EXIT_VALIDATION, "{text}");
+    assert_eq!(text.matches("naming the os").count(), 2, "{text}");
+    assert!(text.contains("macdefaults.yml:5:3"), "{text}");
+    assert!(text.contains("macdefaults.yml:7:3"), "{text}");
+}
+
+#[test]
+fn a_gated_import_does_not_gate_what_follows_it() {
+    // The flag is saved and restored around the descent, not set: an os-gated
+    // import gates the steps inside it and nothing after it. Without the
+    // restore this plan would validate clean and the sibling would ship.
+    let (code, text) = validate("defaults_import/sibling.yml");
+    assert_eq!(code, EXIT_VALIDATION, "{text}");
+    assert_eq!(text.matches("naming the os").count(), 1, "{text}");
+    assert!(text.contains("sibling.yml:5:3"), "{text}");
+}
+
 #[test]
 fn a_defaults_step_that_cannot_mean_what_it_says_is_rejected_at_parse() {
     // `array` and `dict` are deferred, and the error says where they went.

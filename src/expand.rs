@@ -133,6 +133,12 @@ pub(crate) struct Expander {
     /// Spec §8 `--deadline`: when the run's wall clock runs out. `None` is no
     /// deadline, which is the default and every `validate`.
     deadline: Option<Instant>,
+    /// Set while the walk is inside an `import` or `use` whose own `when`
+    /// names the os. Spec §3.1: such a `when` "applies to every imported
+    /// step", and §6.10's `defaults` gate is the one rule that reads a
+    /// step's `when` directly — so without this it read only the step's own
+    /// and refused a correctly-gated subtree (#40c).
+    os_gated: bool,
     /// Every tag the walk saw declared, on a step or inherited from the
     /// `import`/`use` that carried it. Collected so that a `--tags` value
     /// matching none of them can be named at the end of the walk, and so the
@@ -162,6 +168,7 @@ impl Expander {
             keep_going: false,
             strict: false,
             deadline: None,
+            os_gated: false,
             seen_tags: BTreeSet::new(),
         }
     }
@@ -442,6 +449,14 @@ impl Expander {
             Cond::True => {}
         }
 
+        // Saved and restored rather than set: an os-gated `import` gates the
+        // steps *inside* it, and the sibling that follows it is gated by
+        // nothing. Only structural steps can carry a gate down, and only an
+        // `import`/`use` descends.
+        let outer = self.os_gated;
+        if step.is_structural() {
+            self.os_gated = outer || self.when_names_os(step);
+        }
         match step.key {
             "vars" => self.do_vars(step, scope),
             "vars_file" => self.do_vars_file(step, scope),
@@ -449,6 +464,7 @@ impl Expander {
             "use" => self.do_use(step, scope, depth, &tags),
             _ => self.do_action(step, scope, depth),
         }
+        self.os_gated = outer;
     }
 
     // ── conditions ────────────────────────────────────────────────────────
@@ -1179,17 +1195,27 @@ impl Expander {
     /// that carries one has to say where it runs. An error rather than a
     /// warning because strict has one severity, and a second one is a bigger
     /// idea than this rule pays for.
+    /// Does this step's own `when` read the `os` fact? A name the expression
+    /// reads, not a substring of its text: `hostname == "x1"` contains "os"
+    /// and says nothing about the os.
+    fn when_names_os(&self, step: &Step<'static>) -> bool {
+        step.mods
+            .when
+            .and_then(|n| n.as_str().ok())
+            .and_then(|w| self.engine.undeclared(w))
+            .is_some_and(|names| names.contains("os"))
+    }
+
     fn check_strict_gate(&mut self, step: &Step<'static>) {
         if step.key == "defaults" {
-            // A name the expression reads, not a substring of its text:
-            // `hostname == "x1"` contains "os" and says nothing about the os.
-            let names_os = step
-                .mods
-                .when
-                .and_then(|n| n.as_str().ok())
-                .and_then(|w| self.engine.undeclared(w))
-                .is_some_and(|names| names.contains("os"));
-            if !names_os {
+            // Spec §3.1: a `when` on the `import`/`use` that brought this
+            // step in applies to it as surely as one written on the step, so
+            // an os-gated component is gated whichever of the two carries the
+            // gate. Reading only the step's own `when` refused the shape the
+            // spec recommends — a macOS component imported under
+            // `when: os == "darwin"` — while accepting the same `when`
+            // pasted onto each step inside it (#40c).
+            if !(self.os_gated || self.when_names_os(step)) {
                 self.diags.push(
                     step.at
                         .err("`defaults` step has no `when` naming the os")

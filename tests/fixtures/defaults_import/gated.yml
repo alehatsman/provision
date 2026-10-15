@@ -1,0 +1,5 @@
+# The shape spec §3.1 recommends: the os gate on the import, once, rather
+# than pasted onto every step inside.
+- name: mac only
+  import: ./macdefaults.yml
+  when: os == "darwin"
