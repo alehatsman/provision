@@ -653,27 +653,53 @@ fn as_written(n: yaml::N<'static>) -> String {
         .unwrap_or_default()
 }
 
-/// `provision list <dir>/`. One line per `.yml` file, sorted by stem: the
-/// file stem, then its `description` or nothing. Nothing below the root keys
-/// is parsed and nothing is run, so a directory holding one broken file
-/// still lists. This is the task runner's "what can I run here" (spec §8).
+/// `provision list <dir>/`. One line per component, sorted by the name it
+/// prints: that name, then its `description` or nothing. Nothing below the
+/// root keys is parsed and nothing is run, so a directory holding one broken
+/// file still lists. This is the task runner's "what can I run here" (§8).
+///
+/// Two layouts, because this repo's own examples use both. A `.yml` file in
+/// the directory is one component, named by its stem. A subdirectory holding
+/// `index.yml` is also one component, named by the *directory* — that is the
+/// layout a component shipping its own `templates/` has to use, since a
+/// `src:` resolves relative to the component file. Naming those by stem would
+/// print `index` for every one of them, which is why this looks at the
+/// directory instead.
+///
+/// One level down, and `index.yml` by name rather than a recursive sweep:
+/// `zsh/` also holds `vars/arch.yml` and its friends, which are a component's
+/// data and not components, and a sweep would list them all as
+/// `(not a component)`.
 fn list_tasks(dir: &Path, base: &Path) -> Result<u8, Diag> {
-    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+    let mut found: Vec<(String, PathBuf)> = Vec::new();
+    for entry in std::fs::read_dir(dir)
         .map_err(|e| Diag::file_level(dir, format!("cannot read: {e}")))?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|x| x == "yml"))
-        .collect();
-    // By stem, not by filename: sorting the whole name puts `ci-fast` above
-    // `ci`, because `-` sorts below `.`. The name a reader is looking for is
-    // the one the listing prints.
-    files.sort_by(|a, b| a.file_stem().cmp(&b.file_stem()));
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        if path.is_dir() {
+            let index = path.join("index.yml");
+            if index.is_file()
+                && let Some(name) = path.file_name()
+            {
+                found.push((name.to_string_lossy().into_owned(), index));
+            }
+        } else if path.extension().is_some_and(|x| x == "yml")
+            && let Some(stem) = path.file_stem()
+        {
+            found.push((stem.to_string_lossy().into_owned(), path));
+        }
+    }
+    // By the printed name, not by filename: sorting the whole name puts
+    // `ci-fast` above `ci`, because `-` sorts below `.`. The name a reader is
+    // looking for is the one the listing prints.
+    found.sort_by(|a, b| a.0.cmp(&b.0));
 
-    if files.is_empty() {
-        output::line(format_args!("  no tasks in {}", rel(dir, base)));
+    if found.is_empty() {
+        output::line(format_args!("  no components in {}", rel(dir, base)));
         return Ok(EXIT_OK);
     }
-    for path in &files {
-        let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    for (name, path) in &found {
         // A file that will not load, or is not a component, is named rather
         // than skipped: a listing that silently omits a file is worse than
         // one that says which file is wrong.
@@ -681,7 +707,7 @@ fn list_tasks(dir: &Path, base: &Path) -> Result<u8, Diag> {
             Ok(c) => c.description.unwrap_or_default(),
             Err(_) => "(not a component)".to_string(),
         };
-        output::line(format_args!("  {stem:<24}  {note}"));
+        output::line(format_args!("  {name:<24}  {note}"));
     }
     Ok(EXIT_OK)
 }

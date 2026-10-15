@@ -1,6 +1,8 @@
 # Example component — a mapping with `props` and `steps`.
 # Called with `use: ./components/zsh/index.yml`.
 
+description: deploy zsh config and optionally install zplug
+
 props:
   config_dir:
     type: string

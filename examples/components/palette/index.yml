@@ -2,6 +2,8 @@
 # a child scope — it sees the caller's variables read-only, and its own `vars`
 # do not leak back.
 
+description: render a terminal palette into the shell config
+
 props:
   variant:
     type: string
