@@ -1003,3 +1003,65 @@ rather than honoured — the shape it describes is a mapping root, which
 legitimately ungated step has no honest gate to declare and no task root to
 move to. The fix then is a per-step `verdict:` escape hatch, which D20
 already weighed and closed.
+
+## D27 — strict reads a subtree this machine gates off, shape only
+
+**Decision.** When `strict` is on, the walk descends into a structural step
+whose `when` is false and checks the steps inside it for shape: the
+idempotency gate (D3, D21) and §6.10's `defaults` os-gate. It renders
+nothing there, records nothing, and reports no step. The step itself is still
+reported `skipped   when: false`, exactly as before.
+
+**Why.** `validate` evaluates `when`, so a subtree gated off on *this*
+machine was invisible to it. A `when: os == "linux"` component carried no
+weight on a Mac and a `when: os == "darwin"` one carried none on Linux — so
+the same plan validated differently on different hosts, and an ungated
+`shell` inside a cross-platform component was found by whichever machine
+happened to match. That is the opposite of what a linter is for, and it fails
+on exactly the plans that most need checking: os-gated components are what a
+cross-platform plan is made of. D20's named regression — a convergence plan
+carrying an ungated `sed -i /etc/pacman.conf` — was reachable by putting it
+behind an os gate.
+
+**Why shape only.** A gated-off subtree may read variables that do not exist
+on this machine; that is usually *why* it is gated. Rendering it would fail
+on an undefined variable, a missing `src`, or an import path named through
+one of those variables — which is mooncake #191, the failure D7's ordering
+exists to prevent: a step that is skipped must not fail on what it reads. So
+the descent evaluates no condition, renders no field and binds no variable.
+The one thing it must render is the path of the next file, because there is
+no other way to reach it, and a failure there just ends the descent.
+
+`vars` and `vars_file` are not run inside a false branch. They compute
+values, and values are the one thing a gated-off subtree has no business
+producing: they would land in the live scope and be read by the steps after
+it.
+
+**Why it is gated on `strict` and not on the verb.** Two reasons that agree.
+The strict gate is the only thing a shape-only walk checks, so with strict
+off there is nothing to go in for. And strict is a property of the file
+(D26), so all three verbs that walk a plan root descend and reach the same
+verdict — which is what §8 promises: one file, one set of arguments, one
+verdict. Restricting this to the `validate` verb would have made it refuse a
+file `plan` accepts, with the same arguments on the same machine, and that is
+the single thing §8 says cannot happen.
+
+**What this costs, stated plainly.** A plan that validated yesterday can exit
+3 today, under all three verbs, because a fault that was hidden behind an os
+gate is now visible — and the fix is the same as D26's: declare the gate. A
+machine can now be told about a fault in a component it will never run, which
+is the point and is also mildly annoying. The `defaults` os-gate rule reads
+the plan rather than the machine, so a `defaults` step inside an
+`os == "darwin"` import is gated when validated on Linux, where the import is
+false and the steps will never run; that is correct — the rule asks what the
+plan says, not what this host is.
+
+**What stays un-checked, on purpose.** Everything that needs a value: types,
+undefined variables, missing files, prop arity. A gated-off subtree is
+checked for what it *says*, never for what it would *do*. Nobody should read
+a clean `validate` as proof that the other OS's half of a plan will run.
+
+**Overturned by.** A shape check that cannot be made without a value, for a
+fault worth catching across the gate. Then the honest move is a second verb
+or a flag that takes a target os and renders against it — not relaxing this
+one into rendering a branch the machine cannot evaluate.

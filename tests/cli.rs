@@ -981,6 +981,67 @@ fn help_and_version_are_not_usage_errors() {
     }
 }
 
+// ── a subtree this machine gates off (D27) ───────────────────────────────
+
+#[test]
+fn strict_reads_a_subtree_its_when_ruled_out_on_this_machine() {
+    // Before: `validate` evaluated `when`, so a `when: os == "linux"`
+    // component was invisible on a Mac and the same plan validated
+    // differently on different hosts. The ungated `shell` was found by
+    // whichever machine happened to match.
+    let (code, text) = validate("gated_subtree/root.yml");
+    assert_eq!(code, EXIT_VALIDATION, "{text}");
+    assert!(text.contains("no idempotency gate"), "{text}");
+    assert!(text.contains("bits.yml:15:3"), "{text}");
+}
+
+#[test]
+fn a_gated_off_subtree_is_read_for_shape_and_never_rendered() {
+    // The whole risk of walking in, and the reason it is shape-only. That
+    // fixture's other four steps each read something that does not exist on
+    // the validating machine -- an undefined variable, a missing `src`, a
+    // nested import named through that variable. Rendering any of them is
+    // mooncake #191, the failure D7's ordering exists to prevent: a step
+    // that is skipped must not fail on what it reads.
+    let (code, text) = validate("gated_subtree/root.yml");
+    assert_eq!(code, EXIT_VALIDATION, "{text}");
+    assert_eq!(
+        text.matches("error:").count(),
+        1,
+        "exactly one fault: {text}"
+    );
+    assert!(!text.contains("only_on_the_other_os"), "{text}");
+    assert!(!text.contains("not found"), "{text}");
+}
+
+#[test]
+fn an_os_gate_on_a_false_import_still_gates_the_defaults_inside_it() {
+    // The §6.10 rule asks what the plan says, not what this machine is. The
+    // import is false here and its `when` still names the os, so the
+    // `defaults` steps inside are gated.
+    let (code, text) = validate("gated_subtree/os_gated.yml");
+    assert_eq!(code, 0, "{text}");
+}
+
+#[test]
+fn the_three_verbs_agree_on_a_gated_off_subtree() {
+    // Spec §8: one file, one set of arguments, one verdict. The descent is
+    // gated on `strict` rather than on the verb precisely so this holds --
+    // restricting it to `validate` would make it refuse a file `plan`
+    // accepts, with the same arguments on the same machine.
+    let path = fixtures().join("gated_subtree/root.yml");
+    let path = path.to_str().unwrap();
+    for verb in ["validate", "plan", "apply"] {
+        let out = run(&[verb, path]);
+        assert_eq!(
+            out.status.code(),
+            Some(EXIT_VALIDATION),
+            "{verb} disagreed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
 // ── templated typed modifiers (#35, spec §3.4) ───────────────────────────
 
 #[test]

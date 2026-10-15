@@ -1027,6 +1027,21 @@ gates, so it has a wall clock worth bounding too. There is no
   steps it would run; the whole-file question is `validate`'s, which takes
   no filter.
 
+  **A subtree gated off on this host is still read for shape** (D27). The
+  walk descends into a structural step whose `when` is false and applies the
+  idempotency gate and §6.10's `defaults` os-gate to the steps inside — but
+  shape only: nothing there is rendered, no condition is evaluated, no
+  variable is bound, and no step is reported. The step itself is still
+  reported `skipped   when: false`. Without this a `when: os == "linux"`
+  component was invisible to `validate` on a Mac, so the same plan got
+  different verdicts on different hosts and an ungated `shell` was caught by
+  whichever machine happened to match. The descent is on exactly when
+  `strict` is, which is what keeps the one-verdict rule above true across
+  all three verbs. Everything needing a *value* — types, undefined
+  variables, missing files, prop arity — stays unchecked in there, because a
+  gated-off subtree may legitimately read names this host does not have: it
+  is checked for what it says, never for what it would do.
+
   It is therefore evaluated against **this host's facts and PATH**, and that
   is kept as narrow as it can be. A rule about a *named* backend holds on
   every host and is checked here; a rule about one this host merely happens

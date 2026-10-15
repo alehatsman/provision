@@ -1,0 +1,6 @@
+# The os gate is on the import and the import is false here. The `defaults`
+# steps inside must still be read as gated: the rule asks what the plan says,
+# not what this machine is.
+- name: mac only
+  import: ./mac.yml
+  when: os == "darwin"

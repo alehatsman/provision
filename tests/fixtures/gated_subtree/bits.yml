@@ -1,0 +1,16 @@
+# Imported under a `when` that is false on the validating machine. Everything
+# here except the last step would fail if the subtree were *rendered*, which
+# is why a shape-only walk is the only safe way in: the subtree is gated off
+# precisely because none of it applies here.
+- vars:
+    derived: "{{ only_on_the_other_os }}/x"
+- name: reads a variable that does not exist on this machine
+  shell: echo "{{ only_on_the_other_os }}"
+  changed_when: "false"
+- name: a src that exists only there
+  file: {path: /tmp/x, state: file, src: /definitely/not/here}
+- name: a nested import named through that same variable
+  import: "{{ only_on_the_other_os }}/more.yml"
+# The one real fault, and the only thing that should be reported.
+- name: an ungated shell hiding behind the gate
+  shell: sed -i s/a/b/ /etc/pacman.conf
