@@ -1350,8 +1350,15 @@ gates, so it has a wall clock worth bounding too. There is no
 
 - `list --json`, with **no path**: every builtin action and every step
   modifier, as one document (D25). Verbs that answer return a document;
-  verbs that walk stream. `--json` on a path narrows it to that one action
-  or component.
+  verbs that walk stream. `--json` on a path narrows it to that one
+  action, that one component, or the components in that directory — three
+  document shapes, one per thing `list` can be pointed at. A component's
+  document carries `props` and, beside it, `reads` and `reads_complete`:
+  the caller variables it needs beyond its props (§3.2), because a props
+  list that presents itself as the interface and is not one is a blind spot
+  a program cannot see past. A directory's document names a file that will
+  not parse rather than omitting it, for the same reason the text listing
+  does.
 
   The modifiers are the half that had no printed form at all. `list
   <action>` answers "which keys does `git` take"; nothing answered "which

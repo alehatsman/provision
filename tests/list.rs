@@ -485,3 +485,44 @@ fn a_component_that_needs_nothing_from_its_caller_says_nothing() {
     assert_eq!(code, 0, "{out}");
     assert!(!out.contains("reads from the caller"), "{out}");
 }
+
+// `--json` was threaded only into the bare-action-name branch, so
+// `list --json <component.yml>` and `list --json <dir>/` accepted the flag
+// and printed the human listing. A flag accepted and dropped is the shape §4
+// calls a typo that costs an afternoon — and D25 made this output a contract
+// an agent reads, which is the consumer that cannot notice the difference.
+#[test]
+fn list_json_answers_for_a_component_file() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/list_globals/comp.yml");
+    let (code, out) = run(&["list", "--json", path.to_str().unwrap()]);
+    assert_eq!(code, 0, "{out}");
+    let doc: serde_json::Value = serde_json::from_str(&out).expect("a JSON document");
+
+    assert_eq!(doc["name"], "comp");
+    let props: Vec<&str> = doc["props"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(props, vec!["tool"]);
+    // The half #41 is about: the declared interface and the real one.
+    assert_eq!(doc["reads"], serde_json::json!(["editor", "install_root"]));
+    assert_eq!(doc["reads_complete"], true);
+}
+
+#[test]
+fn list_json_answers_for_a_directory() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/list_nested");
+    let (code, out) = run(&["list", "--json", dir.to_str().unwrap()]);
+    assert_eq!(code, 0, "{out}");
+    let doc: serde_json::Value = serde_json::from_str(&out).expect("a JSON document");
+    let names: Vec<&str> = doc["components"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"flat"), "{out}");
+    assert!(names.contains(&"palette"), "{out}");
+}

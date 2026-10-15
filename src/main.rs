@@ -636,7 +636,7 @@ fn is_component(path: &Path) -> Result<bool, Diag> {
 /// form used to answer only the first half of it.
 fn list(path: &Path, base: &Path, json: bool) -> Result<u8, Diag> {
     if path.is_dir() {
-        return list_tasks(path, base);
+        return list_tasks(path, base, json);
     }
     if !path.exists() {
         // Spec §8: a path that exists wins, so only a bare name matching no
@@ -659,7 +659,7 @@ fn list(path: &Path, base: &Path, json: bool) -> Result<u8, Diag> {
             ),
         );
     }
-    describe_component(path)
+    describe_component(path, json)
 }
 
 /// `provision list <action>`. The summary, then one line per body field:
@@ -738,7 +738,7 @@ fn describe_action(name: &str, doc: &config::model::ActionDoc) -> u8 {
 ///
 /// Nothing below the root keys is parsed and nothing runs, exactly as the
 /// directory form promises.
-fn describe_component(path: &Path) -> Result<u8, Diag> {
+fn describe_component(path: &Path, json: bool) -> Result<u8, Diag> {
     let doc = yaml::Doc::load(path)?;
     // A plan gets the same answer `--prop` on a plan already gets: it declares
     // no props, and asking one for its interface is that same mistake.
@@ -751,6 +751,20 @@ fn describe_component(path: &Path) -> Result<u8, Diag> {
     let component = config::load::parse_component(doc)?;
     let (globals, uncertain) = caller_globals(&component);
     let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+
+    // D25: verbs that answer return a document. `--json` used to be threaded
+    // only into the bare-action-name branch, so `list --json <component.yml>`
+    // and `list --json <dir>/` silently printed the human listing — a flag
+    // accepted and dropped, which is the exact shape §4 calls "a typo that
+    // costs an afternoon".
+    if json {
+        output::line(format_args!(
+            "{}",
+            component_json(&stem, &component, &globals, uncertain)
+        ));
+        return Ok(EXIT_OK);
+    }
+
     let description = component.description.clone().unwrap_or_default();
     output::line(format_args!("  {stem:<24}  {description}"));
 
@@ -970,6 +984,34 @@ fn report_globals(globals: &[String], uncertain: bool) {
     }
 }
 
+/// One component as a document (D25). Carries `reads` beside `props`,
+/// because a props list that presents itself as the interface and is not one
+/// is the thing #41 filed — and a machine-readable listing that inherited
+/// that blind spot would be worse than the human one, which at least gets
+/// read by someone who can go and look.
+fn component_json(
+    stem: &str,
+    component: &config::load::Component,
+    globals: &[String],
+    uncertain: bool,
+) -> serde_json::Value {
+    serde_json::json!({
+        "name": stem,
+        "description": component.description,
+        "props": component.props.iter().map(|p| serde_json::json!({
+            "name": p.name,
+            "type": p.ty.name(),
+            "required": p.required,
+            "default": p.default.map(as_written),
+            "description": p.description,
+        })).collect::<Vec<_>>(),
+        // The caller variables the component reads beyond its props, and
+        // whether the scan could see everything (D11: say what is not known).
+        "reads": globals,
+        "reads_complete": !uncertain,
+    })
+}
+
 /// A default's source text. Spec §3.2: taken as written, never rendered.
 fn as_written(n: yaml::N<'static>) -> String {
     n.as_scalar_string()
@@ -994,7 +1036,7 @@ fn as_written(n: yaml::N<'static>) -> String {
 /// `zsh/` also holds `vars/arch.yml` and its friends, which are a component's
 /// data and not components, and a sweep would list them all as
 /// `(not a component)`.
-fn list_tasks(dir: &Path, base: &Path) -> Result<u8, Diag> {
+fn list_tasks(dir: &Path, base: &Path, json: bool) -> Result<u8, Diag> {
     let mut found: Vec<(String, PathBuf)> = Vec::new();
     for entry in std::fs::read_dir(dir)
         .map_err(|e| Diag::file_level(dir, format!("cannot read: {e}")))?
@@ -1018,6 +1060,35 @@ fn list_tasks(dir: &Path, base: &Path) -> Result<u8, Diag> {
     // `ci-fast` above `ci`, because `-` sorts below `.`. The name a reader is
     // looking for is the one the listing prints.
     found.sort_by(|a, b| a.0.cmp(&b.0));
+
+    if json {
+        // One document, not one object per component: `list` answers rather
+        // than walks (D25), and a directory with nothing in it is an empty
+        // array rather than silence.
+        let items: Vec<serde_json::Value> = found
+            .iter()
+            .map(|(name, path)| {
+                match yaml::Doc::load(path).and_then(config::load::parse_component) {
+                    Ok(c) => {
+                        let (globals, uncertain) = caller_globals(&c);
+                        component_json(name, &c, &globals, uncertain)
+                    }
+                    // Named, not skipped, for the same reason the text form
+                    // names it: a listing that silently omits a file is worse
+                    // than one that says which file is wrong.
+                    Err(e) => serde_json::json!({
+                        "name": name,
+                        "error": e.msg,
+                    }),
+                }
+            })
+            .collect();
+        output::line(format_args!(
+            "{}",
+            serde_json::json!({ "dir": rel(dir, base).clone(), "components": items })
+        ));
+        return Ok(EXIT_OK);
+    }
 
     if found.is_empty() {
         output::line(format_args!("  no components in {}", rel(dir, base)));
