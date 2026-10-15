@@ -1,0 +1,6 @@
+---
+description: a component that needs no directory
+steps:
+  - name: Nothing
+    shell: "true"
+    changed_when: "false"

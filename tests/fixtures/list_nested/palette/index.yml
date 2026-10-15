@@ -1,0 +1,10 @@
+---
+description: a component that ships its own templates
+
+# Named `palette`, not `index`: a component holding its own `templates/` has
+# to live in a directory, because a `src:` resolves relative to the component
+# file. The directory is the name a reader is looking for.
+steps:
+  - name: Nothing
+    shell: "true"
+    changed_when: "false"
