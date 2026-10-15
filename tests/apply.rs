@@ -3419,16 +3419,23 @@ fn a_typed_action_after_its_gate_gets_only_the_time_left() {
     std::fs::create_dir(&bin).unwrap();
     // The query is the first command a `pkg` step runs, and this one hangs.
     // `apt-get` only has to be on PATH: the step checks for it first.
+    // Each stub logs when it was called and when it stopped, so a failure
+    // here says *which* command spent the time rather than only that
+    // something did. Without this the overrun is a number with no owner, and
+    // the number is the whole finding.
+    let log = dir.path().join("calls.log");
+    let stamp = |what: &str| {
+        format!(
+            "start=$(date +%s.%N); echo \"{what} start $start\" >> {0}",
+            log.display()
+        )
+    };
     fake_manager(
         &bin,
         "dpkg-query",
-        "sleep 20
-",
+        &format!("{}\nsleep 20\n", stamp("dpkg-query")),
     );
-    fake_manager(
-        &bin, "apt-get", "exit 0
-",
-    );
+    fake_manager(&bin, "apt-get", &format!("{}\nexit 0\n", stamp("apt-get")));
     let path = dir.path().join("pkg.yml");
     std::fs::write(
         &path,
@@ -3460,9 +3467,10 @@ fn a_typed_action_after_its_gate_gets_only_the_time_left() {
         String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
 
     assert_eq!(out.status.code(), Some(124), "{text}");
+    let calls = std::fs::read_to_string(&log).unwrap_or_default();
     assert!(
         elapsed < std::time::Duration::from_millis(4500),
-        "the query ran past the deadline: {elapsed:?}\n{text}"
+        "the query ran past the deadline: {elapsed:?}\ncommands the step ran:\n{calls}\n{text}"
     );
     assert!(
         text.contains("deadline exceeded after"),
