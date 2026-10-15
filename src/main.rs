@@ -749,12 +749,14 @@ fn describe_component(path: &Path) -> Result<u8, Diag> {
         );
     }
     let component = config::load::parse_component(doc)?;
+    let (globals, uncertain) = caller_globals(&component);
     let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-    let description = component.description.unwrap_or_default();
+    let description = component.description.clone().unwrap_or_default();
     output::line(format_args!("  {stem:<24}  {description}"));
 
     if component.props.is_empty() {
         output::line(format_args!("\n  no props"));
+        report_globals(&globals, uncertain);
         return Ok(EXIT_OK);
     }
     output::line(format_args!("\n  props:"));
@@ -777,7 +779,195 @@ fn describe_component(path: &Path) -> Result<u8, Diag> {
             output::line(format_args!("    {:<22}  {d}", ""));
         }
     }
+    report_globals(&globals, uncertain);
     Ok(EXIT_OK)
+}
+
+/// #41: the names a component reads from whoever calls it, beyond its
+/// declared props.
+///
+/// A component's `props:` block advertises itself as the component's
+/// interface and is not one — nothing stops a step inside from reading a
+/// caller's `vars`, and §3.1 says a `use` child sees the parent's variables.
+/// So `validate caller.yml` passed while `validate --prop tool=x
+/// lib/comp.yml` failed on a name `list` never mentioned, and the only way
+/// to learn a component's real arguments was to run it and read the error.
+///
+/// Static and conservative: the names every template in the component reads,
+/// minus the ones that do not come from a caller — its own `vars` and
+/// `register` bindings, the namespaces (`props`, `env`, `facts`,
+/// `component_dir`) and the facts, which the machine supplies. What is left
+/// is what the caller has to have set.
+fn caller_globals(component: &config::load::Component) -> (Vec<String>, bool) {
+    let engine = template::Engine::new();
+    let facts = facts::Facts::detect();
+    let mut bound: std::collections::HashSet<String> = facts
+        .iter()
+        .map(|(k, _)| k.clone())
+        .chain(
+            ["props", "env", "facts", "component_dir", "result", "item"]
+                .into_iter()
+                .map(String::from),
+        )
+        .collect();
+
+    // A name the component binds itself is not the caller's to supply. Both
+    // bind before the steps that read them, so one pass in file order is
+    // enough — and a name read *before* it is bound is a fault this function
+    // is not here to diagnose.
+    let mut reads: Vec<String> = Vec::new();
+    let mut uncertain = false;
+    for step in &component.steps {
+        if let Some(n) = step.mods.register.and_then(|n| n.as_str().ok()) {
+            bound.insert(n.to_string());
+        }
+        if step.key == "vars"
+            && let Ok(pairs) = step.body.as_map()
+        {
+            for (k, _) in pairs {
+                if let Ok(name) = k.as_scalar_string() {
+                    bound.insert(name);
+                }
+            }
+        }
+        let mut sources: Vec<String> = Vec::new();
+        let mut strings = Vec::new();
+        expand::collect_strings(step.body, &mut strings);
+        for m in config::model::modifier_nodes(step) {
+            expand::collect_strings(m, &mut strings);
+        }
+        for sn in strings {
+            if let Ok(src) = sn.as_str()
+                && config::model::is_template(sn)
+            {
+                sources.push(src.to_string());
+            }
+        }
+
+        // The same boundary D14 had: a step's fields are not the whole of
+        // what it reads. `zsh/index.yml` declares two props and its real
+        // caller inputs — `editor`, `dotfiles_dir` — appear only inside the
+        // `.j2` files it renders. A list that stopped at the fields would
+        // have reported the component clean and been wrong about exactly the
+        // components that have the problem.
+        if step.key == "template"
+            && let Some(src_at) = step.body.get("src")
+            && let Ok(rel) = src_at.as_str()
+        {
+            match rel.split_once("{{") {
+                None => {
+                    let path = config::load::resolve(src_at.file, rel);
+                    match std::fs::read_to_string(&path) {
+                        Ok(text) => sources.push(text),
+                        Err(_) => uncertain = true,
+                    }
+                }
+                // `src: ./{{ props.variant }}.j2` — same shape as a templated
+                // `vars_file`, same answer: the directory is fixed even when
+                // the file is not, so every candidate in it is read. A name
+                // any of them reads is one the caller may have to supply.
+                Some((prefix, _)) => {
+                    let dir = config::load::resolve(src_at.file, prefix);
+                    let mut any = false;
+                    if let Ok(entries) = std::fs::read_dir(&dir) {
+                        for e in entries.flatten() {
+                            let p = e.path();
+                            if p.is_file()
+                                && let Ok(text) = std::fs::read_to_string(&p)
+                            {
+                                sources.push(text);
+                                any = true;
+                            }
+                        }
+                    }
+                    uncertain |= !any;
+                }
+            }
+        }
+        // A `vars_file` binds names this component then reads. When its path
+        // is a template it cannot be opened here, and a name it would have
+        // bound shows up below as if the caller had to supply it.
+        if step.key == "vars_file"
+            && let Ok(rel) = step.body.as_str()
+        {
+            {
+                let read_keys = |path: &Path, bound: &mut std::collections::HashSet<String>| {
+                    let Ok(doc) = yaml::Doc::load(path) else {
+                        return false;
+                    };
+                    let Ok(pairs) = doc.node().as_map() else {
+                        return false;
+                    };
+                    for (k, _) in pairs {
+                        if let Ok(name) = k.as_scalar_string() {
+                            bound.insert(name);
+                        }
+                    }
+                    true
+                };
+                match rel.split_once("{{") {
+                    None => {
+                        let path = config::load::resolve(step.body.file, rel);
+                        uncertain |= !read_keys(&path, &mut bound);
+                    }
+                    // `./vars/{{ distro }}.yml` — the file is chosen at run
+                    // time and the directory is not. Every candidate in it
+                    // binds the same names in practice (that is the point of
+                    // the pattern), so reading all of them is the honest
+                    // over-approximation: a name any of them binds is not one
+                    // the caller has to supply. Without this, `zsh` reported
+                    // `zsh_plugin_dir` as a caller input when its own
+                    // os-selected vars file sets it.
+                    Some((prefix, _)) => {
+                        let dir = config::load::resolve(step.body.file, prefix);
+                        let mut any = false;
+                        if let Ok(entries) = std::fs::read_dir(&dir) {
+                            for e in entries.flatten() {
+                                let p = e.path();
+                                if p.extension().is_some_and(|x| x == "yml" || x == "yaml") {
+                                    any |= read_keys(&p, &mut bound);
+                                }
+                            }
+                        }
+                        uncertain |= !any;
+                    }
+                }
+            }
+        }
+
+        for src in sources {
+            for name in engine.undeclared_in_template(&src).into_iter().flatten() {
+                if !bound.contains(&name) && !reads.contains(&name) {
+                    reads.push(name);
+                }
+            }
+        }
+    }
+    reads.sort();
+    reads.retain(|n| !bound.contains(n));
+    (reads, uncertain)
+}
+
+fn report_globals(globals: &[String], uncertain: bool) {
+    if globals.is_empty() && !uncertain {
+        return;
+    }
+    output::line(format_args!("\n  reads from the caller:"));
+    if globals.is_empty() {
+        output::line(format_args!("    none found"));
+    }
+    for g in globals {
+        output::line(format_args!("    {g}"));
+    }
+    // D11's house answer: say what is not known rather than imply the list is
+    // complete. A `vars_file` or a `template` `src` whose path is itself a
+    // template cannot be opened without the scope a call site supplies.
+    if uncertain {
+        output::line(format_args!(
+            "    {:<22}  (a path this component builds at run time could not be read, so this list may be wrong in either direction)",
+            ""
+        ));
+    }
 }
 
 /// A default's source text. Spec §3.2: taken as written, never rendered.

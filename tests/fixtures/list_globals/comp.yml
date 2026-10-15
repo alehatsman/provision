@@ -1,0 +1,17 @@
+description: a component whose real interface is wider than its props
+props:
+  tool: {type: string, required: true}
+steps:
+  - vars:
+      local_thing: computed here
+  - vars_file: ./vars/{{ os }}.yml
+  - name: reads a prop, a fact, its own var, and a caller global
+    shell: "echo {{ props.tool }} {{ os }} {{ local_thing }} {{ install_root }}"
+    changed_when: "false"
+    register: r
+  - name: reads its own register
+    shell: "echo {{ r.rc }}"
+    changed_when: "false"
+  # The hidden half: the caller input that appears only in the rendered file.
+  - name: render
+    template: {src: ./t/body.j2, dest: "{{ env.PROVISION_SCRATCH }}/out"}

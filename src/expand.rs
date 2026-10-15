@@ -1918,7 +1918,7 @@ fn describe_value(v: &Value) -> String {
     }
 }
 
-fn collect_strings(n: N<'static>, out: &mut Vec<N<'static>>) {
+pub(crate) fn collect_strings(n: N<'static>, out: &mut Vec<N<'static>>) {
     if n.as_str().is_ok() {
         out.push(n);
     } else if let Ok(items) = n.as_seq() {
