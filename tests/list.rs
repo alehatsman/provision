@@ -84,10 +84,15 @@ fn a_closed_stdout_is_not_an_error() {
         .unwrap();
     }
 
+    // bash reads backslashes as escapes, so a Windows path has to be handed
+    // over with `/` — which Windows itself accepts. Without this the shell
+    // mangles the path, `list` is asked for a directory that is not there,
+    // and the test reports a pipe bug that is really a quoting one.
+    let for_bash = |p: &Path| p.display().to_string().replace('\\', "/");
     let script = format!(
         "set -o pipefail; '{}' list '{}' | head -3 >/dev/null",
-        env!("CARGO_BIN_EXE_provision"),
-        dir.path().display()
+        for_bash(Path::new(env!("CARGO_BIN_EXE_provision"))),
+        for_bash(dir.path())
     );
     let out = Command::new("bash")
         .args(["-c", &script])
@@ -102,7 +107,8 @@ fn a_closed_stdout_is_not_an_error() {
     assert_eq!(
         out.status.code(),
         Some(0),
-        "the reader asking for less is not an error:\n{stderr}"
+        "the reader asking for less is not an error:\n{stderr}{}",
+        String::from_utf8_lossy(&out.stdout)
     );
 }
 
