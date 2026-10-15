@@ -135,8 +135,16 @@ fn validate_rejects_what_plan_would_reject() {
         out.contains("`file` state file needs `content` or `src`"),
         "{out}"
     );
+    // Derived from the same `cfg!` the code uses, not asserted as a literal
+    // (the rule `tests/apply.rs` opens by stating). On Windows the action is
+    // refused outright before its body is read, which is the right order: an
+    // unsupported action's body is not worth a second diagnostic.
     assert!(
-        out.contains("`service` needs `state` or `enabled`"),
+        out.contains(if cfg!(windows) {
+            "`service` is not supported on Windows"
+        } else {
+            "`service` needs `state` or `enabled`"
+        }),
         "{out}"
     );
     assert!(out.contains("`cmd` is a list of arguments"), "{out}");
@@ -1020,6 +1028,12 @@ fn a_filtered_run_is_judged_on_the_steps_it_would_run() {
 // ── the documented example ────────────────────────────────────────────────
 
 #[test]
+// The example is a Linux workstation's plan: it asks for `sudo`, which
+// Windows has not got, so `validate` refuses it there and is right to. The
+// assertion is scoped to where it means something rather than weakened to
+// something true everywhere — "the README's own example still validates" is
+// the claim worth keeping, and it is a claim about a Unix host.
+#[cfg(not(windows))]
 fn the_readme_example_validates_and_plans() {
     let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/x1.yml");
     let out = run(&["validate", example.to_str().unwrap()]);
@@ -1394,10 +1408,20 @@ fn a_defaults_step_that_cannot_mean_what_it_says_is_rejected_at_parse() {
     assert!(text.contains("is not an integer"), "{text}");
     assert_positioned(&text);
 
-    // §6.10: a root write lands in root's preferences.
+    // §6.10: a root write lands in root's preferences. On Windows there is no
+    // `sudo` at all, so the step is refused one rule earlier — still exit 3,
+    // still positioned, and the test says which answer it expects where
+    // rather than asserting the host it happened to run on.
     let (code, text) = validate("defaults_sudo.yml");
     assert_eq!(code, EXIT_VALIDATION, "{text}");
-    assert!(text.contains("must not run under `sudo`"), "{text}");
+    assert!(
+        text.contains(if cfg!(windows) {
+            "`sudo` is not supported on Windows"
+        } else {
+            "must not run under `sudo`"
+        }),
+        "{text}"
+    );
     assert_positioned(&text);
 }
 
