@@ -91,7 +91,19 @@ impl Diags {
     /// `2 problems`. Dropping the duplicate here rather than at the report
     /// keeps `len()` and the fatality checks reading the same number the
     /// operator does.
-    pub(crate) fn push(&mut self, d: Diag) {
+    pub(crate) fn push(&mut self, mut d: Diag) {
+        // Attached here rather than at the dozen places a render error turns
+        // into a diagnostic: the hint is a property of the message, and one
+        // choke point cannot miss a path. A diagnostic that already carries
+        // a note keeps it — the note the author wrote is the better one.
+        // Before the duplicate check, not after: the note is part of what
+        // makes two diagnostics equal, so attaching it second would make the
+        // second copy of one fault look like a different one.
+        if d.note.is_none()
+            && let Some(note) = crate::template::vocabulary_note(&d.msg)
+        {
+            d.note = Some(note);
+        }
         if self.0.contains(&d) {
             return;
         }
@@ -106,6 +118,18 @@ impl Diags {
             Err(d) => {
                 self.push(d);
                 None
+            }
+        }
+    }
+
+    /// Give each note-less diagnostic a second line, when the caller can
+    /// say something about it that was not knowable when it was pushed.
+    pub(crate) fn annotate(&mut self, f: impl Fn(&Diag) -> Option<String>) {
+        for d in &mut self.0 {
+            if d.note.is_none()
+                && let Some(note) = f(d)
+            {
+                d.note = Some(note);
             }
         }
     }

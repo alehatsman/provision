@@ -743,6 +743,15 @@ pub(crate) fn mod_retry(at: N<'_>, engine: &Engine, ctx: &Value) -> Result<Retry
 }
 
 fn parse_retry_with(at: N<'_>, scope: Option<(&Engine, &Value)>) -> Result<Retry> {
+    // Before `deny_unknown_keys`, which asks the node for its map and reports
+    // `expected a mapping, found an integer` — naming neither the key that
+    // was wrong nor the shape it wanted. `retry: 3` is the obvious thing to
+    // write, so it is the one that has to answer for itself.
+    if at.as_map().is_err() {
+        return Err(at
+            .err(format!("`retry` is a mapping, found {}", at.kind()))
+            .with_note("retry: { attempts: 3, delay: 2s } — `delay` is optional"));
+    }
     at.deny_unknown_keys(&["attempts", "delay"], "`retry`")?;
     let attempts_at = at.require("attempts")?;
     let attempts = match (is_template(attempts_at), scope) {

@@ -57,9 +57,12 @@ enum Command {
     /// Parse, check the schema, render every template, resolve every file.
     Validate {
         plan: PathBuf,
-        /// Also reject `shell`/`cmd` steps with no idempotency gate. On by
-        /// default for a plan (D3); this only ever turns it on, for a
-        /// component or task file that wants the discipline too.
+        /// Also reject `shell`/`cmd` steps with no idempotency gate.
+        ///
+        /// On by default when the file's root is a list, which is what makes
+        /// it a convergence plan; a mapping root (`description:`/`steps:`) is
+        /// a component or task and stays opt-in. This flag only ever turns
+        /// the check on.
         #[arg(long)]
         strict: bool,
         /// Set a prop, when the root file is a component rather than a plan.
@@ -155,7 +158,8 @@ struct RunArgs {
     #[arg(long, value_enum, default_value_t = Color::Auto)]
     color: Color,
     /// A wall clock for the whole run: `30s`, `5m`, `1h`. Steps still carry
-    /// their own `timeout`; this bounds the sum of them (spec §8, D19).
+    /// their own `timeout`; this bounds the sum of them. The run exits 124,
+    /// the same code a killed command reports (spec §8, D19).
     #[arg(long, value_name = "DURATION")]
     deadline: Option<String>,
     #[command(flatten)]
@@ -327,6 +331,23 @@ fn run() -> Result<u8, Diag> {
                     };
                     output::line(format_args!("{k:<20} {shown}"));
                 }
+                // Not facts, and the reason to print them here anyway: these
+                // are the other names a plan can read, and a reader who runs
+                // `provision facts` to find out what is available has just
+                // been given an answer that omits two of them. The `--json`
+                // form is a contract (D25) and keeps only the facts.
+                output::line(format_args!(
+                    "\nalso readable, and not facts:\n\
+                     {:<20} {}\n\
+                     {:<20} {}\n\
+                     {:<20} {}",
+                    "env.NAME",
+                    "this process's environment, e.g. {{ env.HOME }}",
+                    "facts.NAME",
+                    "the facts above, under a namespace no `vars` can shadow",
+                    "component_dir",
+                    "the directory of the component being run, inside a `use` only",
+                ));
             }
             Ok(EXIT_OK)
         }
@@ -349,8 +370,10 @@ fn run() -> Result<u8, Diag> {
             // the whole point, so it is on by default there. A task or
             // component file legitimately has none, and stays opt-in. The
             // flag only ever forces it on, never off.
-            let strict = strict || strict_by_root(&plan)?;
-            let mut ex = expander(&vars, Mode::Validate, selection)?.strict(strict);
+            let by_root = strict_by_root(&plan)?;
+            let mut ex = expander(&vars, Mode::Validate, selection)?
+                .strict(strict || by_root)
+                .gate_from_root(by_root);
             walk_root(&mut ex, &plan, &props)?;
             let base = cwd();
             if ex.diags.is_empty() {
@@ -388,6 +411,7 @@ fn run() -> Result<u8, Diag> {
                 // report after it turns the walk into exit 3, which is the
                 // path every other plan-time diagnostic already takes.
                 .strict(strict_by_root(&plan)?)
+                .gate_from_root(strict_by_root(&plan)?)
                 // Gates run with their step's sudo (§4), so plan has to know
                 // whether root is reachable. Unlike apply it must not fail
                 // when it is not: plan is the read-only command, and a root
@@ -476,7 +500,8 @@ fn run() -> Result<u8, Diag> {
             // before `Sudo::preflight`, before `catch_interrupts`, and
             // before the apply expander exists.
             let mut check = expander(&run.vars, Mode::Validate, run.selection())?
-                .strict(strict_by_root(&plan)?);
+                .strict(strict_by_root(&plan)?)
+                .gate_from_root(strict_by_root(&plan)?);
             walk_root(&mut check, &plan, &props)?;
             if !check.diags.is_empty() {
                 // The preflight runs before the apply expander and its sink
@@ -554,6 +579,16 @@ fn run() -> Result<u8, Diag> {
 /// a plan has no props to set, and the caller who typed one believes it took
 /// effect.
 fn walk_root(ex: &mut Expander, root: &Path, props: &[(String, String)]) -> Result<(), Diag> {
+    let out = walk_root_inner(ex, root, props);
+    // One place, after the whole walk: naming a register the walk saw needs
+    // the set of every register bound anywhere, which only exists once the
+    // walk is over. Mid-walk the fatality checks read `diags` for whether it
+    // is empty, and a note changes neither that nor the count.
+    ex.explain_scoped_registers();
+    out
+}
+
+fn walk_root_inner(ex: &mut Expander, root: &Path, props: &[(String, String)]) -> Result<(), Diag> {
     if is_component(root)? {
         return ex.run_component(root, props);
     }

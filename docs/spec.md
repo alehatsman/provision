@@ -397,6 +397,12 @@ carries the distinction, and this is what it is for.
 
 Computed once at startup, lazily where expensive, read-only.
 
+`provision facts` prints them, and then prints the three names a plan can
+read that are **not** facts — `env.NAME`, `facts.NAME`, `component_dir` —
+because a reader who runs it to find out what is available has otherwise
+been handed an answer that leaves two of them out. `facts --json` is a
+contract (D25) and carries the facts alone.
+
 Every fact is reachable two ways, and the difference matters. The **bare
 name** — `hostname` — follows §3.3's precedence, so a `vars` step, a
 `--var` or a `--vars-file` outranks it. That is deliberate and load-bearing:

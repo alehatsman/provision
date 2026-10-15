@@ -15,6 +15,38 @@ pub(crate) struct Engine {
     env: Environment<'static>,
 }
 
+/// The filters provision adds. minijinja's own are documented upstream; a
+/// reader has no way at all to look these up, which is why the unknown-filter
+/// diagnostic names them.
+pub(crate) const OWN_FILTERS: &[&str] = &[
+    "expanduser",
+    "basename",
+    "dirname",
+    "quote",
+    "to_json",
+    "to_yaml",
+    "crc32",
+];
+
+/// The tests provision adds. Same reason.
+pub(crate) const OWN_TESTS: &[&str] = &["exists"];
+
+/// A second line for a diagnostic that says a filter or test is unknown.
+/// minijinja has no API for enumerating what it knows, so this names what
+/// *provision* adds and says plainly that the rest are minijinja's — a true
+/// and complete statement, where a hand-kept list of every built-in would
+/// drift and a drifting list is worse than none.
+pub(crate) fn vocabulary_note(msg: &str) -> Option<String> {
+    let what = if msg.contains("unknown filter") {
+        format!("provision's own filters: {}", OWN_FILTERS.join(", "))
+    } else if msg.contains("unknown test") {
+        format!("provision's own tests: {}", OWN_TESTS.join(", "))
+    } else {
+        return None;
+    };
+    Some(format!("{what} — every other one is minijinja's"))
+}
+
 impl Engine {
     pub(crate) fn new() -> Engine {
         let mut env = Environment::new();
@@ -757,5 +789,31 @@ mod tests {
             e.describe_with("{{ known }}{{ palette.bg }}", &c, &err),
             "undefined variable `palette`"
         );
+    }
+}
+
+#[cfg(test)]
+mod vocabulary {
+    use super::{Engine, OWN_FILTERS, OWN_TESTS};
+    use minijinja::value::Value;
+
+    // The lists are hand-kept beside the registrations, and a hand-kept list
+    // drifts. This is what stops it: every name in them must resolve against
+    // a real engine, so a filter renamed or removed fails here rather than in
+    // a note that confidently names something that no longer exists.
+    #[test]
+    fn every_name_provision_claims_to_add_is_registered() {
+        let e = Engine::new();
+        let ctx = Value::from(std::collections::BTreeMap::<String, Value>::new());
+        for f in OWN_FILTERS {
+            let err = e.render(&format!("{{{{ 'x' | {f} }}}}"), &ctx).err();
+            let msg = err.map(|x| x.to_string()).unwrap_or_default();
+            assert!(!msg.contains("unknown filter"), "`{f}` is not registered");
+        }
+        for t in OWN_TESTS {
+            let err = e.render(&format!("{{{{ 'x' is {t} }}}}"), &ctx).err();
+            let msg = err.map(|x| x.to_string()).unwrap_or_default();
+            assert!(!msg.contains("unknown test"), "`{t}` is not registered");
+        }
     }
 }
