@@ -892,6 +892,29 @@ fn is_identifier(s: &str) -> bool {
 }
 
 /// The expression fields, which compile as expressions rather than templates.
+/// Every modifier node that may hold a template, for a caller that needs to
+/// know what a step reads. `register` and `tags` are excluded: both are names
+/// the plan writes, not values it reads.
+pub(crate) fn modifier_nodes<'a>(step: &Step<'a>) -> Vec<N<'a>> {
+    [
+        step.mods.name,
+        step.mods.when,
+        step.mods.unless,
+        step.mods.creates,
+        step.mods.sudo,
+        step.mods.timeout,
+        step.mods.retry,
+        step.mods.env,
+        step.mods.cwd,
+        step.mods.changed_when,
+        step.mods.failed_when,
+        step.mods.props,
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
 pub(crate) fn expression_fields<'a>(step: &Step<'a>) -> Vec<N<'a>> {
     [
         step.mods.when,

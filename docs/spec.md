@@ -147,6 +147,27 @@ Call site:
   rendered. A default that has to be computed is a `vars` step instead.
 - `description` is optional, a plain string, and only read by
   `provision list <dir>/`. Any other root key is an error.
+- **`list <component.yml>` also reports the caller variables the component
+  reads**, under `reads from the caller:`. A component's `props:` block looks
+  like its interface and is not one: §3.1 gives a `use` child the parent's
+  variables read-only, so a step inside may read any of them, and nothing
+  declares that. The effect was that `validate caller.yml` passed while
+  `validate --prop … component.yml` failed on a name `list` never mentioned,
+  and the only way to learn a component's real arguments was to run it and
+  read the error.
+
+  The list is static and deliberately narrow: every template the component
+  contains, minus what does not come from a caller — its own `vars` and
+  `register` bindings, the facts (§5), and the `props`, `env`, `facts` and
+  `component_dir` namespaces. It reads the bodies of the `.j2` files the
+  component renders as well as its step fields, because a shared component's
+  real inputs usually appear only in the files it writes.
+
+  A path the component builds at run time — `vars_file: ./vars/{{ os }}.yml`,
+  `src: ./{{ props.variant }}.j2` — is resolved by reading every candidate in
+  the directory, since the directory is fixed even when the file is not.
+  Where even that is impossible the section says so rather than implying the
+  list is complete (D11).
 - A component is also a **task**: `provision apply <component.yml>` runs it
   as the root scope with props supplied by `--prop`, and `plan` and
   `validate` take it the same way (§8). A task step whose exit code is its

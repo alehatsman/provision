@@ -434,3 +434,54 @@ fn the_dumps_prose_about_a_modifier_is_true() {
     );
     assert!(text.contains("cannot read a register"), "{text}");
 }
+
+// #41: a component's `props:` block advertised itself as the interface and
+// was not one. Nothing stops a step inside from reading a caller's `vars`
+// (§3.1 gives a `use` child the parent's variables read-only), so
+// `validate caller.yml` passed while `validate --prop tool=x lib/comp.yml`
+// failed on a name `list` never mentioned — and the only way to learn a
+// component's real arguments was to run it and read the error.
+#[test]
+fn list_reports_the_caller_globals_a_component_reads() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/list_globals/comp.yml");
+    let (code, out) = run(&["list", path.to_str().unwrap()]);
+    assert_eq!(code, 0, "{out}");
+
+    // The two real caller inputs. `install_root` is read in a step field;
+    // `editor` only inside the `.j2` the component renders — the same
+    // fields-versus-bytes boundary D14 had, and the reason a scan of the
+    // steps alone would have called this component clean.
+    assert!(out.contains("reads from the caller:"), "{out}");
+    assert!(out.contains("install_root"), "{out}");
+    assert!(out.contains("editor"), "{out}");
+
+    // And nothing that is not the caller's to supply:
+    //   props.tool      declared, and a prop
+    //   os              a fact; the machine supplies it
+    //   local_thing     the component's own `vars` step
+    //   r               the component's own `register`
+    //   from_vars_file  bound by the os-selected `vars_file`, whose path is
+    //                   templated — every candidate in that directory is read
+    //                   rather than giving up, which is what stopped `zsh`
+    //                   reporting its own `zsh_plugin_dir` as a caller input
+    let section = out
+        .split_once("reads from the caller:")
+        .expect("the section is present")
+        .1;
+    let listed: Vec<&str> = section
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    assert_eq!(listed, vec!["editor", "install_root"], "{out}");
+}
+
+#[test]
+fn a_component_that_needs_nothing_from_its_caller_says_nothing() {
+    // The section is absent, not empty: a component with a real interface
+    // equal to its props should read exactly as it did before this existed.
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/list_nested/flat.yml");
+    let (code, out) = run(&["list", path.to_str().unwrap()]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains("reads from the caller"), "{out}");
+}
