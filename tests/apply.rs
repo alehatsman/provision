@@ -39,6 +39,11 @@
 //!
 //! This is a tool for converging machines that are not each other. Its own
 //! suite running on exactly one kind of machine is how all six got in.
+//! Unix only, and deliberately: most of what follows is modes, `chown`,
+//! `stat` and sudo. The engine underneath — verdicts, gates, registers, the
+//! JSON shape, the deadline — is not platform behaviour and runs on both in
+//! `tests/apply_cross_platform.rs` (#26). Before that file existed this
+//! gate was the broad form of exactly what the comment above warns about.
 #![cfg(unix)]
 
 use std::path::{Path, PathBuf};

@@ -260,13 +260,23 @@ steps that produced them. A second job exercises the rest of the contract —
 SIGTERM gives exit 143, `--deadline` gives 124, and both still print the
 summary.
 
-Windows runs `tasks/tests.yml` — the suite with no tool but cargo — natively,
-which is new and is less than it sounds. `tests/apply.rs` is `#![cfg(unix)]`,
-so what runs there is `cli.rs`, `component.rs`, `list.rs` and the unit tests:
-parsing, validation, `list`, components, the CLI and every exit code they
-reach, on a real Windows host. `pkg` against winget, `service` and Ctrl-C
-stay untested, because the suite that would test them does not compile there.
-Closing that is a change to the suite, not to this workflow.
+Windows runs `tasks/tests.yml` — the suite with no tool but cargo — natively.
+`tests/apply.rs` is `#![cfg(unix)]`, because most of it is modes, `chown`,
+`stat` and sudo, which are Unix behaviour rather than assertions that are
+merely awkward to write portably. The engine underneath it is not: the four
+verdicts, stop-on-failure, `--keep-going`, a register read by a later step,
+the `--json` shape, `--deadline`, a `file` step converging, and tag
+selection run on both, in `tests/apply_cross_platform.rs`, with every
+command spelled so that `bash` and `powershell` both accept it. With
+`cli.rs`, `component.rs`, `list.rs` and the unit tests, what a Windows host
+now covers is parsing, validation, `list`, components, the CLI, every exit
+code they reach, and the apply engine's own contract.
+
+What stays untested there is `pkg` against winget, `service` beyond its
+refusal, and Ctrl-C. The first two would have to install or start something
+on the machine running them; the third needs a console control event rather
+than a signal, which is a different mechanism from the one the Unix test
+drives.
 
 That is evidence about **a** runner, not about moongit. The `mgitci.yml` and
 the Rust CI image still wait on moongit's runner switching to `provision apply
