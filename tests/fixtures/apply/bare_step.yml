@@ -3,8 +3,11 @@
 # so its exit code is its whole contract. This is the task and CI shape — one
 # line per command, no modifier — and the reason the file exists is that the
 # shape used to cost a `changed_when: false` on every step.
-- name: A bare shell that exits zero
-  shell: "true"
+description: "bare steps: the task and CI shape, one line per command"
 
-- name: A bare cmd that exits zero
-  cmd: ["true"]
+steps:
+  - name: A bare shell that exits zero
+    shell: "true"
+
+  - name: A bare cmd that exits zero
+    cmd: ["true"]
