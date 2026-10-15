@@ -231,12 +231,12 @@ fn wait_for_pipes(out: &Reader, err: &Reader, pid: u32, limit: Instant) -> How {
             return How::Exited;
         }
         if interrupted() {
-            kill_group(pid);
+            kill_group(pid, None);
             return How::Interrupted;
         }
         let now = Instant::now();
         if now >= limit {
-            kill_group(pid);
+            kill_group(pid, None);
             return How::TimedOut;
         }
         std::thread::sleep(nap.min(limit - now));
@@ -260,18 +260,15 @@ fn wait_for(child: &mut Child, pid: u32, deadline: Instant) -> How {
             Ok(None) => {}
         }
         if interrupted() {
-            kill_group(pid);
-            // Reaping a process we just killed. It is going to exit, and its
-            // status is not the answer -- `How` already is.
-            #[expect(clippy::let_underscore_must_use, reason = "reaping a killed child")]
-            let _ = child.wait();
+            // The reap happens inside, before the grace loop: a process we
+            // just killed is a zombie until it is waited for, and a zombie
+            // is still a member of its group.
+            kill_group(pid, Some(child));
             return How::Interrupted;
         }
         let now = Instant::now();
         if now >= deadline {
-            kill_group(pid);
-            #[expect(clippy::let_underscore_must_use, reason = "reaping a killed child")]
-            let _ = child.wait();
+            kill_group(pid, Some(child));
             return How::TimedOut;
         }
         std::thread::sleep(tick.min(deadline - now));
@@ -389,12 +386,16 @@ fn own_process_group(cmd: &mut Command) {
 
 /// Kill the child *and everything it started*. TERM first so a package
 /// manager mid-write gets to finish its transaction, then KILL.
+///
+/// `reap` is the direct child, when the caller still owns it. See the body:
+/// the grace period is for processes that are still running, and a zombie is
+/// not one of them.
 #[cfg(unix)]
 #[expect(
     unsafe_code,
     reason = "killing a process *group* is not in std; Command::process_group is"
 )]
-fn kill_group(pid: u32) {
+fn kill_group(pid: u32, reap: Option<&mut Child>) {
     // `as` would wrap an out-of-range pid to a negative pgid, and a negative
     // pgid is not a group -- `killpg(-1, ...)` is every process this user may
     // signal. Nothing on a real system produces one; refusing to guess costs
@@ -408,6 +409,18 @@ fn kill_group(pid: u32) {
     // with ESRCH -- which the loop below reads as "already gone".
     unsafe {
         libc::killpg(pgid, libc::SIGTERM);
+    }
+    if let Some(child) = reap {
+        // Reap the direct child *before* asking whether the group still has
+        // anyone in it. A terminated child stays in its group as a zombie
+        // until it is waited for, and the existence check below cannot tell a
+        // zombie from a process still running — so without this the loop
+        // waited the full two seconds on the corpse of the thing it had just
+        // killed. That is where a `--deadline 3s` run spent five seconds on
+        // Linux (#19), while macOS, which drops a zombie's group membership
+        // sooner, returned at once and hid it.
+        #[expect(clippy::let_underscore_must_use, reason = "reaping a killed child")]
+        let _ = child.wait();
     }
     for _ in 0..20 {
         std::thread::sleep(Duration::from_millis(100));
@@ -424,12 +437,18 @@ fn kill_group(pid: u32) {
 }
 
 #[cfg(windows)]
-fn kill_group(pid: u32) {
+fn kill_group(pid: u32, reap: Option<&mut Child>) {
     // `taskkill /T` is the documented way to end a tree and is present on
-    // every supported version.
+    // every supported version. There is no grace loop here to mislead, so
+    // `reap` is taken for signature parity and the child is waited for the
+    // same way, which costs nothing and keeps the two paths honest.
     let _ = Command::new("taskkill")
         .args(["/T", "/F", "/PID", &pid.to_string()])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
+    if let Some(child) = reap {
+        #[expect(clippy::let_underscore_must_use, reason = "reaping a killed child")]
+        let _ = child.wait();
+    }
 }
