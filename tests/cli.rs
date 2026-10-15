@@ -600,6 +600,37 @@ fn one_good_tag_does_not_excuse_a_typo_beside_it() {
 }
 
 #[test]
+fn tags_always_is_not_exempt_from_the_unknown_tag_check() {
+    // The exemption was granted to both flags; §8 only ever justified it for
+    // `--skip-tags`. On `--tags` it reinstated the exact bug the check exists
+    // to kill: `apply --tags always` on a plan with no `always`-tagged step
+    // selected nothing, did nothing, exited 0.
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("plan.yml");
+    std::fs::write(
+        &plan,
+        "- name: a\n  shell: \"true\"\n  changed_when: \"false\"\n  tags: [core]\n",
+    )
+    .unwrap();
+    let path = plan.display().to_string();
+
+    let out = run(&["apply", "--tags", "always", &path]);
+    assert_eq!(out.status.code(), Some(EXIT_VALIDATION));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("`always` matches no step"), "{err}");
+
+    // But a plan that DOES declare it is selected normally.
+    let withit = dir.path().join("withit.yml");
+    std::fs::write(
+        &withit,
+        "- name: a\n  shell: \"true\"\n  changed_when: \"false\"\n  tags: [always]\n",
+    )
+    .unwrap();
+    let out = run(&["apply", "--tags", "always", &withit.display().to_string()]);
+    assert_eq!(out.status.code(), Some(0));
+}
+
+#[test]
 fn always_is_a_keyword_not_a_tag_the_plan_must_declare() {
     // `--skip-tags always` is documented (§8) and is written for plans that
     // have an `always` step somewhere below — refusing it on a plan that

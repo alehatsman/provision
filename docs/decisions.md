@@ -206,9 +206,10 @@ answer is already needed.
 
 **What this costs, stated plainly.** A pipeline passing a tag that a plan has
 since dropped now fails instead of running nothing — louder, and in CI that is
-the point, but it is a new way for a green job to go red. `always` is exempt
-as a keyword, so `--skip-tags always` is still accepted on a plan with no
-`always` step. And the check stands down when the walk already found
+the point, but it is a new way for a green job to go red. `always` is exempt on
+`--skip-tags` only, so `--skip-tags always` is still accepted on a plan with
+no `always` step; on `--tags` it is checked like any other value, because
+selecting a keyword no step carries can only be a mistake. And the check stands down when the walk already found
 problems: a typo'd tag on a plan that also fails to load is not reported, on
 the grounds that "no step is tagged `x`" would then be a guess.
 
