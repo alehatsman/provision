@@ -60,6 +60,15 @@ Rules:
 - Exactly one of the action or structural keys per step. Zero or two is a
   validation error naming the step and the file:line.
 - Unknown top-level keys in a step are errors. No silent typos.
+- A **known** key on a step that cannot honour it is an error too. A
+  structural step (`vars`, `vars_file`, `import`, `use`) builds a scope and
+  walks it; it runs no command, so `unless`, `creates`, `changed_when`,
+  `failed_when`, `env`, `register`, `cwd`, `sudo`, `timeout`, `retry` and
+  `raw` have nothing to act on there and are rejected rather than ignored.
+  `when` and `tags` do apply: they gate the step and its whole subtree
+  before the walk descends. `props` belongs to `use` and `optional` to
+  `vars_file`. A key that is silently dropped is a typo that costs an
+  afternoon.
 - Files are resolved relative to the file that names them, never the cwd.
 - `~` expands in every path field the tool owns (`dest`, `path`, `src`,
   `creates`, `cwd`, `vars_file`, `import`, `use`). It does **not** expand

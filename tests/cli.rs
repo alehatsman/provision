@@ -209,39 +209,113 @@ fn a_modifier_on_the_wrong_step_is_an_error() {
     assert_positioned(&out);
 }
 
-// `env` and `register` reach no command through a structural step: `use` and
-// `import` build a scope and walk it, and never reach `do_action`. The file's
-// own rule -- silently ignoring a misplaced modifier is how a typo becomes a
-// two-hour debug -- had been applied to `props` and `optional` but not to
-// these two.
+// `use` and `import` build a scope and walk it, and never reach `do_action`,
+// so none of these is ever read. All eleven were accepted and dropped on the
+// floor. The file's own rule -- silently ignoring a misplaced modifier is how
+// a typo becomes a two-hour debug -- had been applied to `props` and
+// `optional` and to nothing else.
+//
+// `register` is the one with teeth: D5 names it as the handler replacement,
+// so it was the prescribed recipe doing nothing across a component boundary.
 #[test]
-fn env_on_a_structural_step_is_an_error() {
-    let (code, out) = validate("structural_modifier.yml");
-    assert_eq!(code, EXIT_VALIDATION, "{out}");
-    assert!(
-        out.contains("`env` does not reach the steps `import` walks"),
-        "{out}"
-    );
-    assert_positioned(&out);
+fn a_modifier_a_structural_step_cannot_honour_is_an_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = dir.path().join("lib.yml");
+    std::fs::write(
+        &lib,
+        "description: a component\nsteps:\n  - name: inner\n    shell: \"true\"\n    changed_when: \"false\"\n",
+    )
+    .unwrap();
+
+    for (key, body) in [
+        ("unless", "unless: \"true\""),
+        ("creates", "creates: /tmp"),
+        ("changed_when", "changed_when: \"false\""),
+        ("failed_when", "failed_when: \"false\""),
+        ("env", "env: { A: b }"),
+        ("register", "register: r"),
+        ("cwd", "cwd: /tmp"),
+        ("sudo", "sudo: true"),
+        ("timeout", "timeout: 30s"),
+        ("retry", "retry: { attempts: 2 }"),
+        ("raw", "raw: true"),
+    ] {
+        for verb in ["use", "import"] {
+            let plan = dir.path().join(format!("{key}_{verb}.yml"));
+            std::fs::write(
+                &plan,
+                format!("- name: call\n  {verb}: {}\n  {body}\n", lib.display()),
+            )
+            .unwrap();
+            let (code, out) = {
+                let o = run(&["validate", &plan.display().to_string()]);
+                (
+                    o.status.code().unwrap_or(-1),
+                    String::from_utf8_lossy(&o.stderr).into_owned(),
+                )
+            };
+            assert_eq!(code, EXIT_VALIDATION, "`{key}` on a `{verb}`: {out}");
+            assert!(
+                out.contains(&format!("`{key}` has no effect on a `{verb}`")),
+                "`{key}` on a `{verb}`: {out}"
+            );
+        }
+    }
 }
 
-// The sharper half: D5 names `register` as the handler replacement, so this
-// is the prescribed recipe doing nothing. It was not even consistently
-// nothing -- a *skipped* `use` binds, because the skip paths run
-// `bind_register` and the success path does not.
+// The two that do propagate, and must keep doing so: they gate the subtree
+// before the walk descends, which is a different thing from being handed to
+// a command a structural step never runs.
 #[test]
-fn register_on_a_structural_step_is_an_error() {
-    let (code, out) = validate("structural_register.yml");
-    assert_eq!(code, EXIT_VALIDATION, "{out}");
-    assert!(
-        out.contains("`register` has nothing to bind on `use`"),
-        "{out}"
+fn when_and_tags_still_reach_a_structural_step() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = dir.path().join("lib.yml");
+    std::fs::write(
+        &lib,
+        "description: a component\nsteps:\n  - name: inner\n    shell: \"true\"\n    changed_when: \"false\"\n",
+    )
+    .unwrap();
+    let plan = dir.path().join("plan.yml");
+    std::fs::write(
+        &plan,
+        format!(
+            "- name: call\n  use: {}\n  when: os == \"darwin\"\n  tags: [mac]\n",
+            lib.display()
+        ),
+    )
+    .unwrap();
+    let out = run(&["validate", &plan.display().to_string()]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
     );
-    assert!(
-        out.contains("register the step inside the component"),
-        "{out}"
+}
+
+// `optional` belongs to `vars_file`, which is itself structural -- so the
+// blanket rule must not eat the one modifier a structural step does honour.
+#[test]
+fn optional_still_works_on_a_vars_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let vars = dir.path().join("v.yml");
+    std::fs::write(&vars, "a: 1\n").unwrap();
+    let plan = dir.path().join("plan.yml");
+    std::fs::write(
+        &plan,
+        format!(
+            "- name: load\n  vars_file: {}\n  optional: true\n",
+            vars.display()
+        ),
+    )
+    .unwrap();
+    let out = run(&["validate", &plan.display().to_string()]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
     );
-    assert_positioned(&out);
 }
 
 #[test]
