@@ -2,7 +2,7 @@
 source: tests/apply.rs
 expression: out
 ---
-  tests/fixtures/apply/verdicts.yml · 5 steps
+  tests/fixtures/apply/verdicts.yml · 5 steps to run
   ✓ An ungated shell is its own exit code            ok  [t]
   ~ changed_when decides                             changed  [t]
   ✓ A later step reads the register                  ok  [t]

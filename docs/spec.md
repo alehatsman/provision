@@ -1338,6 +1338,17 @@ files when more than one, and how many ask for root. It comes from the
 preflight walk (§7), which already visits every step, so it probes nothing
 and costs nothing.
 
+**`manifest.steps` and `summary.total` count different sets, on purpose.**
+`steps` is what the run will *attempt*: the preflight evaluates `when` and
+the tag filter, so the steps those rule out are not in it. `total` is every
+step the walk reached, skipped ones included. So `steps` is at most `total`,
+and the difference is exactly the steps `when` or tags excluded. `unless`
+and `creates` are **not** probed by the preflight — it is read-only and
+cheap by design (§7) — so a step gated by one of those is counted in
+`steps` and may still skip. The text form says `N steps to run` in the
+header and `N steps` in the summary for the same reason: one word for two
+sets was one run reporting two step counts.
+
 ```json
 {"event":"manifest","plan":"main_pc.yml","steps":166,"files":9,"sudo":12}
 ```

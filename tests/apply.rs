@@ -750,6 +750,35 @@ fn json_carries_rc_and_output_for_every_step_that_ran_a_command() {
     assert_eq!(steps[3]["status"], "skipped");
 }
 
+// #45. The manifest counts what the run will attempt (`when` and tags
+// applied); the summary counts every step the walk reached. They are
+// different sets and the output used to call both "N steps", so one run
+// reported two step counts. The number is right -- `when` is the one gate the
+// preflight can answer up front -- so the fix is the word.
+#[test]
+fn the_manifest_counts_what_will_run_and_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("plan.yml");
+    std::fs::write(
+        &plan,
+        "- name: a\n  shell: \"true\"\n  changed_when: \"false\"\n\
+         - name: b\n  shell: \"true\"\n  when: false\n",
+    )
+    .unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_provision"))
+        .args(["apply", &plan.display().to_string()])
+        .output()
+        .unwrap();
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+
+    assert!(text.contains("1 step to run"), "manifest: {text}");
+    assert!(
+        text.contains("2 steps · 1 ok · 1 skipped"),
+        "summary: {text}"
+    );
+}
+
 // Spec §4, "a register for a step that never ran". The table there is a
 // promise about six field values, so it is pinned here field by field --
 // including the trap it exists to name: `rc == 0` is true for a step that was

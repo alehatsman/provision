@@ -168,8 +168,17 @@ impl Sink for Text {
         // the slot rather than printing a second line saying the same name.
         self.current = Some(plan.to_path_buf());
         let name = plan.strip_prefix(&self.base).unwrap_or(plan).display();
+        // "to run", not bare "steps" (#45). This count is taken on the
+        // preflight walk, which evaluates `when` and the tag filter and so
+        // excludes the steps they rule out -- while the summary below counts
+        // every step the walk reached, skipped ones included. Two different
+        // sets, and printing both as "N steps" meant one run reporting two
+        // step counts. The number stays as it is: `when` is the one gate the
+        // preflight can honestly answer up front, and a count that ignored it
+        // would overstate the run on every plan with an os-gated step, which
+        // is most of them. It is the word that was wrong.
         let mut parts = vec![format!(
-            "{} step{}",
+            "{} step{} to run",
             m.steps,
             if m.steps == 1 { "" } else { "s" }
         )];

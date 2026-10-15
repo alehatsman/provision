@@ -2,7 +2,7 @@
 source: tests/apply.rs
 expression: out
 ---
-  tests/fixtures/apply/failure.yml · 3 steps
+  tests/fixtures/apply/failure.yml · 3 steps to run
   ✓ This one works                                   ok  [t]
   ✗ This one does not                                FAILED  [t]
     │ context line

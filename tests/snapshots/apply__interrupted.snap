@@ -2,7 +2,7 @@
 source: tests/apply.rs
 expression: text
 ---
-  tests/fixtures/apply/interrupt.yml · 1 step
+  tests/fixtures/apply/interrupt.yml · 1 step to run
   ✗ Sleeps until something stops it                  FAILED  [t]
     │ (interrupted)
 
