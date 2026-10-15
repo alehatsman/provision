@@ -1435,3 +1435,59 @@ fn one_fault_in_a_steps_name_is_one_diagnostic() {
     );
     assert!(out.contains("1 problem"), "{out}");
 }
+
+// §3.2: a prop `default` is taken as written, never rendered — a legal
+// string, and never a legal path. Before this, `validate` and `plan` both
+// called this file clean and `apply` created a directory named `{{ home }}`,
+// which inverts what the two read-only verbs are for.
+#[test]
+fn an_unrendered_default_reaching_a_path_is_refused_before_anything_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("c.yml");
+    std::fs::write(
+        &path,
+        "description: a default that was never rendered\n\
+         props:\n\
+         \x20 dir:\n\
+         \x20   type: string\n\
+         \x20   default: \"{{ home }}/.cache/x\"\n\
+         steps:\n\
+         \x20 - name: make it\n\
+         \x20   file: { path: \"{{ props.dir }}\", state: dir }\n",
+    )
+    .unwrap();
+    let out = run(&["validate", &path.display().to_string()]);
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(EXIT_VALIDATION), "{text}");
+    assert!(
+        text.contains("still contains `{{` after rendering"),
+        "{text}"
+    );
+    assert!(text.contains("taken as written"), "{text}");
+}
+
+// The rule it must not overturn: `{{` in a *string* is legal, which is the
+// whole of §3.2, and `list` prints such a default with its braces intact.
+#[test]
+fn an_unrendered_default_in_a_plain_string_is_still_legal() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ok.yml");
+    std::fs::write(
+        &path,
+        "description: a default that is data, not a path\n\
+         props:\n\
+         \x20 greeting:\n\
+         \x20   type: string\n\
+         \x20   default: \"hello {{ name }}\"\n\
+         steps:\n\
+         \x20 - name: say it\n\
+         \x20   shell: \"echo {{ props.greeting }}\"\n\
+         \x20   changed_when: \"false\"\n",
+    )
+    .unwrap();
+    let out = run(&["validate", &path.display().to_string()]);
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "{text}");
+}
