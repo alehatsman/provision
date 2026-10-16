@@ -4,7 +4,7 @@ expression: text
 ---
   tests/fixtures/apply/interrupt.yml · 1 step to run
   ✗ Sleeps until something stops it                  FAILED  [t]
-    │ (interrupted)
+    │ (exit 130 · interrupted)
 
   tests/fixtures/apply/interrupt.yml · 1 step · 1 failed · [t]
   interrupted

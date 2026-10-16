@@ -348,7 +348,20 @@ impl Runner {
         attempts: u32,
     ) -> R<Done> {
         let status = match out.how {
-            How::Interrupted => Status::Failed(interrupted()),
+            // D22's twin: a stop is a kill like the clock's, so the same
+            // rule holds. `rc` is `process::run`'s `128 + signal` — `130`
+            // for Ctrl-C, `143` for a TERM — the value the step's
+            // `register` already reports, and `interrupted` is what tells
+            // it apart from a command that chose to exit `130` itself.
+            // `interrupted()` is kept for the paths where no command of the
+            // step's ran at all.
+            How::Interrupted => Status::Failed(Failure {
+                msg: "interrupted".into(),
+                rc: Some(out.rc),
+                stderr: out.stderr.clone(),
+                interrupted: true,
+                timed_out: false,
+            }),
             // D22: the child's `rc` is `124`, the same value the step's
             // `register` reports, and `timed_out` is what tells it apart
             // from a command that chose to exit `124` itself. Reporting
