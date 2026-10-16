@@ -744,3 +744,107 @@ fn settle(r: R<Done>) -> Result<Done> {
         Err(Stop::Bad(d)) => Err(d),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The runner asks three questions and this answers none of them: every
+    /// test below stops before a verdict is ever judged.
+    struct NoJudge;
+
+    impl Judge for NoJudge {
+        fn failed(&self, _out: &Output) -> Result<bool> {
+            unreachable!("the step never reached a verdict")
+        }
+        fn changed(&self, _out: &Output) -> Result<Option<bool>> {
+            unreachable!("the step never reached a verdict")
+        }
+        fn expr(&self, _src: &str) -> Result<bool> {
+            unreachable!("the step never reached a verdict")
+        }
+    }
+
+    /// A step whose run clock ran out `ago` before now.
+    ///
+    /// `Action::Gate` is the action because none of these tests reaches the
+    /// match that would look at it — they return on the budget check above
+    /// it, which is the branch under test. A real typed action would need a
+    /// `Spec` the branch never reads.
+    fn spent(ago: Duration) -> Prepared {
+        Prepared {
+            action: Action::Gate,
+            unless: None,
+            creates: None,
+            cwd: None,
+            env: BTreeMap::new(),
+            sudo: false,
+            timeout: Duration::from_secs(1),
+            retry: None,
+            has_changed_when: false,
+            deadline_bound: true,
+            own_timeout: Duration::from_secs(600),
+            deadline: Instant::now().checked_sub(ago),
+        }
+    }
+
+    fn runner() -> Runner {
+        Runner {
+            sudo: Sudo::none(),
+            stream: false,
+            root_available: false,
+        }
+    }
+
+    /// Spec §8: a typed action is clamped after its gate, not at prepare
+    /// time, so an `unless` that spent the rest of the run's clock leaves it
+    /// with nothing. The branch is a few microseconds wide from outside — the
+    /// gate is itself killed at the deadline, so an end-to-end test would be
+    /// racing the kill — and it was the only one of §8's three
+    /// stopped-before-anything-ran shapes with no coverage at all.
+    #[test]
+    fn a_typed_action_with_no_budget_left_never_runs() {
+        let Err(Stop::Fail(f)) = runner().typed(&spent(Duration::from_secs(1)), &NoJudge, true)
+        else {
+            panic!("a spent clock stops the step with a failure")
+        };
+        assert_eq!(f.msg, "deadline exceeded before the step ran");
+        // No command ran, so there is no exit code to report (D30) and
+        // nothing wrote to stderr. `timed_out` is what tells a runner the
+        // clock is why, and it is the only discriminator there is.
+        assert_eq!(f.rc, None);
+        assert_eq!(f.stderr, "");
+        assert!(f.timed_out);
+        assert!(!f.interrupted);
+    }
+
+    /// The same clock, the retry loop. Reachable end-to-end (the fixture
+    /// `retry_delay_clock.yml` lands here when `delay` outlives the
+    /// deadline), but the attempt numbers in the message are not pinned
+    /// anywhere, and they are the part that says which attempt the register
+    /// holds.
+    #[test]
+    fn a_retry_with_no_budget_left_names_the_attempt_it_stopped_before() {
+        let Err(Stop::Fail(f)) =
+            runner().attempt_loop(&spent(Duration::from_secs(1)), &NoJudge, 3, Duration::ZERO)
+        else {
+            panic!("a spent clock stops the loop with a failure")
+        };
+        // Attempt one: nothing ran before it, so `stopped_between` has no
+        // earlier attempt to report and the failure stands on its own.
+        assert_eq!(f.msg, "deadline exceeded before attempt 1/3");
+        assert_eq!(f.rc, None);
+        assert!(f.timed_out);
+    }
+
+    /// A step with no `--deadline` has no clock to run out of, whatever its
+    /// own `timeout` says. `None` there is "no deadline", not "no time" --
+    /// the two read the same at the call site and only one of them stops a
+    /// step.
+    #[test]
+    fn no_deadline_is_not_a_spent_one() {
+        let mut p = spent(Duration::from_secs(1));
+        p.deadline = None;
+        assert_eq!(p.budget(), Some((Duration::from_secs(600), false)));
+    }
+}

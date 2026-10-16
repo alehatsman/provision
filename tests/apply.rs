@@ -1581,6 +1581,19 @@ fn a_deadline_reaches_into_a_retry_delay_and_keeps_the_last_attempt() {
         !step.contains("after 0ms"),
         "a duration nobody waited:\n{out}"
     );
+    // And it says which attempt it stopped before, which is how a reader
+    // tells "the clock ran out while attempt 1 was running" from "the clock
+    // ran out in the delay before attempt 2". Only the second is this
+    // fixture, and the attempt numbers are the whole difference -- §10's
+    // "the register holds the last attempt" is unreadable without them.
+    assert!(
+        step.contains("deadline exceeded before attempt 2/3"),
+        "the stop did not name the attempt it stopped before:\n{out}"
+    );
+    assert!(
+        step.contains(r#""attempt":1"#) && step.contains(r#""attempts":3"#),
+        "§9.3's attempt keys are not on the step that retried:\n{out}"
+    );
 }
 
 // The same sleep, the other stop: a TERM during a retry's `delay` ends the run

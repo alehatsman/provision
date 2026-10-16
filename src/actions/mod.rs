@@ -572,3 +572,97 @@ fn command_name<'a>(argv: &[&'a str]) -> &'a str {
     }
     argv.get(i).copied().unwrap_or("")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::exec::sudo::Sudo;
+    use std::time::Instant;
+
+    /// A context whose run clock ran out a second ago.
+    fn spent<'a>(escalate: &'a Sudo, env: &'a BTreeMap<String, String>) -> Ctx<'a> {
+        Ctx {
+            sudo: false,
+            root_available: false,
+            escalate,
+            timeout: Duration::from_secs(600),
+            deadline: Instant::now().checked_sub(Duration::from_secs(1)),
+            env,
+            last: std::cell::Cell::new((Duration::from_secs(600), false)),
+        }
+    }
+
+    /// Spec §8: a typed action runs several commands — `pkg` queries,
+    /// installs and queries again — and each is clamped against what is
+    /// *now* left. When nothing is left, the command is not spawned at all
+    /// and the answer is the one every caller already handles: a kill.
+    ///
+    /// The third of §8's stopped-before-anything-ran shapes, and the only
+    /// one that needs no process. The window is microseconds wide from
+    /// outside: the command before this one is itself killed at the
+    /// deadline, so an end-to-end test would be racing that kill rather
+    /// than reaching here.
+    #[test]
+    fn a_command_reached_with_no_budget_left_is_not_spawned() {
+        let sudo = Sudo::none();
+        let env = BTreeMap::new();
+        let ctx = spent(&sudo, &env);
+        // A command that would take thirty seconds and leave a mark if it
+        // ever ran. It returns instantly, which is the assertion: nothing
+        // was spawned.
+        let started = Instant::now();
+        let got = ctx
+            .exec(&["sleep", "30"], false)
+            .expect("the branch answers without spawning");
+        assert!(started.elapsed() < Duration::from_secs(1));
+        // `124` and `TimedOut` together: the shape every caller already
+        // reads for a command the clock killed, rather than a second shape
+        // for the same event.
+        assert_eq!(got.rc, 124);
+        assert_eq!(got.how, process::How::TimedOut);
+        assert!(got.stdout.is_empty());
+        assert!(got.stderr.is_empty());
+    }
+
+    /// What the step then says. `last` is set to zero so the wording comes
+    /// from the deadline rather than the step's own `timeout` — right about
+    /// whose clock, wrong about the duration: no command waited 0ms, because
+    /// no command ran. Issue #56; pinned as it is so the branch is covered
+    /// while the wording is decided separately.
+    #[test]
+    fn the_wording_of_a_command_that_was_never_spawned() {
+        let sudo = Sudo::none();
+        let env = BTreeMap::new();
+        let ctx = spent(&sudo, &env);
+        let got = ctx.exec(&["sleep", "30"], false).expect("answered");
+        assert_eq!(ctx.last.get(), (Duration::ZERO, true));
+        let Some(Effect::Failed { msg, .. }) = ctx.stopped(&got) else {
+            panic!("a killed command is a failure")
+        };
+        assert_eq!(msg, "deadline exceeded after 0ms");
+    }
+
+    /// The same context with time left spawns for real and records what the
+    /// command was given, which is what a later kill's message names.
+    #[test]
+    fn a_command_with_budget_left_records_what_it_got() {
+        let sudo = Sudo::none();
+        let env = BTreeMap::new();
+        let mut ctx = spent(&sudo, &env);
+        ctx.deadline = Some(Instant::now() + Duration::from_secs(30));
+        let got = ctx
+            .exec(&[if cfg!(windows) { "cmd" } else { "true" }], false)
+            .expect("a command that exists");
+        assert_eq!(got.how, process::How::Exited);
+        let (left, deadline_bound) = ctx.last.get();
+        assert!(left <= Duration::from_secs(30));
+        assert!(
+            deadline_bound,
+            "the run's clock was the smaller and the wording has to say so"
+        );
+        assert!(
+            ctx.stopped(&got).is_none(),
+            "a command that exited is not a kill"
+        );
+    }
+}
