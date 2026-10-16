@@ -3610,6 +3610,82 @@ exit 0
     );
 }
 
+// Spec §8, line "`--deadline` runs out during a step": a kill the run's clock
+// caused is worded `deadline exceeded`, never as a step timeout the file does
+// not contain. The flag deciding that wording was read once, before the
+// action's first command, while the duration was reclamped per command — so a
+// step with its own `timeout:` entered unbound by the deadline, was clamped by
+// it on a later command, and reported `timed out after 3.0s`: a step timeout
+// wording after a number neither the file's `4s` nor the run's `6s` holds.
+//
+// The sibling above cannot catch it — it declares no step `timeout:`, so the
+// deadline is the smaller from the start and the flag is right by accident.
+#[test]
+fn a_deadline_kill_is_not_worded_as_the_steps_own_timeout() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    // Answers "nothing installed", slowly but inside its own 4s budget: the
+    // query is bound by the step's `timeout:`, not by the run's clock.
+    fake_manager(
+        &bin,
+        "dpkg-query",
+        "sleep 3
+exit 0
+",
+    );
+    // The install is reached with ~3s left against a 4s ceiling, so it is the
+    // deadline that binds it and the deadline that kills it.
+    fake_manager(
+        &bin,
+        "apt-get",
+        "sleep 20
+",
+    );
+    let path = dir.path().join("pkg.yml");
+    std::fs::write(
+        &path,
+        "- name: An install behind a slow query, under its own timeout
+  timeout: 4s
+  pkg:
+    names: [yarn]
+    manager: apt
+",
+    )
+    .unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_provision"))
+        .args([
+            "apply",
+            path.to_str().expect("temp paths are UTF-8"),
+            "--deadline",
+            "6s",
+        ])
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                bin.display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("provision failed to start");
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+
+    assert_eq!(out.status.code(), Some(124), "{text}");
+    assert!(
+        text.contains("deadline exceeded after"),
+        "the run's clock killed the step and the message named the step's own timeout:\n{text}"
+    );
+    assert!(
+        !text.contains("timed out after"),
+        "a deadline kill was worded as a step timeout:\n{text}"
+    );
+}
+
 // Spec §8: each step's effective timeout is the lesser of its own and the
 // time left, so no step runs past the deadline it was admitted under. A typed
 // action took the timeout computed before its `unless` ran — so the gate's

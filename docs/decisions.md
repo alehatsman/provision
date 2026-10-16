@@ -720,6 +720,18 @@ Found by `a_typed_action_after_its_gate_gets_only_the_time_left` failing on
 Linux and passing on macOS — a difference in how many commands the action
 got to run, not a difference in the rule. Issue #19.
 
+**Amendment, 2026-10-17.** The per-command clamp above moved the duration and
+left the wording behind. `deadline_bound` — the flag choosing between
+"deadline exceeded after N" and "timed out after N" — was still the one
+computed once, before the action's first command, so a step with its own
+`timeout:` entered unbound by the deadline, was clamped by it on a later
+command, and reported `timed out after 3.0s`: a step-timeout wording after a
+number neither the file's `4s` nor the run's `6s` holds — the exact fault §8
+draws the distinction to prevent. The clamp is now one function,
+`process::clamp`, returning the duration and the flag together, and the
+typed path carries the pair per command beside `last`. A reader can no longer
+take the two apart, which is what let them disagree. Issue #49.
+
 ## D20 — a bare `shell` step's exit code is its whole contract
 
 **Decision.** A `shell` or `cmd` step with no `unless`, `creates` or
