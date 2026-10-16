@@ -410,29 +410,48 @@ fn kill_group(pid: u32, reap: Option<&mut Child>) {
     unsafe {
         libc::killpg(pgid, libc::SIGTERM);
     }
-    if let Some(child) = reap {
-        // Reap the direct child *before* asking whether the group still has
-        // anyone in it. A terminated child stays in its group as a zombie
-        // until it is waited for, and the existence check below cannot tell a
-        // zombie from a process still running — so without this the loop
-        // waited the full two seconds on the corpse of the thing it had just
-        // killed. That is where a `--deadline 3s` run spent five seconds on
-        // Linux (#19), while macOS, which drops a zombie's group membership
-        // sooner, returned at once and hid it.
-        #[expect(clippy::let_underscore_must_use, reason = "reaping a killed child")]
-        let _ = child.wait();
-    }
+    let mut reap = reap;
+    let mut gone = false;
     for _ in 0..20 {
-        std::thread::sleep(Duration::from_millis(100));
+        // Reap the direct child *before* asking whether the group still has
+        // anyone in it, and without blocking on it. A terminated child stays
+        // in its group as a zombie until it is waited for, and the existence
+        // check below cannot tell a zombie from a process still running — so
+        // without this the loop waited the full two seconds on the corpse of
+        // the thing it had just killed. That is where a `--deadline 3s` run
+        // spent five seconds on Linux (#19), while macOS, which drops a
+        // zombie's group membership sooner, returned at once and hid it.
+        //
+        // `try_wait`, not `wait`: a blocking reap here is only bounded by the
+        // child's willingness to die, and the one thing that guarantees it
+        // dies is the KILL below. A child that traps TERM — `trap '' TERM` in
+        // a step's shell, or a package manager that defers it — held this
+        // function forever, which made `timeout`, `--deadline` and Ctrl-C all
+        // unenforceable against it.
+        if let Some(child) = reap.as_deref_mut() {
+            #[expect(clippy::let_underscore_must_use, reason = "reaping a killed child")]
+            let _ = child.try_wait();
+        }
         // ESRCH means the group is gone; anything else means it is still there.
         // SAFETY: signal 0 is the existence check; it delivers nothing.
         if unsafe { libc::killpg(pgid, 0) } != 0 {
-            return;
+            gone = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    if !gone {
+        // SAFETY: as above. TERM was given 2s to be polite; this is the end
+        // of it.
+        unsafe {
+            libc::killpg(pgid, libc::SIGKILL);
         }
     }
-    // SAFETY: as above. TERM was given 2s to be polite; this is the end of it.
-    unsafe {
-        libc::killpg(pgid, libc::SIGKILL);
+    // Now the blocking reap is bounded: either the group is gone, or KILL has
+    // been delivered and cannot be refused.
+    if let Some(child) = reap {
+        #[expect(clippy::let_underscore_must_use, reason = "reaping a killed child")]
+        let _ = child.wait();
     }
 }
 
@@ -442,12 +461,23 @@ fn kill_group(pid: u32, reap: Option<&mut Child>) {
     // every supported version. There is no grace loop here to mislead, so
     // `reap` is taken for signature parity and the child is waited for the
     // same way, which costs nothing and keeps the two paths honest.
-    let _ = Command::new("taskkill")
+    let killed = Command::new("taskkill")
         .args(["/T", "/F", "/PID", &pid.to_string()])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status();
+        .status()
+        .is_ok_and(|st| st.success());
     if let Some(child) = reap {
+        // `taskkill` not on PATH, or refusing the pid, would leave the wait
+        // below unbounded the same way a trapped TERM did on Unix. This ends
+        // the direct child at least; a tree it started is then the host's.
+        if !killed {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "the wait below is the report"
+            )]
+            let _ = child.kill();
+        }
         #[expect(clippy::let_underscore_must_use, reason = "reaping a killed child")]
         let _ = child.wait();
     }

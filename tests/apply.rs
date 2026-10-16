@@ -459,6 +459,34 @@ fn a_timeout_kills_the_children_not_only_the_shell() {
     );
 }
 
+// A child that ignores TERM is killed anyway, on the grace period's clock.
+// `kill_group` used to reap the direct child with a blocking `wait` *before*
+// the grace loop, which put the only thing that guarantees the child dies —
+// the KILL at the end of that loop — behind the wait for it to die. A step
+// that trapped TERM then ran to completion with `timeout`, `--deadline` and
+// Ctrl-C all unenforceable against it.
+#[test]
+fn a_step_that_traps_term_is_still_killed() {
+    let dir = tempfile::tempdir().unwrap();
+    let started = std::time::Instant::now();
+    let (code, out) = apply(dir.path(), "trapped_term.yml", &[]);
+    let elapsed = started.elapsed();
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("timed out after 1"), "{out}");
+    assert!(
+        elapsed < std::time::Duration::from_secs(30),
+        "the grace period never escalated to KILL: {elapsed:?}\n{out}"
+    );
+    assert!(
+        !out.contains("Must not run after the timeout"),
+        "the walk did not stop:\n{out}"
+    );
+    assert!(
+        !child_alive(dir.path()),
+        "the step that ignored TERM outlived its timeout"
+    );
+}
+
 /// Whether the pid a fixture wrote to `child.pid` is still running.
 fn child_alive(dir: &Path) -> bool {
     let pid = std::fs::read_to_string(dir.join("child.pid"))

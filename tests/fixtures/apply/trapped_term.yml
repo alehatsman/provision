@@ -1,0 +1,16 @@
+---
+# A step that refuses TERM is still bounded. `trap '' TERM` sets the ignore
+# disposition, and `exec` carries it into `sleep`, so nothing in this group
+# dies of the polite signal the kill starts with — only of the KILL that ends
+# the grace period. Without that escalation the run waits out the `sleep`.
+- name: Ignores TERM
+  shell: |
+    trap '' TERM
+    echo $$ > "{{ env.PROVISION_SCRATCH }}/child.pid"
+    exec sleep 300
+  timeout: 1s
+  changed_when: "false"
+
+- name: Must not run after the timeout
+  shell: "true"
+  changed_when: "false"
