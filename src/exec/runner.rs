@@ -63,11 +63,7 @@ impl Prepared {
     /// retry `delay`, an `unless` — spent time the prepare-time `timeout`
     /// still counts as left.
     fn budget(&self) -> Option<(Duration, bool)> {
-        let Some(deadline) = self.deadline else {
-            return Some((self.own_timeout, false));
-        };
-        let left = deadline.saturating_duration_since(Instant::now());
-        (!left.is_zero()).then(|| (left.min(self.own_timeout), left < self.own_timeout))
+        process::clamp(self.deadline, self.own_timeout)
     }
 
     /// What to call a timeout, which depends on whose clock ran out (spec §8).
@@ -434,13 +430,16 @@ impl Runner {
             sudo: p.sudo,
             root_available: self.root_available,
             escalate: &self.sudo,
-            timeout,
-            deadline_bound,
+            // The step's own ceiling, unclamped: `Ctx` reclamps it against
+            // the deadline per command, and handing it the entry-clamped
+            // value would make the ceiling of command two the budget of
+            // command one.
+            timeout: p.own_timeout,
             deadline: p.deadline,
             env: &p.env,
-            // Until a command runs, the step's own ceiling is the honest
+            // Until a command runs, the clamp taken just above is the honest
             // answer: that is what the first one will get.
-            last: std::cell::Cell::new(timeout),
+            last: std::cell::Cell::new((timeout, deadline_bound)),
         };
         let (effect, mut note) = match &p.action {
             Action::File(spec) => (

@@ -482,3 +482,20 @@ fn kill_group(pid: u32, reap: Option<&mut Child>) {
         let _ = child.wait();
     }
 }
+
+/// Spec §8's clamp: the lesser of a ceiling and what the run's clock has
+/// left, and whether the clock is the smaller. `None` once the clock has run
+/// out — a command that starts with nothing left is not started.
+///
+/// One function because both callers are the same arithmetic asked at
+/// different moments: the runner asks it per attempt for a `shell` step, a
+/// typed action asks it per command. Two copies meant the pair could be read
+/// apart — the duration taken fresh and the flag left at whatever the first
+/// command saw — and a deadline kill was then worded as a step timeout.
+pub(crate) fn clamp(deadline: Option<Instant>, ceiling: Duration) -> Option<(Duration, bool)> {
+    let Some(deadline) = deadline else {
+        return Some((ceiling, false));
+    };
+    let left = deadline.saturating_duration_since(Instant::now());
+    (!left.is_zero()).then(|| (left.min(ceiling), left < ceiling))
+}

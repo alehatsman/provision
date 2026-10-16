@@ -394,11 +394,6 @@ pub(crate) struct Ctx<'a> {
     /// `apt-get install` waits forever on a dpkg lock, and §4 promises the
     /// step is killed either way.
     pub timeout: Duration,
-    /// Spec §8: `timeout` is the run's remaining `--deadline`, not the step's
-    /// own, because the deadline was the smaller. Only the wording of a kill
-    /// depends on it: a message naming a step timeout the file does not
-    /// contain sends a reader hunting for a number nobody wrote.
-    pub deadline_bound: bool,
     /// Spec §8, D19: the run's `--deadline` as an absolute instant, so every
     /// command this action runs can be clamped against what is *now* left.
     /// `timeout` above was computed once, before the action's first command,
@@ -407,12 +402,18 @@ pub(crate) struct Ctx<'a> {
     /// budget in turn and the step overran the deadline by a multiple of it.
     pub deadline: Option<Instant>,
     pub env: &'a BTreeMap<String, String>,
-    /// What the last command actually got, for the wording of a kill. The
-    /// clamp above means the second command of an action is bound by less
-    /// than `timeout`, and a message that still named `timeout` would name a
-    /// number no command was given — the same fault §8 names a step timeout
-    /// the file does not contain to avoid.
-    pub last: std::cell::Cell<Duration>,
+    /// What the last command actually got and whose clock gave it, for the
+    /// wording of a kill. The clamp above means the second command of an
+    /// action is bound by less than `timeout`, and a message that still
+    /// named `timeout` would name a number no command was given — the same
+    /// fault §8 names a step timeout the file does not contain to avoid.
+    ///
+    /// Both halves, not just the duration: a step with its own `timeout:`
+    /// enters unbound by the deadline and can be clamped by it on a later
+    /// command, and reading the duration fresh while the flag stayed at what
+    /// the first command saw worded a deadline kill as a step timeout —
+    /// after a number neither the file nor `--deadline` contains.
+    pub last: std::cell::Cell<(Duration, bool)>,
 }
 
 impl Ctx<'_> {
@@ -429,13 +430,10 @@ impl Ctx<'_> {
     /// Probes and mutations take the same path regardless, because a hung
     /// manager hangs `is-active` exactly as it hangs `start`.
     /// What this command gets: the lesser of the step's ceiling and the time
-    /// the run has left. `None` means the run has none left at all.
-    fn budget(&self) -> Option<Duration> {
-        let Some(deadline) = self.deadline else {
-            return Some(self.timeout);
-        };
-        let left = deadline.saturating_duration_since(Instant::now());
-        (!left.is_zero()).then(|| left.min(self.timeout))
+    /// the run has left, and whether the clock is the smaller. `None` means
+    /// the run has none left at all.
+    fn budget(&self) -> Option<(Duration, bool)> {
+        process::clamp(self.deadline, self.timeout)
     }
 
     pub(crate) fn exec(&self, argv: &[&str], as_root: bool) -> std::io::Result<process::Raw> {
@@ -444,8 +442,10 @@ impl Ctx<'_> {
         // is what happened: every caller already reports a `TimedOut` command
         // the way §8 wants, and inventing a second shape for the same event
         // would be a second wording for one thing.
-        let Some(timeout) = self.budget() else {
-            self.last.set(Duration::ZERO);
+        let Some((timeout, deadline_bound)) = self.budget() else {
+            // Nothing left at all is the deadline's doing by definition:
+            // the step's own ceiling cannot reach zero mid-action.
+            self.last.set((Duration::ZERO, true));
             return Ok(process::Raw {
                 rc: 124,
                 stdout: Vec::new(),
@@ -453,7 +453,7 @@ impl Ctx<'_> {
                 how: process::How::TimedOut,
             });
         };
-        self.last.set(timeout);
+        self.last.set((timeout, deadline_bound));
         let argv: Vec<String> = argv.iter().map(|s| (*s).to_string()).collect();
         let (argv, stdin) = if as_root {
             // The step's own `env` keys, exactly as the shell path passes
@@ -518,15 +518,18 @@ impl Ctx<'_> {
         match got.how {
             process::How::Exited => None,
             process::How::TimedOut => Some(Effect::Failed {
-                msg: format!(
-                    "{} after {}",
-                    if self.deadline_bound {
-                        "deadline exceeded"
-                    } else {
-                        "timed out"
-                    },
-                    crate::output::event::human(self.last.get())
-                ),
+                msg: {
+                    let (got, deadline_bound) = self.last.get();
+                    format!(
+                        "{} after {}",
+                        if deadline_bound {
+                            "deadline exceeded"
+                        } else {
+                            "timed out"
+                        },
+                        crate::output::event::human(got)
+                    )
+                },
                 detail: got.stderr_text(),
                 interrupted: false,
             }),
