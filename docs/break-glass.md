@@ -63,7 +63,12 @@ never mentioned stays exactly as the failed run left it — a package the new
 plan installed stays installed, a file it created stays created. provision
 keeps no state, so it cannot know what to take away. If the new steps must
 be undone, undo them by hand, or write the inverse as a step (`file` with
-`state: absent`, `pkg` with `state: absent`).
+`state: absent`, `pkg` with `state: absent`). **Those two are the whole of
+it** — the pattern does not generalise. `service` has `state: stopped` and
+`enabled: false`; `defaults` has no undo at all, and `git` and `download`
+are undone only by removing what they put on disk with `file: {state:
+absent}`. Spec §6 has the table and says why this is a known gap rather
+than an oversight.
 
 **d. Fix it by hand.** provision holds no lock and no state on the machine,
 so a manual fix is not something it fights — until the next `apply`, which

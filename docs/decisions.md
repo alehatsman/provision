@@ -395,6 +395,26 @@ same as a field, and is not rendered. The boundary was never intentional;
 nothing could see a file's bytes except the code that reads them, and that
 code reported diagnostics rather than deriving a verdict.
 
+**Amendment, 2026-10-17 — what the placeholder is *not* for: `sudo`,
+`timeout` and `retry` refuse a register outright.** The three typed
+modifiers (§3.4) take a template like every other field, and a step whose
+template reads a register is a validation error naming the modifier, not a
+step rendered from the placeholder. The distinction this decision turns on
+is a verdict: the placeholder lets `plan` say "I do not know yet" about what
+a step *would do*. These three do not describe what a step would do. `sudo`
+is a precondition — §7 promises the preflight finds every root-needing step
+so the password is asked once, up front, and rendered from the placeholder
+it came out `false`, the manifest counted `sudo: 0`, `Sudo::preflight`
+returned without proving root, and the step then ran unprivileged. `timeout`
+and `retry` are budgets, consumed by §8's deadline arithmetic in the same
+preflight and read leniently at execution, so a value that failed to resolve
+became the 10m default and no-retry with nothing said. The derived rule:
+**a value that cannot be known before the run can be a verdict; it cannot be
+a precondition or a budget.** Refuse rather than defer, which is what D27
+and #27 chose for the other undecidable-before-the-run questions — a step
+whose privilege depends on an earlier step's output is two plans, and says
+so. Implemented at `src/expand.rs:1179-1195`; written down by issue #51.
+
 ## D15 — `unknown` counts as a change for `plan`'s exit code
 
 **Decision.** `plan` exits 2 for any step that is not `ok` or `skipped` —
@@ -731,6 +751,29 @@ draws the distinction to prevent. The clamp is now one function,
 `process::clamp`, returning the duration and the flag together, and the
 typed path carries the pair per command beside `last`. A reader can no longer
 take the two apart, which is what let them disagree. Issue #49.
+
+**Amendment, 2026-10-17 — two additions to the contract, written down
+late.** The stream gained `manifest` and `via` without a line here; both are
+in spec §9.3 and both are part of what this decision promises a runner, so
+they belong on the record.
+
+`manifest` is one event before the first step under `apply`, carrying the
+shape of the run — `steps`, `files`, `sudo` — from the preflight walk (§7),
+which already visits every step, so it probes nothing and costs nothing. It
+reports shape and never a diff: `plan`'s verdicts are best-effort (D11) and
+explicitly unprobed for a register-gated step (D14), so a claim about what a
+run *would change*, made before it starts, is one provision cannot keep —
+while how much is about to happen, and whether any of it is root, is one it
+can. `manifest.steps` and `summary.total` count different sets on purpose,
+and §9.3 states the relation and when it inverts.
+
+`via` is the call path on a step event, one entry per call site, absent at
+depth 0. Without it two invocations of one component emitted byte-identical
+`file`, `line` and `name`, so a runner could not tell which call site a step
+belonged to and an intermediate component never appeared at all. It is a
+field and not a graph: it says where a step came from and nothing about
+ordering or dependency — this decision's "the runner owns the rest" is why
+it stops there. Written down by issue #51.
 
 ## D20 — a bare `shell` step's exit code is its whole contract
 
@@ -1132,7 +1175,8 @@ already weighed and closed.
 whose `when` is false and checks the steps inside it for shape: the
 idempotency gate (D3, D21) and §6.10's `defaults` os-gate. It renders
 nothing there, records nothing, and reports no step. The step itself is still
-reported `skipped   when: false`, exactly as before.
+reported `skipped   when: false`, exactly as before. *(Amended 2026-10-17,
+below: the descent happens whatever `strict` says; only the check is gated.)*
 
 **Why.** `validate` evaluates `when`, so a subtree gated off on *this*
 machine was invisible to it. A `when: os == "linux"` component carried no
@@ -1159,7 +1203,24 @@ values, and values are the one thing a gated-off subtree has no business
 producing: they would land in the live scope and be read by the steps after
 it.
 
-**Why it is gated on `strict` and not on the verb.** Two reasons that agree.
+**Amendment, 2026-10-17 — the descent is unconditional; the gate inside it
+is what `strict` decides.** The paragraph below is superseded and kept for
+the record. It was wrong on its own terms: the strict gate is *not* the only
+thing a shape-only walk does — it also collects the subtree's tag set — and
+gating the descent on `strict` therefore gated that collection too. A tag
+declared inside an os-gated component was then visible from a plan root,
+where strict is on, and invisible from a task root, where it is not, so
+`--tags pacman` was accepted on one and refused on the other for the same
+bytes. Whether a tag exists is a property of the file (§8); it cannot depend
+on the root's shape. So the walk descends whatever `strict` says, and only
+`check_strict_gate` inside it is conditional (`src/expand.rs:472-487`,
+`:526-542`). The one-verdict argument below survives intact — strict is
+still a property of the file, so all three verbs still reach the same
+verdict — it just no longer carries the descent. Changed in `3246d59`;
+documented here and in spec §8's `--strict` entry by issue #51.
+
+**Why it is gated on `strict` and not on the verb.** *(Superseded above: the
+descent is unconditional. The verb argument stands.)* Two reasons that agree.
 The strict gate is the only thing a shape-only walk checks, so with strict
 off there is nothing to go in for. And strict is a property of the file
 (D26), so all three verbs that walk a plan root descend and reach the same

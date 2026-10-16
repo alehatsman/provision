@@ -123,7 +123,7 @@ enum Command {
         /// One JSON document on stdout. With no path, that document is every
         /// builtin action and every step modifier — what a writer of plan
         /// files needs in one call, rather than a column-aligned table to
-        /// scrape or a 1300-line spec to carry (D25).
+        /// scrape or the whole spec to carry (D25).
         #[arg(long)]
         json: bool,
     },

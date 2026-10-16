@@ -1,6 +1,6 @@
 # provision — build plan
 
-Status: phases 0–7 code complete · 2026-09-10
+Status: phases 0–7 code complete · 2026-10-17
 
 ## Where this stands
 
@@ -158,7 +158,7 @@ src/
 tests/
   fixtures/        small plans, one directory per command
   snapshots/       output (insta)
-  apply.rs cli.rs component.rs list.rs
+  apply.rs apply_cross_platform.rs cli.rs component.rs list.rs
 ```
 
 A `Probe` is what `plan` prints; an `Outcome` is what `apply` prints. Both
@@ -585,11 +585,13 @@ Gate
   commit clippy-clean standalone. The SIGTERM test asserts the *orphan*, not
   the exit code: the shell reports 143 for an unhandled TERM too, so the code
   alone cannot tell the fix from the bug.
-- **Not run, and said plainly rather than counted green:** the Windows
-  cross-check. `exec/process.rs` is the file that changed and it has
-  `cfg(unix)`/`cfg(windows)` split paths, so
-  `cargo check --target x86_64-pc-windows-gnu --all-targets` on the Linux box
-  is the thing that closes this. The mac it was built on has no such target.
+- **Closed 2026-10-15 (D24):** the Windows cross-check. `exec/process.rs`
+  has `cfg(unix)`/`cfg(windows)` split paths and the mac this was built on
+  has no such target, so the answer was never a local `cargo check
+  --target x86_64-pc-windows-gnu`. The gate's `tests (windows)` job builds
+  and runs the suite on a real `windows-latest` host on every push
+  (`.github/workflows/gate.yml`), which is strictly more than the
+  cross-check asked for. See "Where this stands" above.
 - **Owner's:** moongit's runner actually reading the stream, cancelling with
   TERM and passing `--deadline`. That is the real gate and it lives in that
   repo. **Check on 2026-12-12**: unexercised by then means D17's CI half and

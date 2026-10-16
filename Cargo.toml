@@ -6,10 +6,11 @@
 
 [package]
 name = "provision"
-# `-dev` so a build off a tag and a build off HEAD do not answer `--version`
-# with the same string. A month of unreleased work reading as the released
-# tag made four reviewers file features that already shipped (D23: the one
-# reader who forgets is the owner).
+# Carries a `-dev` suffix between releases, and loses it in the release
+# commit, so a build off a tag and a build off HEAD do not answer
+# `--version` with the same string. A month of unreleased work reading as
+# the released tag made four reviewers file features that already shipped
+# (D23: the one reader who forgets is the owner). Released: no suffix.
 version = "0.9.2"
 edition = "2024"
 license = "MIT"
