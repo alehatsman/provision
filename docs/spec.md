@@ -1,6 +1,6 @@
 # provision — specification
 
-Status: v0.8 · 2026-09-12 · owner: aleh
+Status: v0.9.2 · 2026-10-17 · owner: aleh
 
 This is the contract. Code that disagrees with it is wrong, or this file is.
 Fix one.
@@ -276,6 +276,19 @@ for not being a bool or a duration, and made every root-needing step in a
 cross-platform component fork per OS family even when a typed bool prop
 already held the answer.
 
+**None of the three may read a `register`**, and a step whose `sudo`,
+`timeout` or `retry` does is a validation error naming the modifier (exit
+3), not a value deferred to the run. D14's placeholder exists so a *verdict*
+can be withheld; these three are not verdicts. `sudo` is a precondition —
+§7 promises the preflight finds every root-needing step so the password is
+asked for once, before anything happens, and a placeholder rendered `false`
+there made the step run unprivileged. `timeout` and `retry` are budgets,
+read into §8's deadline arithmetic before the first step runs and read
+leniently at execution, so a value that failed to resolve silently became
+the 10m default and no retry. A value that is not knowable before the run
+can be a verdict; it cannot be a precondition or a budget. Gate the step
+with `when:` instead, or split the plan.
+
 One consequence, stated because it is the cost: a modifier holding a
 template cannot have its type checked when the file is parsed, because the
 value does not exist until there is a scope. Such a node is checked when it
@@ -343,9 +356,9 @@ a string that happens to parse.
 | `when` | expr | true | Skip the step when false. Evaluated before `unless`/`creates`. |
 | `unless` | string | — | A shell command, run through the interpreter `shell` defaults to (bash on unix, powershell on Windows), and with the step's own `sudo`, `env` and `cwd` — a root step's gate has to see root's view. Exit 0 means "already done", step skipped. Non-zero means run, **except** a gate that could not run at all: a spawn failure, `126`/`127` from the interpreter, or the gate hitting the step's timeout. Those fail the step (§10). A gate for a tool the plan has not installed yet must therefore ask whether the tool exists, not ask the tool: `command -v <tool> >/dev/null 2>&1`. `<tool> --version` is `127` on a fresh machine, which is a failed step, not a step that needs to run. |
 | `creates` | path | — | Skip when the path exists. |
-| `sudo` | bool | false | Templated (§3.4); a sole `{{ expr }}` must yield a bool. Run the action as root (§7). Windows: error; use `shell` from an elevated prompt. |
-| `timeout` | duration | 10m | Templated (§3.4). Kill the step and fail. `30s`, `5m`, `1h`. |
-| `retry` | `{attempts, delay}` | none | Both fields templated (§3.4). Re-run on failure. `delay` is a duration. Output shows attempt N/M. |
+| `sudo` | bool | false | Templated (§3.4), but **cannot read a `register`**; a sole `{{ expr }}` must yield a bool. Run the action as root (§7). Windows: error; use `shell` from an elevated prompt. |
+| `timeout` | duration | 10m | Templated (§3.4), but **cannot read a `register`**. Kill the step and fail. `30s`, `5m`, `1h`. |
+| `retry` | `{attempts, delay}` | none | Both fields templated (§3.4), but **neither can read a `register`**. Re-run on failure. `delay` is a duration. Output shows attempt N/M. |
 | `env` | mapping | {} | Extra environment for every command the step runs: `shell`, `cmd`, `assert`'s `command`, `unless`, and the commands a typed action spawns (`pkg`, `service`, `git`, …). Templated. |
 | `cwd` | path | the invocation directory | Working directory for `shell`, `cmd`, `assert`'s `command`, `unless`, under every command and for every step, including one inside a `use`d component. A command runs where the operator is standing; a shared gate checked out elsewhere must not gate its own checkout. An explicit `cwd:` resolves against the step's own file, like every other path a plan names, and `component_dir` (§3.2) names a component's own directory for a path inside a shell string. Phase 5b, 2026-09-08: this used to be the step's file directory under `apply` and the invocation directory under `run`. Measured against the fleet, no step depended on the old default — zero `cwd:` modifiers, zero relative paths in shell strings — and one rule beats two. |
 | `tags` | list | [] | For `--tags` selection (§8). |
@@ -1260,9 +1273,15 @@ gates, so it has a wall clock worth bounding too. There is no
   reported `skipped   when: false`. Without this a `when: os == "linux"`
   component was invisible to `validate` on a Mac, so the same plan got
   different verdicts on different hosts and an ungated `shell` was caught by
-  whichever machine happened to match. The descent is on exactly when
-  `strict` is, which is what keeps the one-verdict rule above true across
-  all three verbs. Everything needing a *value* — types, undefined
+  whichever machine happened to match. **The descent itself is
+  unconditional; only the gate inside it is gated on `strict`.** It used to
+  be gated as a whole, which made a tag declared inside a gated-off subtree
+  visible on a plan root and invisible on a task root — so the same
+  `--tags` value was accepted on one and refused on the other for the same
+  bytes. Whether a tag exists is a property of the file (§8) and cannot
+  depend on the root's shape, so a walk with `strict` off still descends
+  and still collects the tag set; it just checks nothing.
+  Everything needing a *value* — types, undefined
   variables, missing files, prop arity — stays unchecked in there, because a
   gated-off subtree may legitimately read names this host does not have: it
   is checked for what it says, never for what it would do.
@@ -1642,8 +1661,20 @@ so it is emitted as each step finishes, never batched:
 
 ```json
 {"event":"step","index":3,"name":"Deploy .zshrc","status":"changed","duration_ms":12,"file":"components/zsh/index.yml","line":41,"diff":"..."}
-{"event":"summary","changed":1,"ok":1,"skipped":1,"unknown":0,"failed":0,"duration_ms":1700}
+{"event":"summary","plan":"main_pc.yml","total":3,"ok":1,"changed":1,"skipped":1,"unknown":0,"failed":0,"would_change":0,"would_run":0,"would_run_unprobed":0,"interrupted":false,"deadline_exceeded":false,"duration_ms":1700}
 ```
+
+A few more keys ride a step event when they apply, and are absent
+otherwise. A `skipped` step carries **`reason`**: the same words the
+terminal prints after `skipped` — `when: false`, `not selected by tags`,
+or the gate that answered. A step with `retry` carries **`attempt`** and **`attempts`**,
+the attempt the reported result came from and the ceiling the file set; they
+appear together and only when `attempts` is greater than 1, because a step
+that ran once has nothing to report there. A `failed` step carries
+**`message`**, the one-line reason the terminal prints — and `interrupted`
+or `timed_out`, each `true` or absent, never both. **`note`** carries the
+extra words the status column shows — `3 of 14` for a `file` step that
+walked a tree — for the steps that have them.
 
 The summary also carries `interrupted` and `deadline_exceeded`, both always
 present and both booleans. A runner reading only the summary has to be able
@@ -1775,7 +1806,9 @@ and nothing else.
 
 ## 11. Validation of this spec
 
-Before code: walk every step type in `~/dotfiles` (64 files, ~950 steps)
+Before code: walk every step type in `~/dotfiles` (the estimate was 64
+files and ~950 steps; the walk found 58 files, 371 steps and 27 templates
+— `docs/audit.md` §1)
 against §3–§6 and record each construct that has no mapping. The migration
 document must list all of them. Zero unmapped constructs, or an explicit
 decision to rewrite each, is the gate for starting Phase 0.

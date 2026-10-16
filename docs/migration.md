@@ -56,7 +56,7 @@ against a machine mooncake has already converged.
 | `cmd: {argv: [...]}` | `cmd: [...]` | flatten |
 | `file.write: {path, content, state: directory, mode, owner, group}` | `file: {path, content, state: dir, mode, owner, group}` | `directory` → `dir`; 52 sites. `group` is now a spec §6.3 field (2 sites) |
 | `file.copy: {src, dest}` | `file: {path: dest, src, state: file}` | 3 sites |
-| `file.download` (1) | `shell: curl -fsSL URL -o PATH` + `creates: PATH` | |
+| `file.download` (1) | `download: {url, dest, sha256}` | **revised.** Phase 6 made this a typed action (spec §6.9, D4 as amended); the original mapping to `shell: curl` + `creates` predates it and would not notice a wrong or truncated file |
 | `file.template: {src, dest}` | `template: {src, dest}` | 32 sites, rename |
 | `pkg: {name/names, state, manager, cask, update_cache}` | `pkg:` same | unchanged; `manager: yay` supported |
 | `pkg.upgrade: {}` (1) | **delete** | a full distro upgrade is a choice, not a state. Decided 2026-09-08; upgrade by hand or from the justfile (§6) |
@@ -69,7 +69,7 @@ against a machine mooncake has already converged.
 | `log` (2) | `shell: echo` + `changed_when: false`, or move to a README | recipe in §3.9 |
 | `text.replace` (3) | `shell` with sed + `unless: grep -q` | recipe below |
 | `text.line` (1) | `shell: grep -qxF LINE FILE \|\| echo LINE >> FILE` + `unless` | |
-| `git.clone` (2) | `shell: git clone URL DEST` + `creates: DEST` | |
+| `git.clone` (2) | `git: {repo, dest, ref}` | **revised.** Phase 6 made this a typed action (spec §6.8, D4 as amended); the original mapping to `shell: git clone` + `creates` predates it and pins nothing |
 | `assert: {command: {cmd}}` | `assert: {command: "..."}` | flatten, 24 sites |
 | `wait.http` (1) | `assert: {command: curl -fsS …}` + `retry` | the one site is in `moongit`, which is **kept**, not `fleet-peer`. Recipe in §3.10 |
 | `container.image` | — | **zero sites**; dex took both. Nothing to migrate. |
@@ -320,9 +320,9 @@ extended this list; every construct in `~/dotfiles` now has a mapping.
 | `components/terraform/index.yml`, `components/google-cloud/index.yml` | `pkg.repo` apt → §3.11 three-step form |
 | `platforms/arch/index.yml` | `text.replace` multilib → §3.2; `text.line` → recipe; `os.user` → §3.5; yay build step unchanged; **`pkg: {upgrade: true}` → `update_cache: true`** — the step was doing a `pacman -Syu` *and* the database refresh every other `pkg` step installs against. The upgrade goes (same call as `pkg.upgrade`); the refresh stays |
 | `platforms/windows/index.yml` | `os.service` `daemon_reload: true` → a preceding `cmd: [systemctl, daemon-reload]` (§3.8); tailscale `pkg.repo` → §3.11 |
-| `components/zsh/index.yml` | `os.user` → §3.5; `git.clone` → `shell` + `creates` |
-| `components/tmux/index.yml`, `components/claude/index.yml` | `file.copy` → `file: {src, state: file}`; `git.clone` → `shell` + `creates` |
-| `components/nvim/win32yank.yml` | `file.download` → `shell: curl` + `creates` |
+| `components/zsh/index.yml` | `os.user` → §3.5; `git.clone` → `git:` (spec §6.8) |
+| `components/tmux/index.yml`, `components/claude/index.yml` | `file.copy` → `file: {src, state: file}`; `git.clone` → `git:` (spec §6.8) |
+| `components/nvim/win32yank.yml` | `file.download` → `download:` (spec §6.9) |
 | `components/nvim/zk_config.toml.j2`, `zk_template_default.md.j2`, `components/zsh/templates/.zshrc.j2` | `{% verbatim %}`/`{% endverbatim %}` → `{% raw %}`/`{% endraw %}` (3 files, 3 blocks) — Jinja2's tag; see §5 |
 | `platforms/windows/packages.yml` | `pkg.upgrade` → **deleted** (decided 2026-09-08); PPA → §3.3 |
 | `platforms/windows/bootstrap.yml` | drop `run_as_admin`; `shell.cmd` → `shell.script`; typed windows actions → §3.4 PowerShell recipes; the closing `log` banner moves to `platforms/windows/README.md` |

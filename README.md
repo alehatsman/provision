@@ -46,6 +46,39 @@ $ provision apply x1.yml
 A changed `file` or `template` step prints its diff under the line;
 `--no-diff` drops them. Zero counts are left out of the summary.
 
+## Install
+
+No installer, no package. Three ways, in the order of least work:
+
+**A tagged binary.** Each `v*` tag publishes
+`x86_64-unknown-linux-musl`, `aarch64-apple-darwin`,
+`x86_64-pc-windows-gnu` and `aarch64-linux-android` to its GitHub release,
+with a `SHA256SUMS` next to them. Download the one for your machine, check
+it against that file, `chmod +x`, and put it on `PATH`. A machine with no
+Rust toolchain — a phone running Termux, a CI image — takes this path, and
+a plan that installs provision on another machine should use a `download`
+step carrying the `sha256`, which is what the checksums file is there for.
+
+**From source**, if you have Rust:
+
+```
+$ cargo build --release --locked
+$ cp target/release/provision ~/.local/bin/
+```
+
+**With provision itself**, once you have built it once:
+
+```
+$ provision apply tasks/install.yml
+```
+
+That builds and copies to `~/.local/bin/provision`; `--prop dest=…` puts
+it somewhere else. It reports `ok` when the binary already matches, which `cp`
+cannot.
+
+These binaries exist for the owner's machines, not as a product: there is no
+stability promise and no support (D23).
+
 ## Why this exists
 
 This replaced [mooncake](https://github.com/alehatsman/mooncake), now
@@ -307,7 +340,7 @@ and no support (D23).
 
 ## Status
 
-Version 0.9.2-dev. Phases 0 through 7 are code complete ([docs/plan.md](docs/plan.md)).
+Version 0.9.2. Phases 0 through 7 are code complete ([docs/plan.md](docs/plan.md)).
 `validate`, `plan`, `apply`, `list` and `facts` all work, and all ten
 actions — `shell`, `cmd`, `assert`, `file`, `template`, `pkg`, `service`,
 `git`, `download`, `defaults` — run for real, with `unless`, `creates`,

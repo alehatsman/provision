@@ -514,18 +514,15 @@ impl Expander {
                 // property of the file (§8); it cannot depend on the root's
                 // shape.
                 //
-                // Formerly gated on `strict` rather than on the verb, which decides
-                // two things at once. It is the honest trigger: the strict
-                // gate is the only thing a shape-only walk checks, so with
-                // strict off there is nothing to go in for. And it keeps
-                // §8's "one file, one set of arguments, one verdict" —
-                // strict is a property of the file (D26), so all three verbs
-                // that walk a plan root descend here and agree. Restricting
-                // this to the `validate` verb would have made it refuse a
-                // file `plan` accepts, with the same arguments on the same
-                // machine, which is the one thing §8 promises cannot happen.
-                // The executing `apply` walk has strict off and so skips it;
-                // its preflight does not.
+                // Nor is it gated on the verb. Strict is a property of the
+                // file (D26), so all three verbs that walk a plan root
+                // descend here and agree, which is §8's "one file, one set
+                // of arguments, one verdict". Restricting this to the
+                // `validate` verb would have made it refuse a file `plan`
+                // accepts, with the same arguments on the same machine,
+                // which is the one thing §8 promises cannot happen. The
+                // executing `apply` walk has strict off, so it descends for
+                // the tag set and checks nothing; its preflight checks.
                 if step.is_structural() {
                     let outer = (self.shape_only, self.os_gated);
                     self.shape_only = true;

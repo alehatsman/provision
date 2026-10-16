@@ -1,6 +1,13 @@
 # provision — dotfiles construct audit
 
-Status: v1.0 · 2026-09-07 · the spec §11 pre-Phase-0 gate
+Status: v1.0 · 2026-09-07 · the spec §11 pre-Phase-0 gate · **frozen**
+
+**This is a dated artifact, not a live document.** It records the fleet and
+the spec as they stood on 2026-09-07, which is what a gate is for. Phase 6
+superseded several of its mappings by making `git`, `download` and
+`defaults` typed actions (spec §6.8–§6.10, D4 as amended 2026-09-08), so
+where it maps one of those onto a `shell` step the spec is the current
+answer and this file is the record. The census in §1 stands.
 
 Every step in `~/dotfiles` walked against spec §3–§6. This is the artifact
 migration.md §4 says it is waiting on: "The Phase 0 gate (spec §11) will
