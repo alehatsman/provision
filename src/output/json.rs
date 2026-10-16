@@ -48,12 +48,12 @@ impl Sink for Json {
         });
         let m = o.as_object_mut().expect("built as an object");
         // Spec §9.3: `rc`, `stdout` and `stderr` are the step's own command's,
-        // present exactly when the step ran one, whatever its status, in full.
-        // That is the whole of what a CI runner reads per step, so it is not
-        // reserved for failures the way it used to be. A typed action ran no
-        // command and a skipped step ran none, so neither carries them, and a
-        // gate's result is never reported: it decides whether the step runs
-        // and is not the step's own result.
+        // and `stdout` is present exactly when the step ran one, whatever its
+        // status, in full. That is the whole of what a CI runner reads per
+        // step, so it is not reserved for failures the way it used to be. A
+        // typed action ran no command and a skipped step ran none, so neither
+        // carries them, and a gate's result is never reported: it decides
+        // whether the step runs and is not the step's own result.
         if let Some(rc) = ev.rc {
             m.insert("rc".into(), json!(rc));
             m.insert("stdout".into(), json!(ev.stdout));
@@ -62,19 +62,34 @@ impl Sink for Json {
         if let super::event::Status::Skipped(why) = &ev.status {
             m.insert("reason".into(), json!(why));
         }
-        // A failure's `rc` and `stderr` are written after the pair above, not
-        // instead of them: they are the same values for a command that
-        // exited, and for one provision killed they are `124` and whatever
-        // it had written, which is what the step's `register` reports too
-        // (D22). `timed_out` is the discriminator on both sides; `rc` alone
-        // cannot tell provision's kill from a command that exited `124` by
-        // itself. A step the clock ended before any command ran has no `rc`
-        // to give and says so with `null`, still flagged `timed_out`. A
-        // typed action's failure has only these.
+        // D30: a failure carries `rc` and `stderr` whatever it ran, because
+        // every failure has a reason and the reason is what a runner reads.
+        // They are written after the pair above, not instead of it: for a
+        // command that exited they are the same values, and for one
+        // provision killed they are `124` and whatever it had written, which
+        // is what the step's `register` reports too (D22). `timed_out` is the
+        // discriminator on both sides; `rc` alone cannot tell provision's
+        // kill from a command that exited `124` by itself. A failure that
+        // never reached a command — a typed action, a step the clock ended
+        // before it started, a program that could not be spawned, a stop from
+        // outside — has no `rc` to give and says so with `null`, while its
+        // `stderr` is the reason provision synthesized. `stdout` is the key
+        // that stays absent there: it is the one that only a command can
+        // fill.
         if let super::event::Status::Failed(f) = &ev.status {
             m.insert("message".into(), json!(f.msg));
-            m.insert("rc".into(), json!(f.rc));
-            m.insert("stderr".into(), json!(f.stderr));
+            // Only where no command ran. Where one did, the pair above is
+            // already its own `rc` and `stderr` — the same values the step's
+            // `register` holds (D22) — and writing the failure's over them
+            // made an interrupted step report `null` to the stream and its
+            // real code to `register`: one run, two exit codes for one step.
+            if ev.rc.is_none() {
+                // `null`, not the failure's own `rc`: a gate's code is the
+                // one thing in there that is not the step's (§9.3), and the
+                // terminal is where it belongs.
+                m.insert("rc".into(), json!(None::<i32>));
+                m.insert("stderr".into(), json!(f.stderr));
+            }
             if f.interrupted {
                 m.insert("interrupted".into(), json!(true));
             }

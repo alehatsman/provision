@@ -1,0 +1,26 @@
+---
+description: a job whose typed actions fail, for reading the failure's keys
+
+# D30: `stdout` is the key only a command can fill, so a failure that never
+# reached one carries `rc: null` and the reason in `stderr`. Every failure in
+# this file is of that kind -- a typed action that cannot do the work, and one
+# tripped by `failed_when` -- which is the shape check-stream.py used to red
+# and the shape no test stream had ever carried (#47).
+#
+# Bare steps on purpose: a component root, so `--strict` is off (D21).
+steps:
+  - name: A file is in the way
+    file:
+      path: in-the-way
+      content: "not a directory\n"
+
+  - name: A typed action that fails
+    file:
+      path: in-the-way
+      state: dir
+
+  - name: A typed action tripped by failed_when
+    file:
+      path: made-anyway
+      state: dir
+    failed_when: "true"

@@ -507,7 +507,11 @@ impl Runner {
             } => (
                 Status::Failed(Failure {
                     msg,
-                    rc: Some(1),
+                    // D30: no command ran, so there is no exit code to
+                    // report. The `1` this used to carry came off the
+                    // synthetic `Output` below, which exists for the
+                    // overrides and is not an exit code anybody should read.
+                    rc: None,
                     stderr: detail,
                     interrupted,
                     timed_out: false,
@@ -530,7 +534,9 @@ impl Runner {
             if judge.failed(&out)? {
                 status = Status::Failed(Failure {
                     msg: "failed_when".into(),
-                    rc: Some(0),
+                    // D30: `0` here was a failed step reporting that it
+                    // exited successfully. No command ran at all.
+                    rc: None,
                     stderr: String::new(),
                     interrupted: false,
                     timed_out: false,
@@ -598,6 +604,11 @@ impl Runner {
                     };
                     return Err(Stop::Fail(Failure {
                         msg,
+                        // The terminal names the gate's own code, which is
+                        // the fault the operator has to fix. §9.3 keeps it
+                        // out of the stream: a gate's result is never the
+                        // step's, so `--json` reports the step's `rc`, which
+                        // is `null` because no command of the step's ran.
                         rc: Some(out.rc),
                         stderr: out.stderr,
                         interrupted: false,

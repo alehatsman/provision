@@ -1606,13 +1606,30 @@ line.
 One JSON object per line on stdout, human output goes to stderr. `status` is
 one of `ok`, `changed`, `unknown`, `skipped`, `failed`, `would_change`,
 `would_run`, `would_run_unprobed`. `diff` is present only when there is one.
-`rc`, `stdout` and `stderr` are the step's own command's and are present
-exactly when the step ran one: `shell`, `cmd` and `assert`, whatever their
-status, in full, not truncated. A typed action ran no command and carries
-none; a skipped step ran none and carries none. A gate's (`unless`,
-`creates`) result is never reported: it decides whether the step runs, it
-is not the step's result (phase 5b; before it `rc` and `stderr` came only
-with a failure). A step provision killed — its own `timeout`, or
+`rc`, `stdout` and `stderr` are the step's own command's. `stdout` is
+present exactly when the step ran one — `shell`, `cmd` and `assert`,
+whatever their status, in full, not truncated — and `rc` and `stderr` ride
+with it. A typed action ran no command and a skipped step ran none, so
+neither carries any of the three. A gate's (`unless`, `creates`) result is
+never reported: it decides whether the step runs, it is not the step's
+result (phase 5b; before it `rc` and `stderr` came only with a failure).
+
+A `failed` step is the one case that carries `rc` and `stderr` without
+`stdout`, and it always carries both: every failure has a reason, and the
+reason is the thing a runner reads (D30). Where the step ran a command,
+all three are that command's. Where none ran — a typed action that could
+not do the work, a step whose `unless` could not run, one the clock ended
+before it started, a program that could not be spawned — `rc` is `null`
+and `stderr` is the reason provision synthesized, which for an action
+wrapping a tool is that tool's own stderr. `null` is the honest code
+there: no command of the step's ran, so a `0`, a `1` or a gate's `127`
+would be reporting one that did not, and a failed step claiming exit `0`
+is worse than no code at all. So `stdout` implies all three, and `rc` with
+`stderr` and no `stdout` means a failure that never reached a command. The
+terminal is free to name a gate's own exit code, and does; the stream is
+not, because a runner reading `rc` is reading the step's.
+
+A step provision killed — its own `timeout`, or
 `--deadline` — reports `rc: 124` and `timed_out: true`, the same two values
 its `register` holds (D22): one run cannot report two exit codes for one
 step, and `timed_out` is the discriminator on both sides. `interrupted:

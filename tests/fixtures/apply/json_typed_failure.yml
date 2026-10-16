@@ -1,0 +1,22 @@
+---
+# D30: a failure carries `rc` and `stderr` whatever it ran. This one never
+# reaches a command, so `rc` is null and `stderr` is the synthesized reason --
+# and `stdout`, the key only a command can fill, stays absent.
+description: a failing typed action's json stream
+
+steps:
+  - name: A file is in the way
+    file:
+      path: "{{ env.PROVISION_SCRATCH }}/in-the-way"
+      content: "not a directory\n"
+
+  - name: A typed action that fails
+    file:
+      path: "{{ env.PROVISION_SCRATCH }}/in-the-way"
+      state: dir
+
+  - name: A typed action tripped by failed_when
+    file:
+      path: "{{ env.PROVISION_SCRATCH }}/made"
+      state: dir
+    failed_when: "true"
