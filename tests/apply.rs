@@ -1754,6 +1754,13 @@ fn ctrl_c_kills_the_step_and_exits_130() {
     // the shell's convention for SIGINT is the exit code.
     assert_eq!(out.status.code(), Some(130), "{text}");
     assert!(text.contains("interrupted"), "{text}");
+    // D22's twin: the step was killed by a signal, so the terminal names the
+    // code the step's `register` and the `--json` stream already report
+    // rather than printing the kill with no code at all.
+    assert!(
+        text.contains("exit 130"),
+        "an interrupted step printed no exit code:\n{text}"
+    );
     assert!(
         text.contains("1 step"),
         "the summary is still printed:\n{text}"

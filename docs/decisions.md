@@ -847,6 +847,18 @@ register disagree about what happened. The step event now carries the same
 pair, `rc: 124` and `timed_out: true`. D19's runner gets the discriminator
 `register` already had; nothing about the register changed.
 
+**Amendment, 2026-10-17.** The 2026-10-15 amendment aligned the killed-by-the-
+clock arm and left the killed-by-a-signal one beside it on the old shape:
+`rc: None`, `stderr: ""`. The stream stopped disagreeing when D30 made the
+failure block defer to the event's own pair, but the terminal still read the
+failure's, so a Ctrl-C'd step printed `(interrupted)` with no code while the
+same step's `register` held `130`. A stop is a kill like the clock's and the
+same rule holds: the arm now carries `rc: Some(out.rc)` — `process::run`'s
+`128 + signal`, `130` for Ctrl-C and `143` for a TERM — and `interrupted` is
+the discriminator, exactly as `timed_out` is for `124`. Nothing about the
+register or the stream changed; the terminal now names the code the other two
+already reported.
+
 ## D23 — one person's tool, published
 
 **Decided by the owner 2026-10-12**, when the question "who is this for"
