@@ -169,6 +169,30 @@ jobs:
             --expect-deadline \
             --expect-unrun 'Must not run after the run is stopped'
 
+      # #47, D30: the one stream shape the checker had never been shown. A
+      # failing typed action carries `rc` and `stderr` with no `stdout`, and
+      # the old rule -- the three ride together or not at all -- would have
+      # redded it. `--keep-going` so both failures reach the stream.
+      - name: A failing typed action's stream is readable
+        run: |
+          set -u
+          work=$(mktemp -d)
+          job=$PWD/.github/typed-failure-job.yml
+          bin=$PWD/target/release/provision
+          out=$PWD/typed.jsonl
+          # The job writes relative paths, which resolve against the process's
+          # working directory (§4), so it runs from a scratch directory and
+          # the checkout stays clean.
+          set +e
+          (cd "$work" && "$bin" apply "$job" --json --keep-going) > "$out"
+          rc=$?
+          set -e
+          if [ "$rc" != 1 ]; then
+            echo "expected exit 1 from a failed job, got $rc" >&2
+            exit 1
+          fi
+          python3 .github/check-stream.py typed.jsonl --expect-steps 3
+
       - name: A component says what it takes
         run: |
           ./target/release/provision list tasks/

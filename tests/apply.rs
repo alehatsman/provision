@@ -817,6 +817,54 @@ fn json_carries_rc_and_output_for_every_step_that_ran_a_command() {
     assert_eq!(steps[3]["status"], "skipped");
 }
 
+// #47, D30. A failure carries `rc` and `stderr` whatever it ran, because the
+// reason is what a runner reads -- but `stdout` is the key only a command can
+// fill, so a typed action's failure has the two without the third. The values
+// it used to carry were invented: `rc: 1` off the synthetic `Output` the
+// overrides run on, and `rc: 0` for a `failed_when` trip, which is a failed
+// step reporting that it exited successfully. `.github/check-stream.py` reads
+// this same shape in the gate's contract job.
+#[test]
+fn json_reports_a_typed_failure_without_inventing_an_exit_code() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture("json_typed_failure.yml");
+    let out = run_in(
+        dir.path(),
+        &["apply", path.to_str().unwrap(), "--json", "--keep-going"],
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let steps: Vec<serde_json::Value> = stdout
+        .lines()
+        .map(|l| serde_json::from_str::<serde_json::Value>(l).expect(l))
+        .filter(|r| r["event"] == "step")
+        .collect();
+    assert_eq!(steps.len(), 3, "{stdout}");
+
+    for step in &steps[1..] {
+        assert_eq!(step["status"], "failed", "{stdout}");
+        // The reason reaches the runner...
+        assert!(step["message"].is_string(), "{stdout}");
+        assert!(step.get("stderr").is_some(), "{stdout}");
+        // ...with no exit code behind it, and never a fabricated one.
+        assert!(step.get("rc").is_some(), "{stdout}");
+        assert!(
+            step["rc"].is_null(),
+            "a typed failure invented an rc: {stdout}"
+        );
+        // The key only a command can fill stays absent.
+        assert!(step.get("stdout").is_none(), "{stdout}");
+    }
+
+    assert!(
+        steps[1]["message"]
+            .as_str()
+            .unwrap()
+            .contains("not a directory"),
+        "{stdout}"
+    );
+    assert_eq!(steps[2]["message"], "failed_when", "{stdout}");
+}
+
 // #45. The manifest counts what the run will attempt (`when` and tags
 // applied); the summary counts every step the walk reached. They are
 // different sets and the output used to call both "N steps", so one run
@@ -1625,6 +1673,53 @@ fn a_deadline_that_is_not_a_duration_is_a_usage_error() {
     let (code, out) = apply(dir.path(), "deadline.yml", &["--deadline", "soon"]);
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("is not a duration"), "{out}");
+}
+
+// D30, the other half of D22: an interrupted step that *did* run a command
+// has an exit code, and the stream used to report `null` for it while the
+// step's `register` held the real one — one run, two exit codes for one step.
+// The event is the source now, so `stdout` and a non-null `rc` arrive
+// together here just as they do for a step that exited on its own.
+#[test]
+fn an_interrupted_steps_json_rc_is_the_commands_own() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture("interrupt.yml");
+    let child = Command::new(env!("CARGO_BIN_EXE_provision"))
+        .args([
+            "apply",
+            path.to_str().expect("fixture paths are UTF-8"),
+            "--json",
+        ])
+        .env("PROVISION_SCRATCH", dir.path())
+        .env("NO_COLOR", "1")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the child's own output is the assertion"
+    )]
+    let _ = Command::new("kill")
+        .args(["-INT", &child.id().to_string()])
+        .status();
+    let out = child.wait_with_output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    let step = stdout
+        .lines()
+        .map(|l| serde_json::from_str::<serde_json::Value>(l).expect(l))
+        .find(|r| r["event"] == "step")
+        .expect("the interrupted step is reported");
+    assert_eq!(step["status"], "failed", "{stdout}");
+    assert_eq!(step["interrupted"], true, "{stdout}");
+    assert!(step.get("stdout").is_some(), "{stdout}");
+    assert!(
+        step["rc"].is_i64(),
+        "a step that ran a command reported no exit code: {stdout}"
+    );
 }
 
 #[test]

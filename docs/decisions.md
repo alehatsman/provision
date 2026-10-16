@@ -1287,3 +1287,65 @@ are the nearest candidate and accept it for file paths.
 
 **Triggered 2026-10-15**, issue #31, found by D24's Windows gate on its
 first run.
+
+## D30 — a failed step's `rc` and `stderr` are its reason, not only its command's
+
+**Decision.** In `--json`, `stdout` is present exactly when the step ran a
+command, and `rc` and `stderr` ride with it. A `failed` step carries `rc`
+and `stderr` whatever it ran: where a command ran they are its own, and
+where none ran `rc` is `null` and `stderr` is the reason provision
+synthesized. So `stdout` implies all three; `rc` and `stderr` without
+`stdout` is a failure that never reached a command. No step invents an exit
+code it does not have.
+
+**Why.** Phase 5b made `rc`/`stdout`/`stderr` the step's command's rather
+than a failure's privilege, and the gate's own checker reads that as "the
+three ride together or not at all". But the failure block had always
+written `rc` and `stderr` for every failure, because a failure that ran no
+command still has a reason and dropping it drops the only text that says
+what went wrong — for `git` and `pkg`, the tool's own stderr. The two rules
+had been in the same code since 5b: every typed-action failure, every
+interrupt, every unspawnable program and every step the clock ended before
+it started emitted `rc` and `stderr` with no `stdout`, which the checker
+would red. §9.3 itself already blessed one of them (`rc: null` with
+`timed_out`), so the spec contradicted the checker before typed actions
+entered it.
+
+Widening is the side that loses nothing. Narrowing to the command — the
+checker's reading — is a smaller patch and takes the reason off the wire;
+a CI runner reading only the stream would see `"status":"failed"` with no
+text at all.
+
+The lying values go with it. A typed action's failure reported `rc: 1` and
+a typed `failed_when` reported `rc: 0` — a failed step claiming it exited
+successfully — both read off the synthetic `Output` that exists so
+`changed_when`, `failed_when` and `register` mean the same thing on every
+step (D16). That substrate is not an exit code, and `--json` now says so
+with `null`.
+
+`rc` now comes from the step's event on every path, which is the same
+place `register` reads, so the two cannot disagree. They used to: an
+interrupted step reported its command's real code to `register` and `null`
+to the stream, because the failure's `rc` was written over the event's.
+That is D22's defect on the other signal, and the fix is D22's answer —
+one run reports one exit code for one step.
+
+**What this does not overturn.** D22: a step provision killed still reports
+`rc: 124` with `timed_out: true`, because a command did run. §9.3's rule
+that a gate's result is never the step's: an `unless` that could not run
+still fails the step, the terminal still names the gate's `126` or `127` —
+that is the fault the operator has to fix — and the stream still reports
+`rc: null`, because no command of the step's ran. D19's no-list and the
+shape of the stream are untouched — this is a rule about which keys a
+failure carries, not a new key.
+
+**The cost, stated plainly.** A consumer that read `rc` on a failed typed
+step now gets `null` where it used to get `1`, and one that treats any
+`rc` as an exit code has to read `null` as "no command ran". Both were
+already true for an interrupted step; it is now one rule instead of an
+accident.
+
+**Overturned by.** A consumer that needs an exit code on every failure more
+than it needs the code to be true.
+
+**Triggered 2026-10-16**, issue #47, found in the 0.9.2 review.

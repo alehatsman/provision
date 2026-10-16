@@ -143,10 +143,28 @@ def main():
         if last_index is not None and ev["index"] <= last_index:
             fail(f"step indexes are not increasing: {last_index} then {ev['index']}")
         last_index = ev["index"]
-        # rc/stdout/stderr ride together or not at all.
-        present = {k for k in ("rc", "stdout", "stderr") if k in ev}
-        if present and present != {"rc", "stdout", "stderr"}:
-            fail(f"step {ev['name']!r} carries {sorted(present)} but not all three")
+        # D30: `stdout` is the key only a command can fill, so it implies the
+        # other two. The reverse does not hold — a failure that never reached
+        # a command carries `rc: null` and the reason in `stderr`.
+        if "stdout" in ev:
+            missing_io = {"rc", "stderr"} - ev.keys()
+            if missing_io:
+                fail(f"step {ev['name']!r} carries stdout but not {sorted(missing_io)}")
+        elif "rc" in ev or "stderr" in ev:
+            if ev["status"] != "failed":
+                fail(
+                    f"step {ev['name']!r} is {ev['status']} and carries rc/stderr "
+                    "without stdout; only a failure may"
+                )
+            if ev.get("rc") is not None:
+                fail(
+                    f"step {ev['name']!r} ran no command but reports rc "
+                    f"{ev['rc']!r}; it should be null"
+                )
+        if ev["status"] == "failed":
+            missing_io = {"rc", "stderr", "message"} - ev.keys()
+            if missing_io:
+                fail(f"failed step {ev['name']!r} is missing {sorted(missing_io)}")
 
     if args.expect_unrun:
         ran = [e["name"] for e in steps if e["name"] == args.expect_unrun]
