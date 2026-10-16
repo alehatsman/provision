@@ -113,10 +113,19 @@ impl Text {
         // — two pieces of work reported as one (§9.1).
         let previous = self.current.take().unwrap_or_default();
         let dim = Style::new().dimmed();
+        // The latch: once a level differs from the last step's path, every
+        // level under it is new too, whatever its label says. Two components
+        // that each `use` the same file unnamed produce the same label at
+        // the same index — `lib/common.yml` under `A` and again under `B` —
+        // and comparing index by index swallowed the second, so the step
+        // read as if it came straight from `B`. That is the under-reporting
+        // of nesting §9.1's "one header per call site" rules out.
+        let mut diverged = false;
         for (i, label) in ev.via.iter().enumerate() {
-            if previous.0.get(i) == Some(label) {
+            if !diverged && previous.0.get(i) == Some(label) {
                 continue;
             }
+            diverged = true;
             self.write(format_args!("  {}{dim}{label}{dim:#}\n", indent(i)));
         }
         // At depth 0 there is no call site, so the file is the header — and

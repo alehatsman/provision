@@ -1651,6 +1651,47 @@ fn an_unnamed_call_site_falls_back_to_its_file() {
     assert!(text.contains("lib.yml"), "{text}");
 }
 
+// #50: a deeper level of the call path was swallowed once a shallower one had
+// diverged. The header loop compared index by index with no "already
+// diverged" latch, and an unnamed `use` falls back to the file it names — so
+// `A` and `B` each using `lib/common.yml` produce the same label at index 1,
+// and the second one was skipped as unchanged. The step then read as if it
+// came straight from `B`, which is the under-reporting of nesting §9.1's "one
+// header per call site" rules out.
+#[test]
+fn a_repeated_label_under_a_new_parent_still_gets_its_header() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("lib")).unwrap();
+    std::fs::write(
+        dir.path().join("lib/common.yml"),
+        "description: common\nsteps:\n  - name: inner\n    shell: \"true\"\n    changed_when: \"false\"\n",
+    )
+    .unwrap();
+    // Both call the same component, both without a `name:`, so both produce
+    // the label `lib/common.yml` at index 1.
+    for f in ["a.yml", "b.yml"] {
+        std::fs::write(
+            dir.path().join(f),
+            "description: mid\nsteps:\n  - use: ./lib/common.yml\n",
+        )
+        .unwrap();
+    }
+    let root = dir.path().join("root.yml");
+    std::fs::write(
+        &root,
+        "description: root\nsteps:\n  - name: A\n    use: ./a.yml\n  - name: B\n    use: ./b.yml\n",
+    )
+    .unwrap();
+
+    let (code, text) = plan(&[&root.display().to_string()]);
+    assert_eq!(code, 0, "{text}");
+    let headers = text.matches("common.yml").count();
+    assert_eq!(
+        headers, 2,
+        "the second invocation of the component lost its header:\n{text}"
+    );
+}
+
 // #38, the templating vocabulary. minijinja has no API for enumerating what
 // it knows, so the note names what *provision* adds — the ones a reader
 // cannot look up anywhere — and says plainly that the rest are minijinja's.
