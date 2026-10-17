@@ -3600,6 +3600,7 @@ exit 0
             path.to_str().expect("temp paths are UTF-8"),
             "--deadline",
             "3s",
+            "--json",
         ])
         .env(
             "PATH",
@@ -3617,9 +3618,28 @@ exit 0
         String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
 
     assert_eq!(out.status.code(), Some(124), "{text}");
+    // The step's own `duration_ms`, not wall clock. The gap is two seconds
+    // wide by construction -- reclamped the step ends near 3s, given the
+    // budget twice it ends near 5s -- but a wall-clock reading of it also
+    // carries process startup and this binary's own build-and-launch, which
+    // on a loaded machine ate most of the margin and failed the test for
+    // reasons that had nothing to do with the clamp. provision measures the
+    // step itself, so the noise is not in the number.
+    let step_ms = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .find(|r| r["event"] == "step")
+        .and_then(|r| r["duration_ms"].as_u64())
+        .expect("the step reported a duration");
     assert!(
-        elapsed < std::time::Duration::from_millis(4000),
-        "the second command was given the budget the first had already spent: {elapsed:?}\n{text}"
+        step_ms < 4000,
+        "the second command was given the budget the first had already spent: {step_ms}ms\n{text}"
+    );
+    // The outer bound, loose on purpose: it catches a run that hung without
+    // competing with the assertion above for the same margin.
+    assert!(
+        elapsed < std::time::Duration::from_secs(15),
+        "the run did not end: {elapsed:?}\n{text}"
     );
 }
 
