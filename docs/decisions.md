@@ -1434,3 +1434,101 @@ accident.
 than it needs the code to be true.
 
 **Triggered 2026-10-16**, issue #47, found in the 0.9.2 review.
+
+## D31 — a file can have two owners, and `json` is how the plan says which half is its
+
+**Decision.** An eleventh action, `json`, whose declared state is
+*containment*: merging the declared value into the file on disk changes
+nothing. One merge rule — a declared leaf wins, an undeclared key is left
+alone, and everything that is not a mapping is a leaf, arrays included. The
+verdict is on parsed values, never on bytes. JSON only. No removal. Keys
+are written sorted, which costs a one-time reshuffle of the target and saves
+an order-preserving map dependency. Spec §6.11.
+
+**Why.** `file` and `template` assert equality, and equality is the wrong
+predicate for a file an application also writes. `~/.claude/settings.json`
+is both deployed by `components/claude` and rewritten by `/model`,
+`/config` and the effort picker; four keys on this machine were live and
+absent from the declared copy, so every `apply` discarded them (#54). Every
+workaround fails for one reason — they all try to express partial ownership
+in a language that has only total ownership. Folding the application's keys
+into the declared copy pins `model:` as declared state and converts a
+one-time loss into a recurring one. Dropping the declaration loses the
+component. `shell` with `jq` is declarative in nothing but the name and
+shows nothing in `plan`.
+
+**The two questions #54 left open, and their answers.**
+
+*What does "declared" mean when convergence depends on current disk
+contents?* It means a predicate rather than an equality, which this tool
+already allows: D28 made `pkg`'s `version` a floor — "installed, and at
+least 24" — precisely because equality and unboundedness were both wrong.
+"Contains these keys" is the same kind of statement, and `defaults` (§6.10)
+has been managing one key in a store the application also owns since phase
+6.
+
+*Is idempotency still checkable?* Yes, and not weakly. A merge is a
+fixpoint — merging the same declaration into an already-merged document
+changes nothing, because every leaf it would write is the leaf already
+there — so the first apply is `changed` and every apply after it is `ok`.
+What is given up is identical bytes across machines, which is the intent
+and not a cost.
+
+**Why the two other shapes in #54 lose.**
+
+- A `preserve:` list — naming what to read back off the machine before
+  writing — is a denylist against an unbounded set. It requires enumerating
+  what the *application* owns, and the application adds a key next release
+  and the key is lost in silence. A plan declares what it owns and is silent
+  about the rest; the inverse cannot be kept correct by anyone.
+- `file` growing a `keys:` list makes one action's verdict conditional on a
+  format parser it otherwise does not have, and turns its one-line meaning
+  into two. A `src` whose keys are deliberately ignored is also a trap for
+  the next reader. Separate meaning, separate verb.
+
+**Why an array is a leaf.** A union can add an element and never remove
+one, so a declared list becomes unprunable and the one thing it can no
+longer say is "these and no others". Replacing whole keeps the declaration
+meaningful and costs nothing that cannot be bought back by declaring at a
+deeper key: ownership granularity is the key path, chosen by where the
+declaration stops, and written rather than inferred.
+
+**Why JSON only.** A merge rewrites the file. Rewriting YAML or TOML
+discards comments and layout, which is most of what a hand-maintained file
+of either kind is — so the action would be at its most dangerous on exactly
+the files people would reach for it with. JSON has no comments to lose.
+This costs `.gitconfig`, named in #54: it is INI with sections and
+duplicate keys, and `git config --global` is already its keyed idempotent
+writer.
+
+**The admission test, stated honestly.** D4 admits an action on state
+inspection the shell does badly, with a fleet count behind it, and the
+count here is **one** — `~/.claude/settings.json`. The two other structured
+targets in the fleet have a single writer (`com.dotfiles.capslock-ctrl.plist`)
+or are INI (`gtk-3.0/settings.ini`). What admits it is plan.md's own
+agent-host row, which set the condition as *"reopens only if such a config
+needs state inspection to be idempotent that a `creates`/`unless` gate
+cannot express, which is D4's actual admission test and not 'this category
+feels important'"*. No gate can express this one: the question is not
+whether a file exists but whether a subtree of it matches, and the answer
+changes every time the application writes. The row contemplated an
+agent-host action; a general `json` is the better answer to the same
+condition, and is not a family that grows per application.
+
+**What this costs, stated plainly.**
+
+- A second file-writing action, so "which action writes files" has two
+  answers. The boundary is one sentence — `file` for a file the plan owns
+  whole, `json` for one it shares — but it is a boundary a reader has to
+  learn.
+- A declaration that cannot say "not this". Day-1 keys are undeclarable, as
+  with `defaults`.
+- A fleet count of one. If the second and third cases never arrive, this is
+  an action carrying one step.
+
+**Overturned by.** A second format needing the same treatment where a
+rewrite is safe, which would make `json` the wrong name; or the fleet count
+staying at one through another release, which would make it the wrong
+action.
+
+**Triggered 2026-10-17**, issue #54.

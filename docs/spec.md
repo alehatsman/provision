@@ -17,8 +17,9 @@ and a dry-run a person can trust.
 
 - Parse and validate a plan. Render templates. Evaluate conditions.
 - Execute steps sequentially on the local machine. Stop at the first failure.
-- Ten actions: `shell`, `cmd`, `file`, `template`, `pkg`, `service`, `assert`,
-  `git`, `download`, `defaults` (the last three from phase 6, D4 as amended).
+- Eleven actions: `shell`, `cmd`, `file`, `template`, `pkg`, `service`,
+  `assert`, `git`, `download`, `defaults` (the last three from phase 6, D4 as
+  amended), `json` (phase 7, D31).
 - Four structural keywords: `vars`, `vars_file`, `import`, `use`.
 - Step modifiers: `name`, `when`, `unless`, `creates`, `sudo`, `timeout`,
   `retry`, `env`, `cwd`, `tags`, `register`, `changed_when`, `failed_when`.
@@ -74,8 +75,9 @@ Rules:
   `creates`, `cwd`, `vars_file`, `import`, `use`). It does **not** expand
   inside shell scripts; the shell does that.
 - **Whose home `~` is depends on which machine the path names.** A path
-  naming a location on the machine being converged — `file`'s `path` and its
-  link target, `template`/`git`/`download`'s `dest`, a step's `cwd` — and the
+  naming a location on the machine being converged — `file`'s and `json`'s
+  `path` and `file`'s link target, `template`/`git`/`download`'s `dest`, a
+  step's `cwd` — and the
   `expanduser` filter expand against the scope's **`home`**. A path provision
   reads out of the plan tree — `src`, `import`, `use`, `vars_file` — expands
   against the **process's** home, because those files live beside the plan on
@@ -153,7 +155,8 @@ header always showed.
 
   A string is allowed to hold `{{` — that is the point of the rule — but a
   **path provision reads itself is not**. That set is `file.path`,
-  `template.dest`, `download.dest`, `git.dest`, `cwd` and `creates`: the
+  `json.path`, `template.dest`, `download.dest`, `git.dest`, `cwd` and
+  `creates`: the
   paths §3 calls a location on the target, plus the one provision stats.
   Two things are an error in one of them, before anything runs:
 
@@ -473,6 +476,7 @@ the boundary is not obvious from the actions that do have it:
 | `pkg` | `state: absent` |
 | `service` | `state: stopped`, `enabled: false` |
 | `defaults` | **none** — a preference set on day 1 cannot be un-declared |
+| `json` | **none** — a key written on day 1 cannot be un-declared (§6.11) |
 | `git`, `download` | **none** — remove the checkout or the file with `file: {state: absent}` |
 
 `break-glass.md` §3c names the first two as the way to write an undo, which
@@ -1190,6 +1194,120 @@ defaults:
 - `sudo` is not implied and is wrong here: a root write lands in root's
   preferences.
 
+### 6.11 `json`
+
+Ensure a JSON file **contains** what the plan declares, leaving every other
+key as it is. Phase 7, D31.
+
+```yaml
+json:
+  path: ~/.claude/settings.json
+  content:                      # mutually exclusive with src
+    permissions:
+      deny: ["Bash(rm -rf:*)"]
+  src: ./files/claude.json      # a .json file beside the plan
+  mode: "0644"
+```
+
+**Why this is not `file`.** `file` and `template` assert that a file *is*
+something, and that is the wrong assertion for a file an application also
+writes. `~/.claude/settings.json` is the case that forced it: `/model`,
+`/config` and the effort picker write back into the file a component
+deploys, so every `apply` resolved the drift by discarding whichever half
+the application owned. The two expressible answers were both wrong —
+declare the whole file and lose the application's keys on every run, or
+declare none of it and lose the component. Neither says the thing that is
+true: *these keys are mine, the rest are not* (#54).
+
+**State is "merging the declared value into the file on disk changes
+nothing."** That is a containment and not an equality, and a declared state
+is allowed to be one: `pkg`'s `version` is a floor and not a pin for the
+same reason (D28).
+
+**One merge rule: a declared leaf wins, an undeclared key is left alone.**
+Mappings are merged key by key, recursively. Everything that is not a
+mapping — string, number, bool, null, **and array** — is a leaf and is
+replaced whole.
+
+An array is a leaf deliberately. The alternative, a union, can add an
+element and never remove one, which makes a declared list unprunable: the
+one thing it could no longer say is "these and no others". So the
+granularity of ownership is the key path, and it is chosen by where the
+declaration stops. Declare `permissions.deny` and that whole list is the
+plan's. Declare `permissions` and both lists are. Declare neither and the
+application keeps them. Nothing about ownership is inferred; it is written.
+
+**Idempotency, which is the question this action had to answer.** A merge
+is a fixpoint: merging the same declaration into an already-merged document
+changes nothing, because every leaf it would write is the leaf already
+there. The second apply is `ok` and so is every apply after it — §2 in
+full, not a weakened form of it. What a `json` step gives up is not
+idempotency but *identical bytes across machines*: two machines whose
+applications wrote different things end with different files. That is the
+intent, and it is the whole difference between this action and `file`.
+
+**The verdict is on parsed values, never on bytes.** Equal values are `ok`
+and nothing is written, so a file indented differently from what this action
+emits is left alone forever rather than rewritten on every run. A write
+happens only when a leaf actually differs.
+
+**The four outcomes.**
+
+- Target **missing**: `changed`. The file is created holding exactly the
+  declared value, and the directories leading to it are created the way
+  §6.3 creates them.
+- Target present, **merge changes nothing**: `ok`. Nothing is written.
+- Target present, **merge differs**: `changed`, and the merged document is
+  written.
+- Target present and **not parseable as JSON**: the step **fails**, naming
+  the path and the line and column the parse stopped at, and the file is
+  never overwritten. A file this action cannot read holds state provision
+  did not put there, and not destroying that state is the reason the action
+  exists. A document that parses but whose top level is not an object fails
+  the same way: there are no keys to merge into an array or a number, and
+  saying so is better than replacing it.
+
+**Writing.** Two-space indent, one trailing newline, and **keys in sorted
+order** at every depth. Sorted rather than as-found: keeping a file's own
+order means an order-preserving map all the way through the parser, which
+is a dependency, and the thing it buys is a nicer one-time diff of a file
+nothing reads by line. So the first write reshuffles the target once and
+every write after it is stable. A target that already
+exists keeps the mode it has; `mode` sets one and is compared like §6.3's,
+unix-only and accepted-and-ignored elsewhere for the same reason. `sudo:
+true` reads and writes as root, exactly as §6.3 describes — including the
+rule that a target it cannot read fails the step naming `sudo: true`, and is
+`would run (unprobed)` under `plan` with no reachable root.
+
+- Exactly one of `content` or `src`. Neither is a validation error, and both
+  together is one positioned at the second — `file`'s rule (§6.3), because
+  it is the same choice.
+- `content` is written as YAML in the plan and read as data: a mapping, with
+  strings, numbers, bools, nulls and sequences nested under it. Every string
+  in it is templated; the shape is not. A `content` that is not a mapping is
+  a validation error, for the reason a non-object target is a failure.
+- `src` names a `.json` file beside the plan and must parse as an object.
+  Its existence is checked before anything runs, with D18's two exceptions —
+  a `src` after a `shell` or `cmd` step, and a `src` at or under a path an
+  earlier step declared it would write (§8).
+- **JSON only, and on purpose.** A merge rewrites the file, and rewriting
+  YAML or TOML discards comments and layout, which is most of what a
+  hand-maintained file of either kind is. JSON has no comments to lose, so
+  it is the one format where this operation is safe. `.gitconfig` is out of
+  scope for the same reason, and has `git config --global`, which is already
+  a keyed idempotent writer.
+- **No removal.** A key written on day 1 cannot be un-declared (§6 table) —
+  the same gap `defaults` has, and for a sharper reason: the declaration
+  names what it owns and is silent about everything else, so there is no
+  form in which it could say "and not this".
+- Plan: reads only, and reports one line per changed leaf —
+  `model: "sonnet" → "opus"`, `permissions.deny: absent → ["Bash(rm -rf:*)"]`
+  — with the key path written in dots. Not a unified diff: the comparison is
+  on values, and a text diff would show reformatting this action does not
+  perform. `--no-diff` suppresses it. The reordering of a first write is not
+  reported either, for the same reason: it is not a change in what the file
+  says.
+
 ## 7. Privilege escalation
 
 - `sudo: true` runs the action through `sudo -n` (non-interactive). If sudo
@@ -1256,10 +1374,10 @@ gates, so it has a wall clock worth bounding too. There is no
   (D21): a convergence plan's own CI runs plain `validate` and already has
   it.
 
-  Two exceptions, and only two: a `file` step's `src` after a `shell` or `cmd`
-  step in the same walk, and a `file` step's `src` **at or under a path an
-  earlier step declared it would write** — a `git`, `download` or `template`
-  step's `dest`, or another `file` step's `path`. Nothing has run, so in both
+  Two exceptions, and only two: a `file` or `json` step's `src` after a
+  `shell` or `cmd` step in the same walk, and such a `src` **at or under a
+  path an earlier step declared it would write** — a `git`, `download` or
+  `template` step's `dest`, or a `file` or `json` step's `path`. Nothing has run, so in both
   cases a source that is not there yet is unresolved rather than missing, and
   the check moves to the walk that executes (§6.3, D18). The difference
   between them is only how the walk knows: a command declares nothing, so it
@@ -1795,6 +1913,9 @@ and nothing else.
 | `--deadline` shorter than a step's own `timeout` | The deadline wins; that is the clamp. The reverse — a step whose `timeout` expires first — is an ordinary step timeout and reads as one |
 | `--deadline` and a step that already failed | Exit 124 only if the clock is why the run ended. A failure with `--keep-going` off stopped the walk first, so that run is exit 1 and the clock never ran out |
 | Windows path in `dest` | Accepted; `~` expands to `%USERPROFILE%` |
+| `json` target exists and does not parse as JSON | Step failure naming the path, line and column. The file is **not** written. An unreadable target holds state provision did not put there, and a merge that cannot read it cannot preserve it (§6.11) |
+| `json` target parses but its top level is an array or a scalar | Step failure. There are no keys to merge into one, and replacing it would be the data loss the action exists to prevent |
+| A `json` key that itself contains a `.` | The plan line reads `a.b: … → …` whether that is one key or two. The dotted path is display only — nothing parses it back, and no field takes one — so the ambiguity costs a reader a glance and never a wrong write |
 | Two `vars_file` set the same key | Later wins. `--explain-var k` would show the chain — **spec'd, not built**: nothing in the fleet has needed it, and the owner ruled 2026-09-08 to leave it written down rather than build it or cut it |
 | `timeout` and `retry` on one step | The timeout applies per attempt, not to the step |
 | `retry` and `register` on one step | The register holds the last attempt, and its `rc` is that attempt's |

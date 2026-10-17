@@ -5250,3 +5250,43 @@ fn the_manifest_is_an_event_before_any_step_event() {
     assert_eq!(first["files"], 1);
     assert_eq!(first["sudo"], 0);
 }
+
+/// §6.11: a target that already exists keeps the mode it has, and `mode`
+/// sets one and is compared like §6.3's. The mode half of a `json` step is
+/// `file`'s implementation and not a second one, so what this pins is the
+/// delegation: a mode-only difference is `changed` with a metadata delta and
+/// not a value diff, and a converged step is `ok` on both halves.
+#[test]
+fn a_json_step_converges_on_the_mode_as_well_as_the_keys() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("settings.json");
+    std::fs::write(&target, "{\n  \"a\": 1\n}\n").unwrap();
+    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+    let plan = dir.path().join("p.yml");
+    std::fs::write(
+        &plan,
+        format!(
+            "description: a mode\nsteps:\n  - name: settings\n    json:\n      path: {}\n      content:\n        a: 1\n      mode: \"0644\"\n",
+            target.display()
+        ),
+    )
+    .unwrap();
+
+    let out = run_in(dir.path(), &["apply", plan.to_str().unwrap()]);
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert_eq!(out.status.code(), Some(0), "{text}");
+    assert_eq!(verdict(&text, "settings"), "changed", "{text}");
+    // The values already agreed, so what changed is the mode — and the line
+    // says so rather than showing a leaf that did not move.
+    assert!(text.contains("mode 0600 → 0644"), "{text}");
+    assert_eq!(
+        std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+        0o644
+    );
+
+    let out = run_in(dir.path(), &["apply", plan.to_str().unwrap()]);
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert_eq!(verdict(&text, "settings"), "ok", "{text}");
+}

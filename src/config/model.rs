@@ -13,6 +13,7 @@ use std::time::Duration;
 
 pub(crate) const ACTION_KEYS: &[&str] = &[
     "shell", "cmd", "file", "template", "pkg", "service", "assert", "git", "defaults", "download",
+    "json",
 ];
 pub(crate) const STRUCTURAL_KEYS: &[&str] = &["vars", "vars_file", "import", "use"];
 /// What one step modifier is, for `provision list --json` (D25).
@@ -217,6 +218,27 @@ static ACTIONS: &[(&str, ActionDoc)] = &[
                     "optional",
                     "replace a file with a link, or remove a non-empty directory",
                 ),
+            ],
+            shape: None,
+        },
+    ),
+    (
+        "json",
+        ActionDoc {
+            summary: "Ensure a JSON file contains the declared keys, leaving every other key alone.",
+            fields: &[
+                f("path", "required", "the JSON file to merge into"),
+                f(
+                    "content",
+                    "one of content/src",
+                    "the keys this plan owns, as a mapping",
+                ),
+                f(
+                    "src",
+                    "one of content/src",
+                    "a .json file holding those keys",
+                ),
+                f("mode", "optional", "octal, quoted: \"0644\""),
             ],
             shape: None,
         },

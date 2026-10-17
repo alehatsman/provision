@@ -253,6 +253,50 @@ impl<'a> N<'a> {
             _ => return Err(self.err("unsupported YAML node")),
         })
     }
+
+    /// Convert to JSON, preserving YAML types. The sibling of `to_value`, and
+    /// here for the same reason: this module is the one that can see a
+    /// scalar's type, and a caller working from the public API would have to
+    /// guess an integer from its text.
+    ///
+    /// Strings are taken exactly as written. Templating them is the caller's
+    /// job (spec §6.11), because the engine and the scope live a layer up.
+    #[expect(
+        clippy::wrong_self_convention,
+        reason = "N is Copy; taking &self reads better here, and matches to_value directly above"
+    )]
+    pub(crate) fn to_json(&self) -> Result<serde_json::Value> {
+        use serde_json::Value as J;
+        Ok(match &self.node.data {
+            YamlData::Value(Scalar::String(s)) => J::String(s.to_string()),
+            YamlData::Value(Scalar::Integer(i)) => J::from(*i),
+            YamlData::Value(Scalar::FloatingPoint(f)) => {
+                // A NaN or an infinity has no JSON spelling, and
+                // `serde_json::Number` says so by refusing to hold one.
+                // Writing `null` instead would be a silent substitution in a
+                // file the plan claims to declare.
+                let f = f.into_inner();
+                match serde_json::Number::from_f64(f) {
+                    Some(n) => J::Number(n),
+                    None => return Err(self.err(format!("{f} has no JSON representation"))),
+                }
+            }
+            YamlData::Value(Scalar::Boolean(b)) => J::Bool(*b),
+            YamlData::Value(Scalar::Null) => J::Null,
+            YamlData::Sequence(_) => {
+                let items: Result<Vec<_>> = self.as_seq()?.iter().map(N::to_json).collect();
+                J::Array(items?)
+            }
+            YamlData::Mapping(_) => {
+                let mut m = serde_json::Map::new();
+                for (k, v) in self.as_map()? {
+                    m.insert(k.as_scalar_string()?, v.to_json()?);
+                }
+                J::Object(m)
+            }
+            _ => return Err(self.err("unsupported YAML node")),
+        })
+    }
 }
 
 /// Edit distance of 1-2, for "did you mean". Cheap and good enough for typos

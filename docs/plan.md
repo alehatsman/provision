@@ -88,7 +88,7 @@ could not have shown, and the Windows job found a unit test asserting a Unix
 path literal (#28) — a test that had never run on Windows in the project's
 life.
 
-Rust, one crate, one binary, all ten actions, three platforms. **There is no
+Rust, one crate, one binary, all eleven actions, three platforms. **There is no
 line budget.** There was one — 6–9k lines in `src/`, stop and cut at 12k —
 and it was dropped 2026-10-12, because it measured the wrong thing. A line
 count cannot tell a `pkg` backend rule moving to the host where it is true
@@ -661,5 +661,8 @@ is small enough that merge cost exceeds the gain.
 | Parallel steps | a real gate's wall time is dominated by independent steps **and** splitting it into two `provision apply` invocations runner-side is measured worse. Sequential execution is a semantic guarantee — `register` chaining rests on it (D19) |
 | `use` deduplication | never as stated; running a component twice is a performance question, not a correctness one, and the fix is a graph, and a graph is `needs:` (D19) |
 | Secret masking | a real secret reaches a real log through provision **and** the runner could not have caught it at the log-write boundary. A promise to redact that a step can defeat by base64-ing a token is worse than no promise (D19) |
-| Agent-host typed actions (`mcp:`, model/agent config, key delivery) | never as stated — an agent host is a set of files, and `file`/`template`/`git`/`download` already own files. Reopens only if such a config needs **state inspection to be idempotent** that a `creates`/`unless` gate cannot express, which is D4's actual admission test and not "this category feels important" (D25) |
+| ~~Agent-host typed actions (`mcp:`, model/agent config, key delivery)~~ | **Closed 2026-10-17, superseded by D31.** The condition tripped and the row's own test is what tripped it: `~/.claude/settings.json` is written by both `components/claude` and the application, so staying idempotent needs state inspection no `creates`/`unless` gate can express — the question is not whether a file exists but whether a subtree of it matches, and the answer changes every time `/model` runs (#54). What shipped is not the agent-host action this row contemplated: an agent host is still a set of files, and a per-application action would be a family that grows forever. `json` (spec §6.11) is the general form — a file with two owners, and a declaration that names the half the plan owns |
+| `json` key removal ("this key is absent") | a real plan needs to un-declare a key it wrote, twice. D31 ships with the same gap `defaults` has, and for a sharper reason: a declaration that names what it owns has no form in which to say "and not this" |
+| `json` array union (append-if-missing) | a declared list must survive the application appending to it **and** declaring at a deeper key is not the answer. D31 made an array a leaf because a union can add and never remove |
+| `json` for YAML or TOML | a target in either needs merging **and** its comments and layout can be shown to be unimportant. A rewrite discards both, which makes the action most dangerous on exactly the files it would be reached for |
 | A merged-scope dump (`--show-vars` and friends) | never as stated — the scope holds `{{ env.TOKEN }}` in clear, and D19 already declined to promise masking because a promise a step can defeat by base64-ing a token is worse than no promise. A dump is that same undefendable promise wearing a debugging hat. If the gap has to close it closes on a *named* variable, not a dump (D25) |
