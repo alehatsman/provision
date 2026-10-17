@@ -456,6 +456,22 @@ fn mode_of(_m: &std::fs::Metadata) -> u32 {
     0
 }
 
+/// Whether this platform has file modes at all.
+///
+/// Off unix `mode_of` reads `0` for every target and `set_mode` writes
+/// nothing, so a declared `mode` differs from what is read, applying it
+/// changes nothing, and the delta is reported again on the next apply. A
+/// `file` step with `mode:` was `changed` forever on Windows — including
+/// `tasks/install.yml`, the step the README tells a Windows user to run —
+/// which breaks §2's idempotency for the whole class (#57).
+///
+/// Accepted and ignored rather than refused: `mode: "0755"` is right on
+/// every machine that has modes, and a plan that is correct on three
+/// platforms should not need a `when:` to stay correct on the fourth.
+/// `set_mode` has always silently done nothing here; this is the report
+/// agreeing with it instead of claiming a change that never happened.
+const MODE_APPLIES: bool = cfg!(unix);
+
 fn kind_of(m: &std::fs::Metadata) -> Kind {
     let t = m.file_type();
     if t.is_symlink() {
@@ -627,7 +643,7 @@ impl Spec {
     /// group are left to compare.
     fn metadata_only(&self, ctx: &Ctx<'_>, meta: &Meta, act: bool) -> Effect {
         let mut deltas = Vec::new();
-        if let Some(m) = self.mode.filter(|m| *m != meta.mode) {
+        if MODE_APPLIES && let Some(m) = self.mode.filter(|m| *m != meta.mode) {
             deltas.push(format!("mode {:04o} → {m:04o}", meta.mode));
         }
         if let Some(o) = self.owner.as_deref().filter(|o| *o != meta.owner) {
@@ -640,7 +656,8 @@ impl Spec {
             return Effect::Ok;
         }
         if act {
-            if let Some(m) = self.mode
+            if MODE_APPLIES
+                && let Some(m) = self.mode
                 && let Err(e) = self.chmod(ctx, m)
             {
                 return failed(e);

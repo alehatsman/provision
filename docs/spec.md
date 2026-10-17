@@ -656,6 +656,17 @@ target is already gone.
 `mode` gets `0644` and a new directory `0755`. A target that already exists
 keeps the mode it has unless `mode` says otherwise.
 
+**`mode` is unix-only, and is accepted and ignored elsewhere.** Windows has
+no file mode to read or write, so a `mode` there is not compared and not
+reported: the step converges on content, type and the rest. Refusing it
+instead would mean a plan correct on three platforms needed a `when:` to
+stay correct on the fourth, and `mode: "0755"` is the right thing to write
+on every machine that has modes. It used to be compared against a mode read
+as `0000` and applied by a function that does nothing, so a `file` step with
+`mode:` reported `mode 0000 → 0755` and `changed` on every apply, forever —
+§2's idempotency, broken for the whole class. `owner` and `group` need
+`sudo`, which Windows does not have (§7), so they do not arise there.
+
 `mode` applies to the target, and directories created on the way to it get
 `0755`. That is what GNU `install -d -m` already does — intermediates are
 `0755` whatever the umask, and the mode lands on the last component — so the
@@ -1780,6 +1791,7 @@ and nothing else.
 | `--deadline` runs out between steps | The walk stops before the next step, which does not run and is not reported. Summary says `deadline exceeded`, exit 124 |
 | `--deadline` runs out during a step | That step's `timeout` was already clamped to the time left, so it is killed on the run's clock and fails with `deadline exceeded after N` rather than naming a step timeout the file does not contain |
 | `--deadline`, Ctrl-C or SIGTERM during a `retry` `delay` | The delay is part of the step, so it is cut short: the loop stops within one 100ms tick rather than sleeping the delay out. The step fails with `deadline exceeded before attempt N/M` (or `interrupted`), and keeps the attempt that ran — its `rc`, output and attempt count are what the line, the `--json` event and the `register` report |
+| `--deadline` runs out between a typed action's commands | A typed action runs several — `pkg` queries, installs and queries again — and each is clamped against what is *now* left. A command reached with nothing left is not spawned at all; the step fails with `deadline exceeded before the command ran`, which names the event rather than reporting a wait nobody waited. Same for a typed action whose gate spent the rest of the clock: `deadline exceeded before the step ran` |
 | `--deadline` shorter than a step's own `timeout` | The deadline wins; that is the clamp. The reverse — a step whose `timeout` expires first — is an ordinary step timeout and reads as one |
 | `--deadline` and a step that already failed | Exit 124 only if the clock is why the run ended. A failure with `--keep-going` off stopped the walk first, so that run is exit 1 and the clock never ran out |
 | Windows path in `dest` | Accepted; `~` expands to `%USERPROFILE%` |
