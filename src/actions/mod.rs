@@ -520,15 +520,34 @@ impl Ctx<'_> {
             process::How::TimedOut => Some(Effect::Failed {
                 msg: {
                     let (got, deadline_bound) = self.last.get();
-                    format!(
-                        "{} after {}",
-                        if deadline_bound {
-                            "deadline exceeded"
-                        } else {
-                            "timed out"
-                        },
-                        crate::output::event::human(got)
-                    )
+                    if deadline_bound && got.is_zero() {
+                        // The clock was already out when this command was
+                        // reached, so `exec` declined to spawn it. There is
+                        // no wait to report: reporting one read `deadline
+                        // exceeded after 0ms`, a duration nobody waited and
+                        // the exact wording the shell path rejects
+                        // (`tests/apply.rs`). Its two siblings name the event
+                        // instead — `deadline exceeded before attempt 2/3`
+                        // and `before the step ran` — and this is the third
+                        // (#56).
+                        //
+                        // Both halves of the guard: a step may declare
+                        // `timeout: 0s`, which spawns and is killed at once,
+                        // and that is a step timeout the file does contain.
+                        // Only `exec`'s branch sets a zero duration while
+                        // also blaming the deadline.
+                        "deadline exceeded before the command ran".to_string()
+                    } else {
+                        format!(
+                            "{} after {}",
+                            if deadline_bound {
+                                "deadline exceeded"
+                            } else {
+                                "timed out"
+                            },
+                            crate::output::event::human(got)
+                        )
+                    }
                 },
                 detail: got.stderr_text(),
                 interrupted: false,
@@ -624,11 +643,10 @@ mod tests {
         assert!(got.stderr.is_empty());
     }
 
-    /// What the step then says. `last` is set to zero so the wording comes
-    /// from the deadline rather than the step's own `timeout` — right about
-    /// whose clock, wrong about the duration: no command waited 0ms, because
-    /// no command ran. Issue #56; pinned as it is so the branch is covered
-    /// while the wording is decided separately.
+    /// What the step then says. It names the event rather than a duration,
+    /// the way `deadline exceeded before attempt 2/3` and `before the step
+    /// ran` do. It used to say `deadline exceeded after 0ms` — right about
+    /// whose clock, wrong about the wait, since no command ran (#56).
     #[test]
     fn the_wording_of_a_command_that_was_never_spawned() {
         let sudo = Sudo::none();
@@ -639,7 +657,7 @@ mod tests {
         let Some(Effect::Failed { msg, .. }) = ctx.stopped(&got) else {
             panic!("a killed command is a failure")
         };
-        assert_eq!(msg, "deadline exceeded after 0ms");
+        assert_eq!(msg, "deadline exceeded before the command ran");
     }
 
     /// The same context with time left spawns for real and records what the
