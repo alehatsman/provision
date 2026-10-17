@@ -616,11 +616,11 @@ Gate
     skips instead of failing as `Exec format error`.
   - Wiring either into `gate.yml` stays a one-line change if the fleet ever
     stops being the place they run.
-- **Known and open (#52):** no `apply` snapshot renders on Windows. Every
-  one lives in `tests/apply.rs`, which is `#![cfg(unix)]`, so the Windows
-  job pins verdicts and the JSON shape but no rendered terminal output. A
-  per-platform snapshot suffix would close it and costs a second file per
-  snapshot; not taken yet.
+- **Known and open (#60, carved out of #52 when that closed):** no `apply`
+  snapshot renders on Windows. Every one lives in `tests/apply.rs`, which is
+  `#![cfg(unix)]`, so the Windows job pins verdicts and the JSON shape but no
+  rendered terminal output. A per-platform snapshot suffix would close it and
+  costs a second file per snapshot; not taken yet.
 - **Owner's:** moongit's runner actually reading the stream, cancelling with
   TERM and passing `--deadline`. That is the real gate and it lives in that
   repo. **Check on 2026-12-12**: unexercised by then means D17's CI half and
