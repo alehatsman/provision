@@ -288,7 +288,13 @@ fn grandchild_marking(marker: &Path) -> String {
              Start-Sleep -Seconds 60"
         )
     } else {
-        format!("(sleep 5; echo mark > \"{m}\") &\nsleep 60\n")
+        // `&&`, not `;`: a TERM that kills the `sleep` leaves its exit
+        // status non-zero and the write is skipped. With `;` the shell runs
+        // the next command before acting on its own pending TERM, so the
+        // mark appeared at the kill rather than five seconds later -- a
+        // flake in the test, not in the kill, and one that reported the
+        // opposite of what happened.
+        format!("(sleep 5 && echo mark > \"{m}\") &\nsleep 60\n")
     }
 }
 
