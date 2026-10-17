@@ -2,3 +2,7 @@
 
 # rq/findings writes here; the JSONL is an artifact, not a source file.
 /.gate
+
+# codeintel's index, built from the source it indexes. Regenerate with
+# `codeintel index .`; never a source file.
+/.codeintel
