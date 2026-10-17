@@ -108,6 +108,10 @@ stays out: the `os_*` server actions (zero to one use), text replacement
 one-line `unless`), the observe/wait family (D2), the data actions (a
 `register` and a one-liner). Spec §6.8–6.10.
 
+**Amended by the owner 2026-10-17. See D31.** Eleven, not ten: `json`, on a
+fleet count of one. The admission came from the agent-host reopen condition
+rather than this decision's threshold; the rule above is untouched.
+
 ## D5 — No transactions, no rollback, no handlers
 
 **Decision.** Fail-fast. Re-run. That is the recovery model.

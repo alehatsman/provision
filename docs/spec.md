@@ -1,6 +1,6 @@
 # provision — specification
 
-Status: v0.9.2 · 2026-10-17 · owner: aleh
+Status: v0.10.0 · 2026-10-17 · owner: aleh
 
 This is the contract. Code that disagrees with it is wrong, or this file is.
 Fix one.
@@ -19,10 +19,11 @@ and a dry-run a person can trust.
 - Execute steps sequentially on the local machine. Stop at the first failure.
 - Eleven actions: `shell`, `cmd`, `file`, `template`, `pkg`, `service`,
   `assert`, `git`, `download`, `defaults` (the last three from phase 6, D4 as
-  amended), `json` (phase 7, D31).
+  amended), `json` (D31).
 - Four structural keywords: `vars`, `vars_file`, `import`, `use`.
 - Step modifiers: `name`, `when`, `unless`, `creates`, `sudo`, `timeout`,
-  `retry`, `env`, `cwd`, `tags`, `register`, `changed_when`, `failed_when`.
+  `retry`, `env`, `cwd`, `tags`, `register`, `changed_when`, `failed_when`,
+  `raw`.
 - Facts about the local machine.
 - Five commands: `validate`, `plan`, `apply`, `list`, `facts`. The first
   three take a plan or a component as the root; a component's props come from
@@ -1197,7 +1198,9 @@ defaults:
 ### 6.11 `json`
 
 Ensure a JSON file **contains** what the plan declares, leaving every other
-key as it is. Phase 7, D31.
+key as it is. D31, 2026-10-17: the fleet count is one —
+`~/.claude/settings.json`, deployed by a component and rewritten by the
+application, four live keys of which every `apply` discarded (#54).
 
 ```yaml
 json:

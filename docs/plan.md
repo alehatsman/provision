@@ -16,6 +16,10 @@ Status: phases 0–7 code complete · 2026-10-17
 | 6 — `git`, `download`, `defaults` | the six fleet clones, twelve fetches and twenty mac defaults are typed; mac plan `unknown` count drops to zero for that step; main_pc numbers unchanged | `2edd4e6`, `7dbe36a`, `2a76521` — code; the mac's probed plan is the owner's |
 | 7 — the runner's contract | a job can be cancelled (SIGTERM, 143), bounded (`--deadline`, 124), and asked what it takes (`list <component.yml>`) | `d660619` — D19 |
 
+After phase 7, `json` (spec §6.11, D31) shipped in `v0.10.0` — an eleventh
+action, and not a phase: it closed the deferred "Agent-host typed actions"
+row at the bottom of this file rather than opening a new one.
+
 Windows was exercised natively on main_pc's host on 2026-09-08, from WSL via
 `powershell.exe`, with the cross-compiled `x86_64-pc-windows-gnu` binary run
 from a Windows path: `facts` reports the right `os`/`home`/`username`,
@@ -45,8 +49,7 @@ Open, and all of it the owner's — none of it can close from this machine:
   `--explain-var` stays spec'd and unbuilt, marked as such in §10.
   mooncake stays installed everywhere: a tool, not a dependency.
   `--keep-going` built — spec §8, `main.rs` and `expand.rs`.
-- ~~A tag~~ — `v0.9.1` is cut, `v0.9.2` after it, and `v0.10.0` after
-  that. `main` lives at
+- ~~A tag~~ — `v0.9.1`, `v0.9.2` and `v0.10.0` are all cut. `main` lives at
   `github.com/alehatsman/provision`, public since 2026-09-08.
 - go-quality drops `name:` and `version:` from every preset and tags. Both
   are root keys provision rejects, and it stays strict: a `version:` in a
@@ -172,7 +175,7 @@ code took is the one worth describing:
 - **There is no `trait Action`.** `Action` is an `enum` and the dispatch is a
   `match` on the step's key, which is what "actions are a Rust `enum`; the
   dispatcher is a `match`" above already said. A trait would buy dynamic
-  dispatch for a closed set of ten.
+  dispatch for a closed set of eleven.
 - **`shell`, `cmd` and `assert` have no file.** They parse to an `Action`
   variant in `actions/mod.rs` and are executed by `exec/`, because none of
   them inspects state — which is the whole of D4's rule for what gets a typed

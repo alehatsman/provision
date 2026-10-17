@@ -218,7 +218,7 @@ The decisions are in [docs/decisions.md](docs/decisions.md).
 | `loop`, `with_items` | none | deferred; copy the step (plan.md "Deferred") |
 | `notify`, handlers | `register` + `when: x.changed` on the restart step | no handlers (D5) |
 | `block`, `rescue`, `always` | none | no rollback (D5); apply stops at the first failure, `--keep-going` walks on |
-| `lineinfile`, `blockinfile` | none | own the whole file with `template`; deferred otherwise |
+| `lineinfile`, `blockinfile` | none | own the whole file with `template`; a JSON file a second writer also owns is `json` (D31); deferred otherwise |
 | `unarchive` | `download` then a `creates`-gated `shell` | deferred |
 | `user`, `group`, `cron`, `sysctl`, `mount` | `shell` with `unless` | server modules, zero use on a workstation fleet (D4) |
 | `debug` | none | `--verbose` shows every command's output; `facts` prints the facts |
@@ -341,10 +341,12 @@ and no support (D23).
 
 ## Status
 
-Version 0.9.2. Phases 0 through 7 are code complete ([docs/plan.md](docs/plan.md)).
-`validate`, `plan`, `apply`, `list` and `facts` all work, and all ten
+Version 0.10.0. Phases 0 through 7 are code complete
+([docs/plan.md](docs/plan.md)), and `json` landed after them by closing a
+deferred row rather than as a phase of its own (D31).
+`validate`, `plan`, `apply`, `list` and `facts` all work, and all eleven
 actions — `shell`, `cmd`, `assert`, `file`, `template`, `pkg`, `service`,
-`git`, `download`, `defaults` — run for real, with `unless`, `creates`,
+`git`, `download`, `defaults`, `json` — run for real, with `unless`, `creates`,
 `timeout`, `retry`, `env`, `cwd`, `register`, `changed_when`, `failed_when`,
 tags, sudo, `--deadline`, Ctrl-C, SIGTERM and `--json`. Components take typed
 `props`, from a `use:` or from `--prop` on the command line, and this repo's
@@ -446,5 +448,10 @@ $ provision validate examples/x1.yml
 
 $ provision plan --plan-no-probe examples/x1.yml
   ...
-  examples/x1.yml · 19 steps · 16 would run (unprobed) · 3 skipped · 3ms
+  examples/x1.yml · 23 steps · 19 would run (unprobed) · 4 skipped · 1ms
 ```
+
+The step count is the file's; the split is this host's. That plan was walked
+on a Mac, where the Linux-gated steps skip and the `defaults` step does not —
+on the Arch laptop the file is written for, the same 23 steps divide the other
+way.

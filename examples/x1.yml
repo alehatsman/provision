@@ -69,6 +69,69 @@
   use: ./components/zsh/index.yml
   tags: [core, shell]
 
+- name: tmux plugin manager
+  # A legitimate `git` target: tpm is cloned, pinned, and nothing on the
+  # machine writes into it, so §6.8's dirty-tree guard stays quiet. The zplug
+  # clone inside the zsh component is the counter-example and stays a `shell`
+  # step on purpose — zplug turns its own tracked `init.zsh` into a symlink on
+  # first run and reads dirty forever.
+  # `depth: 1` is allowed only because `ref` names a tag: a branch has nothing
+  # to fast-forward from in a shallow history, and §6.8 refuses the reset that
+  # would take.
+  git:
+    repo: https://github.com/tmux-plugins/tpm
+    dest: ~/.config/tmux/plugins/tpm
+    ref: v3.1.0
+    depth: 1
+  tags: [core, tmux]
+
+- name: provision release binary
+  # The one shape §6.9 is for: a versioned release asset, immutable bytes at a
+  # stable URL. The digest is the published SHA256SUMS line for v0.10.0, so a
+  # matching file reads `ok` with no network at all, and a truncated or
+  # swapped download fails the step instead of landing.
+  # `dest` carries the version for the reason §6.9 spells out: a
+  # version-independent path is satisfied by the *previous* release's bytes,
+  # and the next bump would report converged while the old binary sat there.
+  # The asset named here is the linux-musl one, so the step names the os it is
+  # for rather than putting a Linux binary on a Mac.
+  download:
+    url: https://github.com/alehatsman/provision/releases/download/v0.10.0/provision-x86_64-unknown-linux-musl
+    dest: ~/.cache/provision/dist/provision-0.10.0-x86_64-unknown-linux-musl
+    sha256: 4e0ccf5b141ceb06ae577ef26d4767dd35ed86e6a1d06ca7f0f1d525e5b66ff7
+    mode: "0755"
+  when: os == "linux"
+  tags: [core, tools]
+
+- name: Claude settings keys this plan owns
+  # The shape D31 exists for: the application writes back into this file —
+  # `/model` and `/config` land in it — so declaring the whole file with
+  # `file` would discard the application's half on every apply. The
+  # declaration stops at `permissions.deny`, and where it stops is the
+  # ownership: that list is the plan's, every other key in the file is the
+  # application's and is left alone (§6.11).
+  json:
+    path: ~/.claude/settings.json
+    content:
+      permissions:
+        deny: ["Bash(rm -rf:*)"]
+  tags: [core, claude]
+
+- name: Finder shows every file
+  # macOS-only, in an Arch laptop's plan: on this machine it never runs. It is
+  # here because the file claims to show every action once and §6.10 is an
+  # action that exists only on macOS — not because the laptop has a Finder.
+  # The `when` is load-bearing, not decoration: the action does not skip
+  # itself, and an ungated `defaults` step is an error under
+  # `validate --strict` (§6.10).
+  defaults:
+    domain: com.apple.finder
+    key: AppleShowAllFiles
+    type: bool
+    value: true
+  when: os == "darwin"
+  tags: [core, macos]
+
 - name: Record that git is configured
   shell: git config --global user.email "{{ email }}"
   unless: test "$(git config --global user.email)" = "{{ email }}"
