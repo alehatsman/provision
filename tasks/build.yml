@@ -3,11 +3,16 @@ description: build the release binary for this machine
 
 # D1: one static binary per target, built natively on the machine that will
 # run it. The one exception is Windows, which has no toolchain of its own in
-# this fleet and is cross-compiled from Linux (D1 amendment).
+# this fleet and is cross-compiled from Linux (D1 amendment) — tasks/windows.yml.
+#
+# `--locked`, as the gate and the release workflow both build: a release
+# binary built against a resolved-fresh lockfile is not the binary the
+# lockfile describes, and this task had the flag in neither place it is
+# mirrored from.
 
 steps:
-  - name: cargo build --release
-    shell: cargo build --release
+  - name: cargo build --release --locked
+    shell: cargo build --release --locked
     # No modifier: a bare step's exit code is its whole contract (spec §6.1,
     # D20). This carried `changed_when: false` to say that, which on a build
     # that rewrites `target/` every run was literally false — the wart D20

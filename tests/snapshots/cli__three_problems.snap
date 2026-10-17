@@ -1,6 +1,5 @@
 ---
 source: tests/cli.rs
-assertion_line: 129
 expression: out
 ---
   error: tests/fixtures/three_problems_a.yml:3:3: unknown key `creats` in a step

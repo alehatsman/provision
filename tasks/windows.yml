@@ -8,6 +8,17 @@ description: cross-compile the Windows binary with mingw-w64
 #
 # Needs the target and the linker:
 #   rustup target add x86_64-pc-windows-gnu, and mingw-w64.
+#
+# This is the local path, run from a Linux host — a WSL side of one of the
+# fleet's PCs. `.github/workflows/release.yml` does the same build inline for
+# the `v*` tag (its `x86_64-pc-windows-gnu` matrix entry: the target, the
+# mingw-w64 install, and `cargo build --release --locked --target`), because
+# that workflow builds four targets from a matrix and has no provision binary
+# yet to apply a task with. The two are twins and nothing checks that they
+# agree, so an edit here belongs there as well.
+#
+# On a Windows host this file is not what you want: `cargo build --release
+# --locked` builds natively there and needs no mingw at all.
 
 steps:
   - name: cargo build --release --target x86_64-pc-windows-gnu

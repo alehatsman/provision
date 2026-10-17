@@ -1,0 +1,27 @@
+---
+description: the package tests that need a throwaway container, on a Linux host
+
+# `pkg` against a real apt or pacman is the one thing the suite may not do to
+# the machine it runs on, so six tests do it in a `--rm` container instead
+# (`tests/apply.rs`, "pkg, in a container"). They are `#[ignore]`d and
+# env-gated, so a plain `cargo test` never needs Docker — which also meant
+# they ran nowhere at all: no workflow and no task set the variable, so the
+# real install, remove, `update_cache` and config-files-filter paths were
+# covered by nothing. This file is where they run.
+#
+# Linux only, and not as a preference: the harness mounts *this host's* test
+# binary into the image, so a macOS host hands a Mach-O binary to a Linux
+# container and every test fails as `Exec format error`. The harness now says
+# so and skips; this task is for the fleet's Linux machines.
+#
+# Not in the gate. The gate's linux job could set the variable — ubuntu-latest
+# ships Docker — and that is a one-line change if the fleet ever wants it.
+# The fleet tests on its own machines first.
+
+steps:
+  - name: the container package tests
+    shell: cargo test --locked --workspace --all-features -- --ignored
+    env:
+      PROVISION_CONTAINER_TESTS: "1"
+    timeout: 30m
+    when: "facts.os == 'linux'"

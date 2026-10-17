@@ -1571,7 +1571,7 @@ fn validate_step(dir: &Path, step: &str) -> (i32, String) {
         &path,
         format!("description: one step\nsteps:\n  - name: the step\n{step}"),
     )
-    .unwrap();
+    .expect("writing into the test's own tempdir");
     let out = run(&["validate", &path.display().to_string()]);
     (
         out.status.code().unwrap_or(-1),

@@ -4009,6 +4009,19 @@ fn container_tests_enabled() -> bool {
         eprintln!("skipped: set PROVISION_CONTAINER_TESTS=1");
         return false;
     }
+    // `in_container` mounts *this host's* test binary into the image, so the
+    // host has to be the platform the image runs. From a macOS host every one
+    // of these fails as `sh: 1: provision: Exec format error`, which says
+    // nothing about what is wrong or that nothing is wrong with provision.
+    // The fleet's only Linux machines are containers and the CI runner, so
+    // this is the common case rather than the odd one.
+    if !cfg!(target_os = "linux") {
+        eprintln!(
+            "skipped: the container mounts this host's test binary, so these run \
+             from a Linux host only"
+        );
+        return false;
+    }
     true
 }
 
