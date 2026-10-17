@@ -2,7 +2,7 @@
 
 A small, single-binary provisioning tool for your own machines. Rust.
 
-One YAML file per machine. Ten actions. Sequential execution, fail-fast,
+One YAML file per machine. Eleven actions. Sequential execution, fail-fast,
 honest dry-run, readable output. No fleet, no daemon, no agent, no plugin
 economy.
 
@@ -102,10 +102,11 @@ The job is small and stable. The tool should be too.
 - **Shell is first-class.** Most real steps are shell. The tool makes shell
   steps *idempotent by declaration* (`creates`, `unless`) instead of
   pretending a typed action exists for everything.
-- **Ten actions** where idempotency genuinely needs state inspection:
+- **Eleven actions** where idempotency genuinely needs state inspection:
   `shell`, `cmd`, `file`, `template`, `pkg`, `service`, `assert`, `git`,
-  `download`, `defaults` (D4 as amended). `provision list <action>` prints
-  the fields any of them takes.
+  `download`, `defaults` (D4 as amended), `json` (D31 — a JSON file an
+  application also writes, where the plan declares only the keys it owns).
+  `provision list <action>` prints the fields any of them takes.
 - **Composition** with `vars`, `vars_file`, `import`, and `use` (a component
   with declared props).
 - **Jinja2 templating** (minijinja), strict undefined, the same `.j2` files
