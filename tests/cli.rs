@@ -1918,3 +1918,81 @@ fn a_register_that_did_not_leak_out_of_a_use_says_so() {
     assert!(text.contains("undefined variable `version`"), "{text}");
     assert!(text.contains("do not leak back"), "{text}");
 }
+
+// ── `json`'s validation surface (spec §6.11) ──────────────────────────────
+
+/// §6.11 takes `file`'s rule, because it is the same choice: neither is an
+/// error and both is an error positioned at the second.
+#[test]
+fn a_json_step_needs_exactly_one_of_content_and_src() {
+    let dir = tempfile::tempdir().unwrap();
+
+    let (code, out) = validate_step(dir.path(), "    json:\n      path: ./a.json\n");
+    assert_ne!(code, 0, "{out}");
+    assert!(out.contains("needs `content` or `src`"), "{out}");
+
+    // `src` exists, so the check that fires is the one under test: §8's
+    // existence check runs first and would otherwise be the only diagnostic.
+    std::fs::write(dir.path().join("b.json"), "{}").unwrap();
+    let (code, out) = validate_step(
+        dir.path(),
+        "    json:\n      path: ./a.json\n      content:\n        a: 1\n      src: ./b.json\n",
+    );
+    assert_ne!(code, 0, "{out}");
+    assert!(out.contains("mutually exclusive"), "{out}");
+}
+
+/// A merge declares keys, so a `content` with no keys is a validation error
+/// rather than a step that writes a scalar over somebody's settings.
+#[test]
+fn a_json_content_that_is_not_a_mapping_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = validate_step(
+        dir.path(),
+        "    json:\n      path: ./a.json\n      content: \"just a string\"\n",
+    );
+    assert_ne!(code, 0, "{out}");
+    assert!(out.contains("not a mapping"), "{out}");
+}
+
+/// §3.2: `json.path` is a path provision reads itself, so it joins the set
+/// where a surviving `$VAR` is an error before anything runs. The check is a
+/// table (`src/expand.rs`), and a family missing from it fails silently.
+#[test]
+fn a_shell_variable_in_a_json_path_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = validate_step(
+        dir.path(),
+        "    json:\n      path: $CONFIG_DIR/a.json\n      content:\n        a: 1\n",
+    );
+    assert_ne!(code, 0, "{out}");
+    assert!(out.contains("$CONFIG_DIR"), "{out}");
+}
+
+/// §3: unknown keys in a step body are errors, and the table that decides
+/// which are known is per action. `owner` and `group` are deliberately not
+/// fields of `json`.
+#[test]
+fn a_json_step_refuses_a_key_it_does_not_have() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = validate_step(
+        dir.path(),
+        "    json:\n      path: ./a.json\n      content:\n        a: 1\n      owner: root\n",
+    );
+    assert_ne!(code, 0, "{out}");
+    assert!(out.contains("unknown key `owner`"), "{out}");
+}
+
+/// §6.11: a `src` that is not an object cannot declare keys. Caught at
+/// validate, where §8 already checks the file exists.
+#[test]
+fn a_json_src_that_is_not_an_object_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("b.json"), "[1, 2]").unwrap();
+    let (code, out) = validate_step(
+        dir.path(),
+        "    json:\n      path: ./a.json\n      src: ./b.json\n",
+    );
+    assert_ne!(code, 0, "{out}");
+    assert!(out.contains("not a JSON object"), "{out}");
+}

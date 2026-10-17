@@ -4,12 +4,14 @@
 //! Those share one implementation because they genuinely are one — the
 //! differences are which argv gets built and what a success means. The typed
 //! actions (`file`, `template`, `pkg`, `service`, `git`, `defaults`,
-//! `download`) each need real state inspection and have their own modules.
+//! `download`, `json`) each need real state inspection and have their own
+//! modules.
 
 pub(crate) mod defaults;
 pub(crate) mod download;
 pub(crate) mod file;
 pub(crate) mod git;
+pub(crate) mod json;
 pub(crate) mod pkg;
 pub(crate) mod service;
 pub(crate) mod template;
@@ -41,6 +43,7 @@ pub(crate) enum Action {
     Download(download::Spec),
     File(file::Spec),
     Git(git::Spec),
+    Json(json::Spec),
     Template(template::Spec),
     Service(service::Spec),
     Pkg(pkg::Spec),
@@ -157,6 +160,7 @@ impl Action {
                 | Action::Git(_)
                 | Action::Defaults(_)
                 | Action::Download(_)
+                | Action::Json(_)
         )
     }
 }
@@ -306,6 +310,11 @@ impl Action {
 
             "download" => match download::parse(step, engine, ctx, raw)? {
                 Some(spec) => Action::Download(spec),
+                None => return Ok(None),
+            },
+
+            "json" => match json::parse(step, engine, ctx, raw, defer_src)? {
+                Some(spec) => Action::Json(spec),
                 None => return Ok(None),
             },
 

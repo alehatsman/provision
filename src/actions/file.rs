@@ -60,6 +60,33 @@ pub(crate) struct Spec {
     pub label: Option<String>,
 }
 
+/// Read a target's bytes the way `file` reads them — through `sudo` when the
+/// step said so (§6.3) — for an action that has to look before it can say
+/// what the file should hold. `Ok(None)` is "not there".
+///
+/// `json` needs this and `file` does not: `file` knows its content at parse
+/// time, and a merge cannot know its own until it has read the disk (§6.11).
+/// It goes through a `Spec` rather than a second copy of the sudo rule,
+/// because two readers that drift are two answers to "what is on disk".
+pub(crate) fn probe(path: &str, ctx: &Ctx<'_>) -> std::result::Result<Option<Vec<u8>>, String> {
+    let reader = Spec {
+        path: path.to_string(),
+        state: State::File,
+        content: None,
+        link_to: None,
+        mode: None,
+        owner: None,
+        group: None,
+        force: false,
+        label: None,
+    };
+    match stat(path, ctx)?.kind {
+        Kind::Missing => Ok(None),
+        Kind::File => reader.read(ctx).map(Some),
+        _ => Err(format!("{path} exists and is not a regular file")),
+    }
+}
+
 /// The `mode`/`owner`/`group` trio. `template` takes all three with the same
 /// meaning and the same sudo requirement (spec §6.4), so it parses them here
 /// rather than growing a second set of rules.

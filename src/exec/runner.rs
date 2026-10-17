@@ -450,6 +450,14 @@ impl Runner {
                 },
                 None,
             ),
+            Action::Json(spec) => (
+                if act {
+                    spec.apply(&ctx)
+                } else {
+                    spec.plan(&ctx)
+                },
+                None,
+            ),
             Action::Service(spec) => (
                 if act {
                     spec.apply(&ctx)

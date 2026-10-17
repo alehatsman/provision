@@ -292,7 +292,7 @@ fn a_directory_lists_a_name_index_component_by_its_directory() {
 }
 
 // D25: verbs that answer return a document. One call gives a writer of plan
-// files the whole vocabulary -- the ten actions *and* the step envelope,
+// files the whole vocabulary -- the eleven actions *and* the step envelope,
 // which is the half nothing described before: `list <action>` covered the
 // actions, and the sixteen keys every step may carry were a bare name list
 // inside the parser.
@@ -303,7 +303,7 @@ fn list_json_with_no_path_dumps_the_whole_vocabulary() {
     let doc: serde_json::Value = serde_json::from_str(&out).expect("one document");
 
     let actions = doc["actions"].as_array().expect("actions");
-    assert_eq!(actions.len(), 10, "spec §6 has ten actions");
+    assert_eq!(actions.len(), 11, "spec §6 has eleven actions");
     let git = actions
         .iter()
         .find(|a| a["name"] == "git")

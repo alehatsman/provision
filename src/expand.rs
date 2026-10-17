@@ -1120,7 +1120,7 @@ impl Expander {
         if step.key == "template" && !derived {
             derived = self.check_template_sources(step, &ctx, scope);
         }
-        if step.key == "file" && !derived && !self.check_file_source(step, &ctx) {
+        if matches!(step.key, "file" | "json") && !derived && !self.check_file_source(step, &ctx) {
             // The source is named and is not there. `prepare` would reach the
             // same file and say `cannot read … No such file`, one fault
             // reported twice in two wordings — and the one above is the one
@@ -1646,6 +1646,9 @@ impl Expander {
     fn declared_output(&self, step: &Step<'static>, ctx: &Value) -> Option<PathBuf> {
         let key = match step.key {
             "git" | "download" | "template" => "dest",
+            // A `json` step writes its path and never removes it, so it is
+            // always a declared output.
+            "json" => "path",
             "file" => {
                 let absent = step
                     .body
@@ -1687,7 +1690,7 @@ impl Expander {
         let body_keys: &[&str] = match step.key {
             // A `raw` body is not rendered, so braces in it are the author's.
             _ if raw => &[],
-            "file" => &["path"],
+            "file" | "json" => &["path"],
             "template" | "download" | "git" => &["dest"],
             _ => &[],
         };
@@ -1784,7 +1787,12 @@ impl Expander {
         }
         let path = load::resolve(src_at.file, &rel);
         if !path.exists() {
-            self.diags.push(load::missing(src_at, &path, "file src"));
+            // The label names the action the reader wrote, not the one whose
+            // rule this is: `json` shares `file`'s `src` semantics (§6.11),
+            // and a `json` step told "file src not found" sends them looking
+            // for a `file` step they never wrote.
+            self.diags
+                .push(load::missing(src_at, &path, &format!("{} src", step.key)));
             return false;
         }
         true

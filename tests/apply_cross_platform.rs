@@ -338,3 +338,179 @@ fn a_timeout_kills_the_whole_tree_on_every_platform() {
         marker.display()
     );
 }
+
+// ── `json`: a file with two owners (spec §6.11, D31) ──────────────────────
+
+/// Write a JSON file into the test's own tempdir.
+fn seed_json(dir: &Path, name: &str, text: &str) {
+    std::fs::write(dir.join(name), text).expect("writing into the test's own tempdir");
+}
+
+fn read(dir: &Path, name: &str) -> String {
+    std::fs::read_to_string(dir.join(name)).expect("the step should have left a file")
+}
+
+/// Spec §11's definition of idempotent, and §6.11's whole reason to exist:
+/// the keys the application owns are still there after the apply, and the
+/// second apply has nothing to do.
+#[test]
+fn a_json_step_declares_its_own_keys_and_leaves_the_rest_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    seed_json(
+        dir.path(),
+        "settings.json",
+        r#"{"model": "sonnet", "effortLevel": "high", "permissions": {"allow": ["Bash(tmux:*)"]}}"#,
+    );
+    let plan = "  - name: settings\n    json:\n      path: ./settings.json\n      content:\n        permissions:\n          deny: [\"Bash(rm -rf:*)\"]\n";
+
+    let (code, out) = apply(dir.path(), plan, &[]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(verdict(&out, "settings"), "changed", "{out}");
+
+    let after: serde_json::Value =
+        serde_json::from_str(&read(dir.path(), "settings.json")).unwrap();
+    // The application's keys, untouched — the four that #54 lost on every run.
+    assert_eq!(after["model"], "sonnet");
+    assert_eq!(after["effortLevel"], "high");
+    // A sibling key under a declared parent survives: `permissions.allow` was
+    // never declared, so it is not the plan's to replace.
+    assert_eq!(after["permissions"]["allow"][0], "Bash(tmux:*)");
+    // And what the plan does declare is there.
+    assert_eq!(after["permissions"]["deny"][0], "Bash(rm -rf:*)");
+
+    let (code, out) = apply(dir.path(), plan, &[]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(verdict(&out, "settings"), "ok", "{out}");
+}
+
+/// §6.11: everything that is not a mapping is a leaf, arrays included. A
+/// declared list is the plan's whole list, which is what keeps it prunable.
+#[test]
+fn a_declared_array_is_replaced_whole_and_not_appended_to() {
+    let dir = tempfile::tempdir().unwrap();
+    seed_json(
+        dir.path(),
+        "a.json",
+        r#"{"tools": ["old", "stale"], "keep": 1}"#,
+    );
+    let plan = "  - name: tools\n    json:\n      path: ./a.json\n      content:\n        tools: [\"new\"]\n";
+
+    let (code, out) = apply(dir.path(), plan, &[]);
+    assert_eq!(code, 0, "{out}");
+    let after: serde_json::Value = serde_json::from_str(&read(dir.path(), "a.json")).unwrap();
+    assert_eq!(after["tools"], serde_json::json!(["new"]));
+    assert_eq!(after["keep"], 1);
+
+    let (_, out) = apply(dir.path(), plan, &[]);
+    assert_eq!(verdict(&out, "tools"), "ok", "{out}");
+}
+
+/// §6.11: a target that is missing is created holding exactly the declared
+/// value, parents included — §6.3's rule, which every creating action shares.
+#[test]
+fn a_json_step_creates_a_missing_target_and_its_parents() {
+    let dir = tempfile::tempdir().unwrap();
+    let plan = "  - name: fresh\n    json:\n      path: ./nested/deep/new.json\n      content:\n        a: 1\n";
+
+    let (code, out) = apply(dir.path(), plan, &[]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(verdict(&out, "fresh"), "changed", "{out}");
+    let after: serde_json::Value =
+        serde_json::from_str(&read(dir.path(), "nested/deep/new.json")).unwrap();
+    assert_eq!(after, serde_json::json!({"a": 1}));
+
+    let (_, out) = apply(dir.path(), plan, &[]);
+    assert_eq!(verdict(&out, "fresh"), "ok", "{out}");
+}
+
+/// §6.11: the verdict is on parsed values, never on bytes. A target whose
+/// formatting differs from what this action emits is left alone, or it would
+/// be rewritten on every run forever — §2's idempotency, for the whole class.
+#[test]
+fn formatting_that_differs_is_not_a_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let odd = "{\n    \"a\": 1,\n        \"b\": 2\n}";
+    seed_json(dir.path(), "f.json", odd);
+    let plan = "  - name: fmt\n    json:\n      path: ./f.json\n      content:\n        a: 1\n";
+
+    let (code, out) = apply(dir.path(), plan, &[]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(verdict(&out, "fmt"), "ok", "{out}");
+    assert_eq!(
+        read(dir.path(), "f.json"),
+        odd,
+        "the bytes were not touched"
+    );
+}
+
+/// §6.11 and §10: a target this action cannot read holds state provision did
+/// not put there. It fails, and the file is still exactly as it was.
+#[test]
+fn a_target_that_is_not_json_fails_and_is_not_overwritten() {
+    let dir = tempfile::tempdir().unwrap();
+    let junk = "this is not json at all\n";
+    seed_json(dir.path(), "bad.json", junk);
+    let plan = "  - name: junk\n    json:\n      path: ./bad.json\n      content:\n        a: 1\n";
+
+    let (code, out) = apply(dir.path(), plan, &[]);
+    assert_ne!(code, 0, "{out}");
+    assert!(out.contains("not valid JSON"), "{out}");
+    assert_eq!(read(dir.path(), "bad.json"), junk, "the file must survive");
+}
+
+/// The same rule for a document that parses: there are no keys to merge into
+/// an array, and replacing it would be the data loss this action prevents.
+#[test]
+fn a_target_whose_top_level_is_not_an_object_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let list = "[1, 2, 3]";
+    seed_json(dir.path(), "arr.json", list);
+    let plan = "  - name: arr\n    json:\n      path: ./arr.json\n      content:\n        a: 1\n";
+
+    let (code, out) = apply(dir.path(), plan, &[]);
+    assert_ne!(code, 0, "{out}");
+    assert!(out.contains("not a JSON object"), "{out}");
+    assert_eq!(read(dir.path(), "arr.json"), list, "the file must survive");
+}
+
+/// §6.11: `src` is the same declaration kept in a file beside the plan.
+#[test]
+fn the_declared_keys_can_come_from_a_src_file() {
+    let dir = tempfile::tempdir().unwrap();
+    seed_json(dir.path(), "owned.json", r#"{"a": {"b": 2}}"#);
+    seed_json(dir.path(), "t.json", r#"{"a": {"c": 3}, "z": 9}"#);
+    let plan = "  - name: src\n    json:\n      path: ./t.json\n      src: ./owned.json\n";
+
+    let (code, out) = apply(dir.path(), plan, &[]);
+    assert_eq!(code, 0, "{out}");
+    let after: serde_json::Value = serde_json::from_str(&read(dir.path(), "t.json")).unwrap();
+    assert_eq!(after, serde_json::json!({"a": {"b": 2, "c": 3}, "z": 9}));
+
+    let (_, out) = apply(dir.path(), plan, &[]);
+    assert_eq!(verdict(&out, "src"), "ok", "{out}");
+}
+
+/// §6.11: `plan` reports one line per changed leaf, keyed by its dotted path,
+/// and never a unified text diff.
+#[test]
+fn plan_names_the_leaves_it_would_change() {
+    let dir = tempfile::tempdir().unwrap();
+    seed_json(dir.path(), "p.json", r#"{"model": "sonnet"}"#);
+    std::fs::write(
+        dir.path().join("plan.yml"),
+        "description: a plan\nsteps:\n  - name: leaves\n    json:\n      path: ./p.json\n      content:\n        model: \"opus\"\n        new: true\n",
+    )
+    .unwrap();
+
+    let (code, out) = run(dir.path(), &["plan", "plan.yml"]);
+    // §8: `plan` with work pending exits 2.
+    assert_eq!(code, 2, "a pending change is exit 2: {out}");
+    assert!(out.contains(r#"model: "sonnet" → "opus""#), "{out}");
+    assert!(out.contains("new: absent → true"), "{out}");
+    assert!(
+        !out.contains("@@"),
+        "a unified diff has no business here: {out}"
+    );
+    // Read-only: `plan` leaves the file alone.
+    assert_eq!(read(dir.path(), "p.json"), r#"{"model": "sonnet"}"#);
+}
