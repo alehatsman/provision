@@ -1563,6 +1563,148 @@ fn a_shell_variable_in_unless_is_left_alone() {
     assert_eq!(out.status.code(), Some(0), "{text}");
 }
 
+/// Write one step into a tempdir and validate it. The step body is given
+/// whole, because which key the path sits under is the variable here.
+fn validate_step(dir: &Path, step: &str) -> (i32, String) {
+    let path = dir.join("p.yml");
+    std::fs::write(
+        &path,
+        format!("description: one step\nsteps:\n  - name: the step\n{step}"),
+    )
+    .expect("writing into the test's own tempdir");
+    let out = run(&["validate", &path.display().to_string()]);
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr),
+    )
+}
+
+// Spec §3.2 lists four field families provision reads as paths itself, and
+// two of them had no test: `dest` on all three of `template`, `download` and
+// `git`, and `cwd` on any step. The check is one function over a table
+// (`src/expand.rs:1688`), so a family missing from that table fails silently
+// and in exactly the way the rule exists to prevent -- `$VAR` taken as a
+// literal directory name, with `validate` and `plan` both calling the file
+// clean.
+#[test]
+fn a_shell_variable_is_refused_in_every_path_field_provision_reads() {
+    let dir = tempfile::tempdir().unwrap();
+    for (what, step) in [
+        (
+            "template dest",
+            "    template: { src: ./t.j2, dest: \"$OUT/rendered\" }\n",
+        ),
+        (
+            "download dest",
+            "    download: { url: \"https://example.invalid/x\", dest: \"$OUT/x\", sha256: \"0000000000000000000000000000000000000000000000000000000000000000\" }\n",
+        ),
+        (
+            "git dest",
+            "    git: { repo: \"https://example.invalid/r.git\", dest: \"$OUT/r\" }\n",
+        ),
+        (
+            "cwd",
+            "    shell: \"true\"\n    cwd: \"$OUT\"\n    changed_when: \"false\"\n",
+        ),
+    ] {
+        let (code, text) = validate_step(dir.path(), step);
+        assert_eq!(code, EXIT_VALIDATION, "{what} was accepted:\n{text}");
+        assert!(
+            text.contains("shell variable `$OUT`"),
+            "{what} did not name the variable:\n{text}"
+        );
+        assert!(
+            text.contains("{{ env.OUT }}"),
+            "{what} did not say what to write instead:\n{text}"
+        );
+    }
+}
+
+// §3.2: "a `raw: true` body is not rendered at all and is exempt; `creates`
+// and `cwd` are rendered whatever `raw` says, so they are checked whatever
+// `raw` says." Both halves, because the exemption is the part that can
+// quietly grow to cover the modifiers too -- and a `creates` silently
+// exempted is a gate that never matches with `--strict` still satisfied.
+#[test]
+fn a_raw_body_is_exempt_and_its_modifiers_are_not() {
+    let dir = tempfile::tempdir().unwrap();
+    // `{{` in a raw body is the author's, not an unrendered template.
+    let (code, text) = validate_step(
+        dir.path(),
+        "    file: { path: ./x, state: file, content: \"{{ not a template }}\" }\n    raw: true\n",
+    );
+    assert_eq!(
+        code, 0,
+        "a raw body was checked as if it were rendered:\n{text}"
+    );
+
+    // The same step's `creates` is rendered either way, so it is checked
+    // either way.
+    let (code, text) = validate_step(
+        dir.path(),
+        "    file: { path: ./x, state: file, content: \"{{ not a template }}\" }\n    raw: true\n    creates: \"$CACHE/x\"\n",
+    );
+    assert_eq!(code, EXIT_VALIDATION, "`raw` exempted a modifier:\n{text}");
+    assert!(text.contains("shell variable `$CACHE`"), "{text}");
+}
+
+// §9.3: `via` is a field on the step event, so it is on every verb that
+// emits one. It was pinned only under `plan --plan-no-probe --json` -- the
+// stream nobody automates against. `apply --json` is the one a CI runner
+// reads, and it is the one where telling two invocations of a component
+// apart decides which call site a failure belongs to.
+//
+// And through `import`, not only `use`: §3.1 gives them the same call-site
+// rule and the walk dispatches them at three separate sites
+// (`src/expand.rs:477`, `:531`, `:585`), so "it works for `use`" is not an
+// answer about `import`.
+#[test]
+fn via_is_on_the_apply_stream_and_names_an_import_call_site() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("leaf.yml"),
+        // `import:` takes a plan -- a bare list of steps -- where `use:`
+        // takes a component. The call site is named the same way for both.
+        "- name: leaf step\n  shell: \"true\"\n  changed_when: \"false\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("mid.yml"),
+        "description: mid\nsteps:\n  - name: inner import\n    import: ./leaf.yml\n",
+    )
+    .unwrap();
+    let root = dir.path().join("root.yml");
+    std::fs::write(
+        &root,
+        "description: root\nsteps:\n  - name: outer use\n    use: ./mid.yml\n  - name: at the root\n    shell: \"true\"\n    changed_when: \"false\"\n",
+    )
+    .unwrap();
+
+    let out = run(&["apply", "--json", &root.display().to_string()]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    let steps: Vec<serde_json::Value> = stdout
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter(|r| r["event"] == "step")
+        .collect();
+    assert_eq!(steps.len(), 2, "{stdout}");
+    // One entry per call site, outermost first, whichever verb the site
+    // used.
+    assert_eq!(
+        steps[0]["via"],
+        serde_json::json!(["outer use", "inner import"]),
+        "{stdout}"
+    );
+    // §9.3: absent at depth 0, where there is no call path to report --
+    // absent, not an empty array, which a consumer would have to
+    // special-case.
+    assert!(
+        steps[1]["via"].is_null(),
+        "a root-level step carried a call path:\n{stdout}"
+    );
+}
+
 // #32: a `use` step's `name:` was stored and never printed — `do_use` never
 // reaches `finish`, so it only ever showed when the step was skipped. Two
 // invocations of one component then emitted byte-identical `file`, `line`

@@ -2204,3 +2204,63 @@ fn rel_display(p: &Path) -> String {
         .and_then(|cwd| p.strip_prefix(cwd).ok().map(crate::error::show))
         .unwrap_or_else(|| crate::error::show(p))
 }
+
+#[cfg(test)]
+mod tests {
+    //! `shell_var` is the whole of §3.2's second half: whether a rendered
+    //! path holds a `$NAME` provision will take literally. It is a byte
+    //! scanner with four separate ways to decide a `$` is not a variable,
+    //! and every one of them was reached only through a whole `validate`
+    //! run — one case per end-to-end test, which is the most expensive
+    //! possible way to cover a function that takes a `&str`.
+
+    use super::shell_var;
+
+    #[test]
+    fn a_bare_name_and_a_braced_one_are_both_found() {
+        assert_eq!(shell_var("$CACHE_DIR/hit").as_deref(), Some("CACHE_DIR"));
+        assert_eq!(shell_var("${CACHE_DIR}/hit").as_deref(), Some("CACHE_DIR"));
+        // The first one, not the last: the message names a variable to
+        // rewrite, and the first is the one a reader finds.
+        assert_eq!(shell_var("$ONE/$TWO").as_deref(), Some("ONE"));
+        // Anywhere in the path, not only at the front.
+        assert_eq!(shell_var("/opt/$TOOL/bin").as_deref(), Some("TOOL"));
+    }
+
+    #[test]
+    fn a_dollar_that_is_not_a_variable_is_just_a_character() {
+        // A filename may hold any of these, and refusing one would refuse a
+        // path that is correct as written.
+        for s in [
+            "no dollar here",
+            "cost$",          // a lone `$` at the end
+            "a $ b",          // a `$` followed by a space
+            "$-weird",        // a `$` followed by punctuation
+            "${unclosed/hit", // a brace that never closes
+            "${}",            // braces around nothing
+            "$1/first",       // a shell positional, not an environment name
+            "100$/each",      // a digit cannot start a name
+        ] {
+            assert_eq!(shell_var(s), None, "`{s}` was read as a variable");
+        }
+    }
+
+    #[test]
+    fn a_name_ends_where_the_identifier_does() {
+        assert_eq!(shell_var("$HOME/x").as_deref(), Some("HOME"));
+        assert_eq!(shell_var("$HOME-old").as_deref(), Some("HOME"));
+        assert_eq!(shell_var("$A1_b2.txt").as_deref(), Some("A1_b2"));
+        // A multi-byte character ends the name rather than splitting it,
+        // which is the reason the scan is byte-wise at all.
+        assert_eq!(shell_var("$DIR€/x").as_deref(), Some("DIR"));
+        assert_eq!(shell_var("${DIR}€").as_deref(), Some("DIR"));
+    }
+
+    #[test]
+    fn a_later_dollar_is_still_found_after_an_earlier_one_fails() {
+        // The loop continues past a `$` that is not a variable rather than
+        // stopping at it -- otherwise a path holding both reports clean.
+        assert_eq!(shell_var("$ /then $REAL").as_deref(), Some("REAL"));
+        assert_eq!(shell_var("${unclosed $REAL").as_deref(), Some("REAL"));
+    }
+}

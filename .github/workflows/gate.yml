@@ -89,6 +89,20 @@ jobs:
         if: matrix.tools
         run: ./target/release/provision apply tasks/tools.yml
 
+      # `list tasks/` below parses root keys only, by design (§8: the listing
+      # is the one command a broken file cannot break), so a syntax error
+      # inside `tasks/findings.yml` or `ci-fast.yml` shipped unnoticed —
+      # nothing in CI read past the first four keys of any task file. This
+      # does. After the tools step, because `ci.yml` and `ci-fast.yml` `use:`
+      # the checkout it makes and a `use` path resolves during validation.
+      - name: Every task file is valid
+        if: matrix.tools
+        run: |
+          set -eu
+          for f in tasks/*.yml; do
+            ./target/release/provision validate "$f"
+          done
+
       # The whole point: one process, one job file, the stream on stdout. The
       # human output goes to stderr and is live in this log (spec §9.3), so
       # redirecting stdout costs no visibility.
@@ -125,6 +139,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # First, and before anything is built: every other use of the checker
+      # points it at a stream expected to pass, so a checker that degraded to
+      # a no-op would leave this gate green and the contract unguarded. That
+      # is the one failure a green gate cannot report. Needs nothing but
+      # python3, so it costs seconds and runs even when the build is broken.
+      - name: The stream checker still refuses a bad stream
+        run: python3 .github/check-stream-selftest.py
+
+      # A key of its own rather than the gate job's: both jobs built the same
+      # `ubuntu-latest-build-<lock>` entry and raced to write it. `restore-keys`
+      # still reuses whatever the gate left, so this costs no rebuild.
       - name: Cache the build
         uses: actions/cache@v4
         with:
@@ -132,8 +157,10 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ubuntu-latest-build-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ubuntu-latest-build-
+          key: ubuntu-latest-contract-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ubuntu-latest-contract-
+            ubuntu-latest-build-
 
       - name: Build provision
         run: cargo build --release --locked

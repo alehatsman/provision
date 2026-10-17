@@ -1,6 +1,5 @@
 ---
 source: tests/apply.rs
-assertion_line: 728
 expression: text
 ---
   tests/fixtures/apply/plan_all_verdicts.yml

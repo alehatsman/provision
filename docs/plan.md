@@ -592,6 +592,31 @@ Gate
   and runs the suite on a real `windows-latest` host on every push
   (`.github/workflows/gate.yml`), which is strictly more than the
   cross-check asked for. See "Where this stands" above.
+- **Decided 2026-10-17 (#52): what the fleet tests, and what GitHub tests.**
+  The 0.9.2 coverage audit found two paths CI never runs, and neither is
+  being moved into CI. They run on the fleet's own machines, which is where
+  this tool is used.
+  - *macOS.* `defaults` (§6.10) and the macOS `stat` format
+    (`src/actions/file.rs:403`) are exercised by
+    `defaults_applies_twice_changed_then_ok` and the branch at
+    `tests/apply.rs:2298` — on every local suite run, because the machine
+    this is developed on is the macOS machine. A `macos-latest` gate job
+    would re-run on GitHub what already runs here before every push. Free on
+    a public repo and still not worth the wall-clock.
+  - *The container package tests.* Six tests put a real apt and pacman in a
+    throwaway container (`tests/apply.rs`, "pkg, in a container"). They ran
+    nowhere: `#[ignore]`d, env-gated, and no workflow or task set the
+    variable. `tasks/container-tests.yml` is now that task, for the PCs'
+    WSL side. They cannot run from the mac at all — the harness mounts this
+    host's test binary into a Linux image — and the harness now says so and
+    skips instead of failing as `Exec format error`.
+  - Wiring either into `gate.yml` stays a one-line change if the fleet ever
+    stops being the place they run.
+- **Known and open (#52):** no `apply` snapshot renders on Windows. Every
+  one lives in `tests/apply.rs`, which is `#![cfg(unix)]`, so the Windows
+  job pins verdicts and the JSON shape but no rendered terminal output. A
+  per-platform snapshot suffix would close it and costs a second file per
+  snapshot; not taken yet.
 - **Owner's:** moongit's runner actually reading the stream, cancelling with
   TERM and passing `--deadline`. That is the real gate and it lives in that
   repo. **Check on 2026-12-12**: unexercised by then means D17's CI half and

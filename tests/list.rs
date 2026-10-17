@@ -552,3 +552,105 @@ fn list_json_answers_for_a_directory() {
     assert!(names.contains(&"flat"), "{out}");
     assert!(names.contains(&"palette"), "{out}");
 }
+
+// D25: `list --json` is a contract an agent reads, and its two "I am not
+// sure" branches had no test at all. Both say the same thing in the house
+// way (D11) — name what is not known rather than present a partial answer as
+// a complete one — and both are exactly the branches a consumer cannot
+// notice the absence of.
+
+// A directory listing names the file it could not parse rather than omitting
+// it, and the components around it still list. A silently short array is the
+// failure mode: an agent reading it concludes the component does not exist.
+#[test]
+fn list_json_for_a_directory_names_a_file_it_could_not_parse() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("good.yml"),
+        "description: a component that parses\n\
+         props:\n\
+        \x20 tool: {type: string, required: true}\n\
+         steps:\n\
+        \x20 - name: s\n\
+        \x20   shell: \"true\"\n\
+        \x20   changed_when: \"false\"\n",
+    )
+    .unwrap();
+    // A plan, not a component: it loads and is the wrong shape, which is the
+    // common way a file in a component directory is not one.
+    std::fs::write(
+        dir.path().join("broken.yml"),
+        "- name: a plan, not a component\n  shell: \"true\"\n  changed_when: \"false\"\n",
+    )
+    .unwrap();
+
+    let (code, out) = run(&["list", "--json", dir.path().to_str().unwrap()]);
+    // The listing is the one command a broken file cannot break (§8), so the
+    // exit code is still 0.
+    assert_eq!(code, 0, "{out}");
+    let doc: serde_json::Value = serde_json::from_str(&out).expect("a JSON document");
+    let items = doc["components"].as_array().expect("an array");
+    assert_eq!(
+        items.len(),
+        2,
+        "a file was dropped from the listing:\n{out}"
+    );
+
+    let bad = items
+        .iter()
+        .find(|c| c["name"] == "broken")
+        .expect("the file that would not parse is named");
+    assert!(
+        bad["error"].as_str().is_some_and(|e| !e.is_empty()),
+        "the file was named without saying what was wrong:\n{out}"
+    );
+    // An error entry is an error entry: no props list to mistake for an
+    // interface.
+    assert!(bad["props"].is_null(), "{out}");
+
+    let good = items
+        .iter()
+        .find(|c| c["name"] == "good")
+        .expect("the component beside it still lists");
+    assert_eq!(good["props"][0]["name"], "tool", "{out}");
+}
+
+// `reads_complete: false` is the other half of #41: the props list is the
+// declared interface, `reads` is the real one, and a `template` `src` that
+// cannot be opened means the scan could not finish reading it. Saying so is
+// the difference between a list that may be short and a list presented as
+// whole.
+#[test]
+fn list_json_says_when_it_could_not_finish_reading_a_component() {
+    let dir = tempfile::tempdir().unwrap();
+    // The `src` is a fixed path that does not exist, which is the branch:
+    // nothing to read, and nothing to conclude from not reading it.
+    std::fs::write(
+        dir.path().join("c.yml"),
+        "description: renders a template that is not here\n\
+         steps:\n\
+        \x20 - name: render\n\
+        \x20   template: { src: ./gone.j2, dest: ./out }\n",
+    )
+    .unwrap();
+    let path = dir.path().join("c.yml");
+
+    let (code, out) = run(&["list", "--json", path.to_str().unwrap()]);
+    assert_eq!(code, 0, "{out}");
+    let doc: serde_json::Value = serde_json::from_str(&out).expect("a JSON document");
+    assert_eq!(
+        doc["reads_complete"], false,
+        "an unreadable source was reported as a complete scan:\n{out}"
+    );
+
+    // The text form says the same thing in words, and says it even though
+    // `reads` is empty — "none found" alone would read as a component with
+    // no caller interface, which is the opposite of what is known.
+    let (code, text) = run(&["list", path.to_str().unwrap()]);
+    assert_eq!(code, 0, "{text}");
+    assert!(text.contains("reads from the caller"), "{text}");
+    assert!(
+        text.contains("could not be read"),
+        "the uncertainty was not said in words:\n{text}"
+    );
+}

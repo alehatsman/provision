@@ -1026,4 +1026,59 @@ mod tests {
                    never\t\tunknown ok not-installed\n";
         assert!(parse_dpkg(out).is_empty(), "{:?}", parse_dpkg(out));
     }
+
+    // winget is the only manager Windows has, and the only coverage it had
+    // ran through a shell stub inside `tests/apply.rs`, which is
+    // `#![cfg(unix)]` — so the parser for the one Windows manager was
+    // exercised on every platform except Windows. The table it reads is
+    // column-aligned, not delimited, which is why the cut is by the header's
+    // own offsets and in `char`s: the `Café` row misaligns under a byte
+    // offset and the `7-Zip` row has no Version at all. Same fixture the
+    // end-to-end test feeds the stub, read here with no shell in the way, so
+    // this one runs on Windows too.
+    #[test]
+    fn parse_winget_cuts_by_the_headers_offsets() {
+        let got = parse_winget(include_str!(
+            "../../tests/fixtures/apply/pkg/winget_list.txt"
+        ));
+        // The `Id` column is cut between two header offsets and is exact.
+        // Presence is keyed on it, which is the whole of what `pkg` asks
+        // without a floor.
+        assert_eq!(got.len(), 4, "{got:?}");
+        for id in [
+            "Google.Chrome",
+            "Microsoft.VisualStudioCode",
+            "7zip.7zip",
+            "Cafe.MusicPlayer",
+        ] {
+            assert!(
+                got.contains_key(id),
+                "{id} was not read as installed: {got:?}"
+            );
+        }
+        // The version is cut from its header offset to end of line, so it
+        // carries the `Source` column with it -- issue #55. Pinned as it is
+        // rather than as it should be: the column arithmetic is what this
+        // test is for, the bleed is tracked separately, and a test asserting
+        // the fix would be red until it lands. Only a `>=` floor reads this
+        // string; `#55` has what it does to one.
+        assert!(
+            got["Google.Chrome"].starts_with("120.0.6099.129"),
+            "the version column was cut wrong: {got:?}"
+        );
+        assert!(
+            got["Cafe.MusicPlayer"].starts_with("3.2.1"),
+            "a non-ASCII name misaligned the row: {got:?}"
+        );
+    }
+
+    // No header, no table. An empty map is "nothing installed", which makes
+    // the step offer every name — the safe answer. A panic or a row built
+    // from the banner is not.
+    #[test]
+    fn parse_winget_without_a_header_reads_nothing() {
+        assert!(
+            parse_winget("Windows Package Manager v1.6\nNo installed package found.\n").is_empty()
+        );
+    }
 }

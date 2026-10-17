@@ -1581,6 +1581,19 @@ fn a_deadline_reaches_into_a_retry_delay_and_keeps_the_last_attempt() {
         !step.contains("after 0ms"),
         "a duration nobody waited:\n{out}"
     );
+    // And it says which attempt it stopped before, which is how a reader
+    // tells "the clock ran out while attempt 1 was running" from "the clock
+    // ran out in the delay before attempt 2". Only the second is this
+    // fixture, and the attempt numbers are the whole difference -- §10's
+    // "the register holds the last attempt" is unreadable without them.
+    assert!(
+        step.contains("deadline exceeded before attempt 2/3"),
+        "the stop did not name the attempt it stopped before:\n{out}"
+    );
+    assert!(
+        step.contains(r#""attempt":1"#) && step.contains(r#""attempts":3"#),
+        "§9.3's attempt keys are not on the step that retried:\n{out}"
+    );
 }
 
 // The same sleep, the other stop: a TERM during a retry's `delay` ends the run
@@ -3587,6 +3600,7 @@ exit 0
             path.to_str().expect("temp paths are UTF-8"),
             "--deadline",
             "3s",
+            "--json",
         ])
         .env(
             "PATH",
@@ -3604,9 +3618,28 @@ exit 0
         String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
 
     assert_eq!(out.status.code(), Some(124), "{text}");
+    // The step's own `duration_ms`, not wall clock. The gap is two seconds
+    // wide by construction -- reclamped the step ends near 3s, given the
+    // budget twice it ends near 5s -- but a wall-clock reading of it also
+    // carries process startup and this binary's own build-and-launch, which
+    // on a loaded machine ate most of the margin and failed the test for
+    // reasons that had nothing to do with the clamp. provision measures the
+    // step itself, so the noise is not in the number.
+    let step_ms = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .find(|r| r["event"] == "step")
+        .and_then(|r| r["duration_ms"].as_u64())
+        .expect("the step reported a duration");
     assert!(
-        elapsed < std::time::Duration::from_millis(4000),
-        "the second command was given the budget the first had already spent: {elapsed:?}\n{text}"
+        step_ms < 4000,
+        "the second command was given the budget the first had already spent: {step_ms}ms\n{text}"
+    );
+    // The outer bound, loose on purpose: it catches a run that hung without
+    // competing with the assertion above for the same margin.
+    assert!(
+        elapsed < std::time::Duration::from_secs(15),
+        "the run did not end: {elapsed:?}\n{text}"
     );
 }
 
@@ -3994,6 +4027,19 @@ fn a_typed_actions_command_is_bound_by_the_steps_timeout() {
 fn container_tests_enabled() -> bool {
     if std::env::var("PROVISION_CONTAINER_TESTS").is_err() {
         eprintln!("skipped: set PROVISION_CONTAINER_TESTS=1");
+        return false;
+    }
+    // `in_container` mounts *this host's* test binary into the image, so the
+    // host has to be the platform the image runs. From a macOS host every one
+    // of these fails as `sh: 1: provision: Exec format error`, which says
+    // nothing about what is wrong or that nothing is wrong with provision.
+    // The fleet's only Linux machines are containers and the CI runner, so
+    // this is the common case rather than the odd one.
+    if !cfg!(target_os = "linux") {
+        eprintln!(
+            "skipped: the container mounts this host's test binary, so these run \
+             from a Linux host only"
+        );
         return false;
     }
     true

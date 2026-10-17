@@ -227,6 +227,33 @@ fn a_file_step_writes_once_and_then_is_ok() {
     );
 }
 
+// §6.3: "Changed when content, mode, owner, group, or type differs" — so a
+// `file` step that declares a `mode` has to converge on the second apply the
+// same way one that declares only content does. The sibling above applies
+// twice without a `mode:`, which is the half that works everywhere.
+//
+// Ignored on Windows, where it fails: `mode_of` reads 0 for every target and
+// `set_mode` writes nothing, so the delta is reported and never closed and
+// the step is `changed` forever (#57). `tasks/install.yml:40` is exactly this
+// step. The ignore comes off with whichever fix lands.
+#[test]
+#[cfg_attr(windows, ignore = "#57: mode is read as 0 and written nowhere")]
+fn a_file_step_with_a_mode_converges() {
+    let dir = tempfile::tempdir().unwrap();
+    let body = "  - name: write it\n    file: { path: ./moded.txt, state: file, content: \"hello\\n\", mode: \"0640\" }\n";
+    let (code, out) = apply(dir.path(), body, &[]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(verdict(&out, "write it"), "changed", "{out}");
+
+    let (code, out) = apply(dir.path(), body, &[]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(
+        verdict(&out, "write it"),
+        "ok",
+        "a `mode` that is already set was reported as a change:\n{out}"
+    );
+}
+
 // §8: tag selection is filtering, not failure — the steps it excludes are
 // reported skipped and the run is green.
 #[test]
@@ -241,4 +268,73 @@ fn tags_select_which_steps_run() {
     assert_eq!(code, 0, "{out}");
     assert_eq!(verdict(&out, "tagged db"), "ok", "{out}");
     assert!(verdict(&out, "tagged web").starts_with("skipped"), "{out}");
+}
+
+/// A script that starts a grandchild which waits and then leaves a mark,
+/// and then blocks forever itself.
+///
+/// The mark is the assertion: provision kills the step's whole tree, not
+/// just the shell it spawned, so the grandchild must never get to write it.
+/// On unix that is `killpg`; on Windows it is `taskkill /T`, and until this
+/// test the Windows half was executed by nothing at all.
+fn grandchild_marking(marker: &Path) -> String {
+    let m = marker.display().to_string().replace('\\', "/");
+    if cfg!(windows) {
+        // `Start-Process` makes a real child of this shell, which is what
+        // `taskkill /T` walks. A background job would not be one.
+        format!(
+            "Start-Process -NoNewWindow powershell -ArgumentList '-NoProfile','-Command',\
+             'Start-Sleep -Seconds 5; Set-Content -Path \"{m}\" -Value mark'; \
+             Start-Sleep -Seconds 60"
+        )
+    } else {
+        // `&&`, not `;`: a TERM that kills the `sleep` leaves its exit
+        // status non-zero and the write is skipped. With `;` the shell runs
+        // the next command before acting on its own pending TERM, so the
+        // mark appeared at the kill rather than five seconds later -- a
+        // flake in the test, not in the kill, and one that reported the
+        // opposite of what happened.
+        format!("(sleep 5 && echo mark > \"{m}\") &\nsleep 60\n")
+    }
+}
+
+// Spec §4: `timeout` bounds the step, and a step is not its shell — a child
+// the shell started is still the step's. Both platforms promise it and only
+// one of them was tested: every kill and reap test lives in `tests/apply.rs`,
+// which is `#![cfg(unix)]`, so `taskkill /T` (`src/exec/process.rs:458`) ran
+// in no test on any machine. `tests/apply_cross_platform.rs` had a deadline
+// test, but it asserts exit 124 and says nothing about what is still
+// running afterwards — a kill that reached only the shell passes it.
+#[test]
+fn a_timeout_kills_the_whole_tree_on_every_platform() {
+    let dir = tempfile::tempdir().unwrap();
+    let marker = dir.path().join("marker.txt");
+    let started = std::time::Instant::now();
+    let (code, out) = apply(
+        dir.path(),
+        &format!(
+            "  - name: spawns a grandchild\n    shell: |\n{}\n    timeout: 2s\n    changed_when: \"false\"\n",
+            grandchild_marking(&marker)
+                .lines()
+                .map(|l| format!("      {l}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ),
+        &[],
+    );
+    let elapsed = started.elapsed();
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("timed out after"), "{out}");
+    // The step's own clock, not the run's: nothing here passes `--deadline`.
+    assert!(
+        elapsed < std::time::Duration::from_secs(20),
+        "the step outlived its own timeout: {elapsed:?}\n{out}"
+    );
+    // Past when the grandchild would have written, had anything let it.
+    std::thread::sleep(std::time::Duration::from_secs(5));
+    assert!(
+        !marker.exists(),
+        "a grandchild outlived the step it belonged to and wrote {}",
+        marker.display()
+    );
 }
