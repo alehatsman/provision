@@ -226,9 +226,33 @@ fn parse_winget(out: &str) -> BTreeMap<String, String> {
     let Some(header) = lines.find(|l| l.contains("Id") && l.contains("Version")) else {
         return BTreeMap::new();
     };
-    let (Some(id_at), Some(version_at)) = (header.find("Id"), header.find("Version")) else {
+    // Char offsets, because the rows below are cut in `char`s: a non-ASCII
+    // name earlier in a row shifts every byte offset after it. The header
+    // itself is ASCII, so this converts nothing today and stops the two
+    // halves from disagreeing if that ever stops being true.
+    let head: Vec<char> = header.chars().collect();
+    let at = |word: &str| {
+        header
+            .find(word)
+            .and_then(|b| header.get(..b))
+            .map(|before| before.chars().count())
+    };
+    let (Some(id_at), Some(version_at)) = (at("Id"), at("Version")) else {
         return BTreeMap::new();
     };
+    // Where the Version column ends: the start of whatever column comes
+    // next. It used to run to end of line, so every version carried the rest
+    // of the row with it -- `120.0.6099.129  winget`, and a row with a blank
+    // Version parsed as the version `winget`, which `Floor::satisfied_by`
+    // then called unreadable and failed the step over (#55).
+    //
+    // The next column rather than `Source` by name: `winget list` inserts an
+    // `Available` column when an upgrade exists, so naming `Source` would be
+    // right only on the machines with nothing to upgrade.
+    let version_end = (version_at + 1..head.len()).find(|&i| {
+        head.get(i).is_some_and(|c| !c.is_whitespace())
+            && head.get(i - 1).is_some_and(|c| c.is_whitespace())
+    });
     let cut = |l: &str, from: usize, to: Option<usize>| -> String {
         let chars: Vec<char> = l.chars().collect();
         if from >= chars.len() {
@@ -247,7 +271,7 @@ fn parse_winget(out: &str) -> BTreeMap<String, String> {
         .skip_while(|l| l.starts_with('-'))
         .filter_map(|l| {
             let id = cut(l, id_at, Some(version_at));
-            (!id.is_empty()).then(|| (id, cut(l, version_at, None)))
+            (!id.is_empty()).then(|| (id, cut(l, version_at, version_end)))
         })
         .collect()
 }
@@ -1056,20 +1080,32 @@ mod tests {
                 "{id} was not read as installed: {got:?}"
             );
         }
-        // The version is cut from its header offset to end of line, so it
-        // carries the `Source` column with it -- issue #55. Pinned as it is
-        // rather than as it should be: the column arithmetic is what this
-        // test is for, the bleed is tracked separately, and a test asserting
-        // the fix would be red until it lands. Only a `>=` floor reads this
-        // string; `#55` has what it does to one.
-        assert!(
-            got["Google.Chrome"].starts_with("120.0.6099.129"),
-            "the version column was cut wrong: {got:?}"
+        // The version is the Version column and nothing after it (#55). It
+        // used to run to end of line and carry `Source` with it.
+        assert_eq!(got["Google.Chrome"], "120.0.6099.129");
+        assert_eq!(got["Microsoft.VisualStudioCode"], "1.85.1");
+        // A non-ASCII name earlier in the row must not shift the cut.
+        assert_eq!(got["Cafe.MusicPlayer"], "3.2.1");
+        // Present with no version. The row still counts as installed: the
+        // question `pkg` asks without a floor is presence, and a blank
+        // Version column is not an absence. This read as the version
+        // `winget` before, which `Floor::satisfied_by` called unreadable and
+        // failed the step over.
+        assert_eq!(got["7zip.7zip"], "");
+    }
+
+    // `winget list` grows an `Available` column when something can be
+    // upgraded, so the column after Version is not always `Source`. Cutting
+    // at the next column start rather than at a column named `Source` is
+    // what makes both tables read the same.
+    #[test]
+    fn parse_winget_stops_at_the_next_column_whatever_it_is() {
+        let got = parse_winget(
+            "Name                    Id                            Version   Available  Source\n\
+             ----------------------------------------------------------------------------------\n\
+             Google Chrome           Google.Chrome                 120.0     121.0      winget\n",
         );
-        assert!(
-            got["Cafe.MusicPlayer"].starts_with("3.2.1"),
-            "a non-ASCII name misaligned the row: {got:?}"
-        );
+        assert_eq!(got["Google.Chrome"], "120.0", "{got:?}");
     }
 
     // No header, no table. An empty map is "nothing installed", which makes
