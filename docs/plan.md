@@ -45,7 +45,8 @@ Open, and all of it the owner's — none of it can close from this machine:
   `--explain-var` stays spec'd and unbuilt, marked as such in §10.
   mooncake stays installed everywhere: a tool, not a dependency.
   `--keep-going` built — spec §8, `main.rs` and `expand.rs`.
-- ~~A tag~~ — `v0.9.1` is cut, and `v0.9.2` after it. `main` lives at
+- ~~A tag~~ — `v0.9.1` is cut, `v0.9.2` after it, and `v0.10.0` after
+  that. `main` lives at
   `github.com/alehatsman/provision`, public since 2026-09-08.
 - go-quality drops `name:` and `version:` from every preset and tags. Both
   are root keys provision rejects, and it stays strict: a `version:` in a
