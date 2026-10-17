@@ -232,12 +232,12 @@ fn a_file_step_writes_once_and_then_is_ok() {
 // same way one that declares only content does. The sibling above applies
 // twice without a `mode:`, which is the half that works everywhere.
 //
-// Ignored on Windows, where it fails: `mode_of` reads 0 for every target and
-// `set_mode` writes nothing, so the delta is reported and never closed and
-// the step is `changed` forever (#57). `tasks/install.yml:40` is exactly this
-// step. The ignore comes off with whichever fix lands.
+// It used to fail on Windows: `mode_of` reads 0 for every target and
+// `set_mode` writes nothing, so the delta was reported and never closed and
+// the step was `changed` forever (#57) — on `tasks/install.yml:40`, which is
+// exactly this step. A platform with no modes now reports none, so the step
+// converges there on the second apply like everywhere else.
 #[test]
-#[cfg_attr(windows, ignore = "#57: mode is read as 0 and written nowhere")]
 fn a_file_step_with_a_mode_converges() {
     let dir = tempfile::tempdir().unwrap();
     let body = "  - name: write it\n    file: { path: ./moded.txt, state: file, content: \"hello\\n\", mode: \"0640\" }\n";

@@ -656,6 +656,17 @@ target is already gone.
 `mode` gets `0644` and a new directory `0755`. A target that already exists
 keeps the mode it has unless `mode` says otherwise.
 
+**`mode` is unix-only, and is accepted and ignored elsewhere.** Windows has
+no file mode to read or write, so a `mode` there is not compared and not
+reported: the step converges on content, type and the rest. Refusing it
+instead would mean a plan correct on three platforms needed a `when:` to
+stay correct on the fourth, and `mode: "0755"` is the right thing to write
+on every machine that has modes. It used to be compared against a mode read
+as `0000` and applied by a function that does nothing, so a `file` step with
+`mode:` reported `mode 0000 → 0755` and `changed` on every apply, forever —
+§2's idempotency, broken for the whole class. `owner` and `group` need
+`sudo`, which Windows does not have (§7), so they do not arise there.
+
 `mode` applies to the target, and directories created on the way to it get
 `0755`. That is what GNU `install -d -m` already does — intermediates are
 `0755` whatever the umask, and the mode lands on the last component — so the
