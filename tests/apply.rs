@@ -539,23 +539,25 @@ fn sigterm_reaches_a_child_still_holding_the_pipe() {
         .spawn()
         .expect("provision failed to start");
 
-    // Wait for the first attempt to have run, rather than sleeping a fixed
-    // 600ms and hoping. The old guess raced provision's own startup: on a
-    // loaded host the TERM arrived before the handler was installed, the
-    // default disposition killed the run outright, and the test failed with
-    // no exit code at all rather than the 143 it asserts -- three times in
-    // six runs on a busy box (#64). The marker is written by the step, so
-    // seeing it proves the walk is under way and the handler is up.
-    let attempted = dir.path().join("attempted");
+    // Wait for the step's background child to exist, rather than sleeping a
+    // fixed 600ms and hoping. The old guess raced provision's own startup:
+    // on a loaded host the TERM landed before the handler was installed, the
+    // default disposition killed the run outright, and the test failed on
+    // `status.code()` being None rather than on anything it means to assert
+    // (#64). The plan writes the pid, so seeing the file proves the step is
+    // running and the handler is up.
+    let pid = dir.path().join("child.pid");
     let waited = std::time::Instant::now();
-    while !attempted.exists() {
+    while !pid.exists() {
         assert!(
             waited.elapsed() < std::time::Duration::from_secs(30),
-            "the first attempt never ran"
+            "the step never started its child"
         );
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
-    // And let it reach the `delay` it is meant to be interrupted inside.
+    // The pid is the last thing the shell writes, so let it finish exiting:
+    // the stop under test is a TERM arriving once only the background child
+    // still holds the pipe.
     std::thread::sleep(std::time::Duration::from_millis(200));
     #[expect(
         clippy::let_underscore_must_use,
@@ -1763,7 +1765,25 @@ fn sigterm_reaches_into_a_retry_delay() {
         .spawn()
         .expect("provision failed to start");
 
-    std::thread::sleep(std::time::Duration::from_millis(600));
+    // Wait for the first attempt to have run, rather than sleeping a fixed
+    // 600ms and hoping. The old guess raced provision's own startup: on a
+    // loaded host the TERM arrived before the handler was installed, the
+    // default disposition killed the run outright, and the test failed on
+    // `status.code()` being None rather than on the timing it means to
+    // assert -- three of six runs on a busy box (#64). The step writes the
+    // marker, so seeing it proves the walk is under way and the handler is
+    // up.
+    let attempted = dir.path().join("attempted");
+    let waited = std::time::Instant::now();
+    while !attempted.exists() {
+        assert!(
+            waited.elapsed() < std::time::Duration::from_secs(30),
+            "the first attempt never ran"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    // And let it reach the `delay` it is meant to be interrupted inside.
+    std::thread::sleep(std::time::Duration::from_millis(200));
     #[expect(
         clippy::let_underscore_must_use,
         reason = "the child's own output is the assertion"
