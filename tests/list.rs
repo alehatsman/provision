@@ -654,3 +654,105 @@ fn list_json_says_when_it_could_not_finish_reading_a_component() {
         "the uncertainty was not said in words:\n{text}"
     );
 }
+
+// Issue #58, settled in §4: a step modifier is any key a step carries beside
+// its one action or structural key, so `props` and `optional` are modifiers
+// and `list --json` returns all sixteen under one key. The alternative was a
+// second category in the document, and this test is what makes the ruling
+// expensive to undo by accident: it pins the whole set and the whole
+// envelope, not a sample.
+//
+// Order is the table's order (`MODIFIERS`), which is §4's row order, because
+// the dump is the table.
+#[test]
+fn list_json_modifiers_are_the_sixteen_keys_of_spec_4() {
+    let (code, out) = run(&["list", "--json"]);
+    assert_eq!(code, 0, "{out}");
+    let doc: serde_json::Value = serde_json::from_str(&out).expect("one document");
+
+    let names: Vec<&str> = doc["modifiers"]
+        .as_array()
+        .expect("modifiers")
+        .iter()
+        .map(|m| m["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "name",
+            "when",
+            "unless",
+            "creates",
+            "sudo",
+            "timeout",
+            "retry",
+            "env",
+            "cwd",
+            "tags",
+            "register",
+            "changed_when",
+            "failed_when",
+            "raw",
+            "props",
+            "optional",
+        ],
+        "spec §4 has sixteen rows and the dump is that table"
+    );
+
+    // The two the issue was about are modifiers of a structural step, and
+    // `applies` is where that narrowness is said. They are not a separate
+    // category, and nothing else in the document may become one.
+    let applies = |n: &str| -> String {
+        doc["modifiers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["name"] == n)
+            .unwrap_or_else(|| panic!("{n} is a documented modifier"))["applies"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(applies("props"), "`use` only");
+    assert_eq!(applies("optional"), "`vars_file` only");
+
+    let mut keys: Vec<&str> = doc
+        .as_object()
+        .expect("a mapping")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        ["actions", "modifiers", "structural", "version"],
+        "the vocabulary has four keys; a fifth would be a second table to keep true"
+    );
+}
+
+// The ruling only holds if the two really are step keys: a `use` with
+// `props:` and a `vars_file` with `optional:` must parse, and the modifier
+// must be the thing that makes them parse rather than the structural key's
+// own body.
+#[test]
+fn props_and_optional_are_accepted_as_step_keys() {
+    let dir = tempfile::tempdir().unwrap();
+
+    let component = dir.path().join("c.yml");
+    std::fs::write(
+        &component,
+        "props:\n  variant:\n    type: string\nsteps:\n  - name: noop\n    shell: \"true\"\n    changed_when: \"false\"\n",
+    )
+    .unwrap();
+
+    let plan = dir.path().join("p.yml");
+    std::fs::write(
+        &plan,
+        "- name: call\n  use: ./c.yml\n  props: { variant: dark }\n- name: load\n  vars_file: ./absent.yml\n  optional: true\n",
+    )
+    .unwrap();
+
+    let (code, out) = run(&["validate", &plan.display().to_string()]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains("unknown key"), "{out}");
+}

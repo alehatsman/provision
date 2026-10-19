@@ -21,9 +21,11 @@ and a dry-run a person can trust.
   `assert`, `git`, `download`, `defaults` (the last three from phase 6, D4 as
   amended), `json` (D31).
 - Four structural keywords: `vars`, `vars_file`, `import`, `use`.
-- Step modifiers: `name`, `when`, `unless`, `creates`, `sudo`, `timeout`,
-  `retry`, `env`, `cwd`, `tags`, `register`, `changed_when`, `failed_when`,
-  `raw`.
+- Sixteen step modifiers: `name`, `when`, `unless`, `creates`, `sudo`,
+  `timeout`, `retry`, `env`, `cwd`, `tags`, `register`, `changed_when`,
+  `failed_when`, `raw`, `props`, `optional`. A modifier is any key a step
+  carries beside its one action or structural key, and the last two are
+  modifiers of a structural step (§4).
 - Facts about the local machine.
 - Five commands: `validate`, `plan`, `apply`, `list`, `facts`. The first
   three take a plan or a component as the root; a component's props come from
@@ -132,6 +134,14 @@ Call site:
   props: { variant: "{{ palette_variant }}" }
   tags: [core, palette]
 ```
+
+The two `props:` above are different things and the spec names them
+separately: the component root's is the **schema** — the props this
+component declares, with types, defaults and `required` — and the call
+site's is the **arguments** checked against it, which is a step key and so
+a step modifier (§4). Only the second appears in §4's table and in
+`provision list --json`'s `modifiers`; the first is a component root key,
+and `provision list <component.yml>` is what reports it.
 
 A call site's `name:` is read: it is the header the component's steps appear
 under, and the entry it contributes to each of their `via` paths (§9.3). An
@@ -354,22 +364,44 @@ a string that happens to parse.
 
 ## 4. Step modifiers
 
-| Modifier | Type | Default | Meaning |
-|---|---|---|---|
-| `name` | string | action key + first arg | Shown in output. Templated. |
-| `when` | expr | true | Skip the step when false. Evaluated before `unless`/`creates`. |
-| `unless` | string | — | A shell command, run through the interpreter `shell` defaults to (bash on unix, powershell on Windows), and with the step's own `sudo`, `env` and `cwd` — a root step's gate has to see root's view. Exit 0 means "already done", step skipped. Non-zero means run, **except** a gate that could not run at all: a spawn failure, `126`/`127` from the interpreter, or the gate hitting the step's timeout. Those fail the step (§10). A gate for a tool the plan has not installed yet must therefore ask whether the tool exists, not ask the tool: `command -v <tool> >/dev/null 2>&1`. `<tool> --version` is `127` on a fresh machine, which is a failed step, not a step that needs to run. |
-| `creates` | path | — | Skip when the path exists. |
-| `sudo` | bool | false | Templated (§3.4), but **cannot read a `register`**; a sole `{{ expr }}` must yield a bool. Run the action as root (§7). Windows: error; use `shell` from an elevated prompt. |
-| `timeout` | duration | 10m | Templated (§3.4), but **cannot read a `register`**. Kill the step and fail. `30s`, `5m`, `1h`. |
-| `retry` | `{attempts, delay}` | none | Both fields templated (§3.4), but **neither can read a `register`**. Re-run on failure. `delay` is a duration. Output shows attempt N/M. |
-| `env` | mapping | {} | Extra environment for every command the step runs: `shell`, `cmd`, `assert`'s `command`, `unless`, and the commands a typed action spawns (`pkg`, `service`, `git`, …). Templated. |
-| `cwd` | path | the invocation directory | Working directory for `shell`, `cmd`, `assert`'s `command`, `unless`, under every command and for every step, including one inside a `use`d component. A command runs where the operator is standing; a shared gate checked out elsewhere must not gate its own checkout. An explicit `cwd:` resolves against the step's own file, like every other path a plan names, and `component_dir` (§3.2) names a component's own directory for a path inside a shell string. Phase 5b, 2026-09-08: this used to be the step's file directory under `apply` and the invocation directory under `run`. Measured against the fleet, no step depended on the old default — zero `cwd:` modifiers, zero relative paths in shell strings — and one rule beats two. |
-| `tags` | list | [] | For `--tags` selection (§8). |
-| `register` | identifier | — | Store the step result as a variable: `{rc, stdout, stderr, changed, skipped, timed_out}`. The shape is fixed, and it binds even when the step did not run — see "a register for a step that never ran" below. |
-| `changed_when` | expr | action-defined | Override the changed verdict. `result` is in scope. |
-| `failed_when` | expr | `result.rc != 0` | Override the failure verdict. `result` is in scope. |
-| `raw` | bool | false | Do not template the action body. |
+| Modifier | Applies to | Type | Default | Meaning |
+|---|---|---|---|---|
+| `name` | any step | string | action key + first arg | Shown in output. Templated. |
+| `when` | any step | expr | true | Skip the step when false. Evaluated before `unless`/`creates`. |
+| `unless` | command steps | string | — | A shell command, run through the interpreter `shell` defaults to (bash on unix, powershell on Windows), and with the step's own `sudo`, `env` and `cwd` — a root step's gate has to see root's view. Exit 0 means "already done", step skipped. Non-zero means run, **except** a gate that could not run at all: a spawn failure, `126`/`127` from the interpreter, or the gate hitting the step's timeout. Those fail the step (§10). A gate for a tool the plan has not installed yet must therefore ask whether the tool exists, not ask the tool: `command -v <tool> >/dev/null 2>&1`. `<tool> --version` is `127` on a fresh machine, which is a failed step, not a step that needs to run. |
+| `creates` | command steps | path | — | Skip when the path exists. |
+| `sudo` | any action | bool | false | Templated (§3.4), but **cannot read a `register`**; a sole `{{ expr }}` must yield a bool. Run the action as root (§7). Windows: error; use `shell` from an elevated prompt. |
+| `timeout` | any action | duration | 10m | Templated (§3.4), but **cannot read a `register`**. Kill the step and fail. `30s`, `5m`, `1h`. |
+| `retry` | command steps | `{attempts, delay}` | none | Both fields templated (§3.4), but **neither can read a `register`**. Re-run on failure. `delay` is a duration. Output shows attempt N/M. |
+| `env` | action steps | mapping | {} | Extra environment for every command the step runs: `shell`, `cmd`, `assert`'s `command`, `unless`, and the commands a typed action spawns (`pkg`, `service`, `git`, …). Templated. |
+| `cwd` | command steps | path | the invocation directory | Working directory for `shell`, `cmd`, `assert`'s `command`, `unless`, under every command and for every step, including one inside a `use`d component. A command runs where the operator is standing; a shared gate checked out elsewhere must not gate its own checkout. An explicit `cwd:` resolves against the step's own file, like every other path a plan names, and `component_dir` (§3.2) names a component's own directory for a path inside a shell string. Phase 5b, 2026-09-08: this used to be the step's file directory under `apply` and the invocation directory under `run`. Measured against the fleet, no step depended on the old default — zero `cwd:` modifiers, zero relative paths in shell strings — and one rule beats two. |
+| `tags` | any step | list | [] | For `--tags` selection (§8). |
+| `register` | action steps | identifier | — | Store the step result as a variable: `{rc, stdout, stderr, changed, skipped, timed_out}`. The shape is fixed, and it binds even when the step did not run — see "a register for a step that never ran" below. |
+| `changed_when` | any action | expr | action-defined | Override the changed verdict. `result` is in scope. |
+| `failed_when` | any action | expr | `result.rc != 0` | Override the failure verdict. `result` is in scope. |
+| `raw` | any action | bool | false | Do not template the action body. |
+| `props` | `use` only | mapping | {} | The arguments this call site passes the component: its declared props, checked against the component's `props:` schema at `validate` time (§3.2). Values are templated in the caller's scope. |
+| `optional` | `vars_file` only | bool | false | A missing file is not an error; the step loads nothing and the walk continues (§3.1). |
+
+**A modifier is any key a step carries beside its one action or structural
+key.** That is the definition the parser uses — the unknown-key check reads
+this table and nothing else — and it is why the last two rows are here. A
+`props:` on a `use` and an `optional:` on a `vars_file` are step keys that
+are neither the step's subject nor part of its body, which is what every
+other row is too; the only thing that distinguishes them is that their
+subject is structural rather than an action, and the **Applies to** column
+is where that narrowness is said out loud. `props:` at a step is the call
+site's *arguments*; the component root's `props:` is the *schema* they are
+checked against, is not a step key, and is not in this table (§3.2).
+
+This is also what `provision list --json` returns under `modifiers`, and
+that one-table rule is the point: a machine reading the vocabulary without
+the spec beside it gets the keys a step may carry, all sixteen, from the
+same table the parser accepts them from. Splitting two of them into a
+second category would mean a second table to keep true and a second word a
+plan's author has to learn, and D19's noun budget is closed — plan,
+component, step, fact. These are step keys; the model already has a word for
+them.
 
 Order of evaluation: `when` → `unless` → `creates` → action → `failed_when`
 → `changed_when` → `register`.

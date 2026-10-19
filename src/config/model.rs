@@ -110,7 +110,11 @@ pub(crate) static MODIFIERS: &[ModifierDoc] = &[
         "any action",
         "do not render the action body as a template; written for `shell`, honoured by every action",
     ),
-    m("props", "`use` only", "the component's declared arguments"),
+    m(
+        "props",
+        "`use` only",
+        "the arguments this call site passes the component, checked against the component root's `props:` schema -- which is a component key, not a step key, and is not in this table",
+    ),
     m(
         "optional",
         "`vars_file` only",
