@@ -1,0 +1,13 @@
+---
+source: tests/apply_cross_platform.rs
+expression: out
+---
+  plan.yml · 1 step to run
+  ~ a file that is not there yet                     changed  [t]
+    │ --- current
+    │ +++ ./out/hello.txt
+    │ @@ -0,0 +1,2 @@
+    │ +one
+    │ +two
+
+  plan.yml · 1 step · 1 changed · [t]

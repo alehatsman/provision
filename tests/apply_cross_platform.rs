@@ -514,3 +514,118 @@ fn plan_names_the_leaves_it_would_change() {
     // Read-only: `plan` leaves the file alone.
     assert_eq!(read(dir.path(), "p.json"), r#"{"model": "sonnet"}"#);
 }
+
+// ── the rendered run (§9.1, §9.2) ─────────────────────────────────────────
+//
+// Every snapshot of apply's terminal output lived in `tests/apply.rs`, which
+// is `#![cfg(unix)]`, so the Windows job pinned the verdicts, the `--json`
+// shape and the deadline — and not one rendered line (#60). These three are
+// that render, one file each and not one per platform: the name column is a
+// fixed width and not the console's, the glyphs are the same characters
+// everywhere, and a path provision *prints* is written with `/` on every
+// platform (D29). A separator in the output is the point, so the plan is
+// nested a directory deep and the template is a tree.
+//
+// If one ever does differ, the answer is to fix the render and not to suffix
+// the snapshot: a second file per snapshot is the cost #60 names as the
+// reason this gap stayed open.
+
+/// Durations are the only thing in the output that changes between runs —
+/// `tests/apply.rs` filters them the same way.
+macro_rules! snapshot {
+    ($name:expr, $text:expr) => {
+        insta::with_settings!(
+            {filters => vec![
+                (r"\d+ms", "[t]"),
+                (r"\d+\.\d+s", "[t]"),
+            ]},
+            { insta::assert_snapshot!($name, $text) }
+        )
+    };
+}
+
+/// `apply`, with the plan written somewhere other than the tempdir's root.
+///
+/// The path provision prints is the one the operator named, so a plan one
+/// directory down is what puts a separator in the header and the summary —
+/// the line D29 is about.
+fn apply_at(dir: &Path, rel: &str, body: &str, extra: &[&str]) -> (i32, String) {
+    let path = dir.join(rel);
+    std::fs::create_dir_all(path.parent().expect("a relative plan path has a parent"))
+        .expect("creating the plan's directory in the test's own tempdir");
+    std::fs::write(&path, format!("description: a nested plan\nsteps:\n{body}"))
+        .expect("writing into the test's own tempdir");
+    let mut args = vec!["apply", rel];
+    args.extend_from_slice(extra);
+    run(dir, &args)
+}
+
+/// A rendered path never carries a `\`, on any platform (D29).
+///
+/// The snapshot already pins this on whichever platform it was taken on;
+/// this says out loud what would be wrong on the other one, so a Windows
+/// failure reads as "a separator leaked" and not as "a snapshot moved".
+fn no_backslashes(out: &str) {
+    assert!(
+        !out.contains('\\'),
+        "D29: a printed path must use `/` on every platform:\n{out}"
+    );
+}
+
+// §9.1: the header with its step count, one line per step with its glyph,
+// name column and verdict, and §9.2's summary. The nested plan path is the
+// D29 case.
+#[test]
+fn snapshot_the_rendered_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply_at(
+        dir.path(),
+        "plans/run.yml",
+        "  - name: an ungated shell is its own exit code\n    shell: \"exit 0\"\n    changed_when: \"false\"\n\
+         \x20 - name: changed_when decides\n    shell: \"exit 0\"\n    changed_when: \"true\"\n\
+         \x20 - name: a gate that says the work is done\n    shell: \"exit 0\"\n    when: \"false\"\n\
+         \x20 - name: failed_when forgives a non-zero exit\n    shell: \"exit 3\"\n    failed_when: \"false\"\n",
+        &[],
+    );
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("plans/run.yml"), "{out}");
+    no_backslashes(&out);
+    snapshot!("rendered_run", out);
+}
+
+// §9.1: the diff block under a `file` step that creates its target.
+#[test]
+fn snapshot_the_file_diff_block() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(
+        dir.path(),
+        "  - name: a file that is not there yet\n    file:\n      path: ./out/hello.txt\n      content: |\n        one\n        two\n",
+        &[],
+    );
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("@@"), "a unified diff must show:\n{out}");
+    no_backslashes(&out);
+    snapshot!("file_diff_block", out);
+}
+
+// §6.4 and §9.1: a `template` tree reports one diff per output, headed by the
+// output's path relative to `src`. That label is built from a `Path`, so it
+// is the render most likely to spell a separator the OS's way — which is the
+// bug this asserts is not there.
+#[test]
+fn snapshot_the_template_tree_diff_block() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("tpl/sub")).unwrap();
+    std::fs::write(dir.path().join("tpl/top.conf.j2"), "top = {{ 1 + 1 }}\n").unwrap();
+    std::fs::write(dir.path().join("tpl/sub/nested.conf.j2"), "nested = yes\n").unwrap();
+
+    let (code, out) = apply(
+        dir.path(),
+        "  - name: a tree of templates\n    template:\n      src: ./tpl\n      dest: ./rendered\n",
+        &[],
+    );
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("sub/nested.conf"), "{out}");
+    no_backslashes(&out);
+    snapshot!("template_tree_diff_block", out);
+}
