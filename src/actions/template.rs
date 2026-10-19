@@ -67,7 +67,11 @@ pub(crate) fn parse(
             let Some(content) = render_file(&entry, engine, ctx) else {
                 return Ok(None);
             };
-            let label = rel.display().to_string();
+            // D29: this label heads the output's diff, so it is a path
+            // provision *prints* — `/` on every platform, where a bare
+            // `display()` would spell `sub\x.conf` on Windows and fork the
+            // one assertion that is about these exact bytes.
+            let label = crate::error::show(&rel);
             outputs.push(
                 meta.clone()
                     .into_file(out.display().to_string(), content, Some(label)),

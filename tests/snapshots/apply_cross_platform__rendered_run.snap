@@ -1,0 +1,11 @@
+---
+source: tests/apply_cross_platform.rs
+expression: out
+---
+  plans/run.yml · 3 steps to run
+  ✓ an ungated shell is its own exit code            ok  [t]
+  ~ changed_when decides                             changed  [t]
+  - a gate that says the work is done                skipped   when: false  [t]
+  ✓ failed_when forgives a non-zero exit             ok  [t]
+
+  plans/run.yml · 4 steps · 1 changed · 2 ok · 1 skipped · [t]
