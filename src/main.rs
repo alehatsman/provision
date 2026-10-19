@@ -370,11 +370,10 @@ fn run() -> Result<u8, Diag> {
             // the whole point, so it is on by default there. A task or
             // component file legitimately has none, and stays opt-in. The
             // flag only ever forces it on, never off.
-            let root = Root::of(&plan)?;
+            let mut ex = expander(&vars, Mode::Validate, selection)?;
+            let root = Root::of(ex.root_doc(&plan)?);
             let by_root = root.strict_by_default();
-            let mut ex = expander(&vars, Mode::Validate, selection)?
-                .strict(strict || by_root)
-                .gate_from_root(by_root);
+            let mut ex = ex.strict(strict || by_root).gate_from_root(by_root);
             walk_root(&mut ex, root, &plan, &props)?;
             let base = cwd();
             if ex.diags.is_empty() {
@@ -406,8 +405,9 @@ fn run() -> Result<u8, Diag> {
             let mode = Mode::Plan {
                 probe: !plan_no_probe,
             };
-            let root = Root::of(&plan)?;
-            let mut ex = expander(&run.vars, mode, run.selection())?
+            let mut ex = expander(&run.vars, mode, run.selection())?;
+            let root = Root::of(ex.root_doc(&plan)?);
+            let mut ex = ex
                 // D26. Plan does not need a preflight the way apply does: it
                 // executes nothing, so a diag is non-fatal mid-walk and the
                 // report after it turns the walk into exit 3, which is the
@@ -501,8 +501,9 @@ fn run() -> Result<u8, Diag> {
             // have run — which is the regression D20 named. Here it lands
             // before `Sudo::preflight`, before `catch_interrupts`, and
             // before the apply expander exists.
-            let root = Root::of(&plan)?;
-            let mut check = expander(&run.vars, Mode::Validate, run.selection())?
+            let mut check = expander(&run.vars, Mode::Validate, run.selection())?;
+            let root = Root::of(check.root_doc(&plan)?);
+            let mut check = check
                 .strict(root.strict_by_default())
                 .gate_from_root(root.strict_by_default());
             walk_root(&mut check, root, &plan, &props)?;
@@ -673,17 +674,19 @@ enum Root {
 
 impl Root {
     /// Spec §8: the shape is read once per command. Two things ask for it —
-    /// `strict_by_default` and which entry point `walk_root` takes — and
-    /// asking twice meant loading and parsing the root file twice, because
-    /// this bypasses the `Loader` cache the walk itself uses (#62). The
-    /// answer cannot change between the two, so it is derived here and
-    /// carried.
-    fn of(path: &Path) -> Result<Root, Diag> {
-        Ok(if yaml::Doc::load(path)?.node().as_map().is_ok() {
+    /// `strict_by_default` and which entry point `walk_root` takes — and the
+    /// answer cannot change between them, so it is derived once and carried.
+    ///
+    /// The `Doc` comes from the expander's own `Loader` (`root_doc`), not a
+    /// fresh `Doc::load`: the walk is about to load the same path, and a
+    /// direct parse here both repeated the work and leaked a second copy of
+    /// the file for the process lifetime (#62).
+    fn of(doc: &'static yaml::Doc) -> Root {
+        if doc.node().as_map().is_ok() {
             Root::Component
         } else {
             Root::Plan
-        })
+        }
     }
 
     /// D21, D26: a plan has state to declare, and `--strict` catching a
