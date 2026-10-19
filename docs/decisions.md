@@ -1536,3 +1536,84 @@ staying at one through another release, which would make it the wrong
 action.
 
 **Triggered 2026-10-17**, issue #54.
+
+## D32 — the field sweep renders to judge, the action renders to use, and they stay apart
+
+`do_action` renders every string field of a step purely to check that it
+renders, discards the value, and the action's own `parse` renders it again to
+get the value it needs (`expand.rs:1033`, the sweep at `:1037-1075`;
+`actions/mod.rs:356`). Four layers reach the same field: the sweep, the path
+analysis (`resolved_path` `expand.rs:1636`, `declared_output` `:1646`,
+`check_rendered_path` `:1689`), the action's `parse`, and `step_name`
+(`:1896`), which runs twice per reported step. Measured on a 3-step plan with
+one `file` step: `validate` 11 renders, `plan` 15, `apply` 26 — `{{ outdir }}`
+4× under `validate` and 8× under `apply`, which walks every step twice for §7's
+sudo preflight. **The sweep stays. Nothing is shared.**
+
+**Why not a per-(step, scope) memo.** It is not merely unprofitable, it is
+unsound. `Engine::render` is not a pure function of `(src, ctx)`: the `exists`
+test reads the filesystem (`template.rs:472`) and provision's entire job is to
+change the filesystem. Measured, one plan, one `apply`, identical source and
+identical scope:
+
+```
+echo {{ '/tmp/x' is exists }}   =>  "echo False"     preflight walk
+echo {{ '/tmp/x' is exists }}   =>  "echo True"      real walk, after step 1 wrote it
+```
+
+Both answers are correct. The key the option proposes — step and scope — does
+not include the thing that varies, so the memo would serve the preflight's
+answer to the real walk and be wrong in the direction that matters: it would
+report a file as absent that the run had just created.
+
+**Why not hand the sweep's values to the action.** Sound, within one
+`do_action` call, and it buys nothing. The sweep cannot render less — it is the
+error-reporting pass and its coverage is deliberately a superset of any one
+action's — so no render leaves the sweep; the saving is downstream, where each
+consumer would gain a map-or-render fallback branch. That is strictly more code
+paths per field, and a cache threaded through every action's `parse` signature.
+It would also couple the probe to the producer, which is the separation that
+lets exactly one pass own the diagnostic.
+
+**Why the sweep is separate from the use.** Three reasons, each load-bearing:
+
+- *Coverage.* The sweep renders every string leaf of the body
+  (`collect_strings`, `expand.rs:2176`), including fields the chosen action
+  never reads. Strict mode's promise — an undefined variable in a rarely-taken
+  branch surfaces — is a property of the wider pass, not of any consumer.
+- *One owner for the error.* The sweep reports; every other render swallows
+  (`.ok()`, and the comments that say so at `:1637` and `:1706`). One bad
+  `{{ … }}` is one diagnostic rather than five. Sharing values means re-deciding
+  that ownership at five call sites.
+- *A verdict is not a value.* The sweep asks "does this render at all" and its
+  answer is the boolean that gates `renderable` and `derived`. The consumers
+  want types: `PathBuf` from `resolved_path`, a type-preserving `Value` from
+  `render_field` (`template.rs:81`), `bool` and `Duration` from `mod_bool` and
+  `mod_duration`. The sweep's `String` is not the value most of them need. #61
+  is the same split seen from the other side — `mod_bool` demanded a minijinja
+  Bool kind that a rendered `{% … %}` could never produce.
+
+**A premise of #63 corrected.** The issue attributes `do_action`'s length to
+the sweep. `do_action` is 336 lines (`expand.rs:1033-1368`) and the sweep is 39
+of them, about 12%. The bulk is the typed-modifier register refusal (~70 lines),
+the body-key, path and source checks, and the runner dispatch. Collapsing the
+sweep would not shrink the largest function in the crate; owning a value map
+would grow it.
+
+**No constants short-circuit either.** `is_template` (`config/model.rs:678`) is
+not the guard: after #61 it tests `{{`, `{%` and `{#`, and it is deliberately an
+over-accepting "might this be a template", not "does this need rendering".
+Using it to skip renders changes what gets rendered, which is a semantic change
+dressed as an optimisation.
+
+**What this costs, stated plainly.** A literal — `dir`, `echo ran`, a `name:`
+with no placeholder — goes through a full minijinja parse on each pass, and a
+207-step plan does on the order of 1200 renders on `validate`. That is accepted:
+provision's own CPU is negligible beside the subprocesses it waits on, and no
+measurement has ever put render time on the clock.
+
+**Overturned by.** A measurement putting render time on a real run's clock; or
+a render path proved pure, which would make a memo sound and the argument above
+only about cost.
+
+**Triggered 2026-10-19**, issue #63.
