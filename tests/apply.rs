@@ -3731,6 +3731,13 @@ exit 2
 // on the install. Here the query answers slowly but successfully, so the
 // install is reached with the clock nearly out and must not get a fresh
 // second of it.
+//
+// The deadline is 10s against a 2s query, not the 3s this was written with.
+// Three left the query about a second of room, and a host slow enough to eat
+// it spends the whole deadline before the install is ever reached — at which
+// point there is no second command to measure and the test is green about
+// nothing (#64). Ten leaves eight seconds of spawn slack. The gap being read
+// is the query's two seconds either way.
 #[test]
 fn a_typed_actions_second_command_gets_what_is_left_after_its_first() {
     let dir = tempfile::tempdir().unwrap();
@@ -3738,9 +3745,9 @@ fn a_typed_actions_second_command_gets_what_is_left_after_its_first() {
     std::fs::create_dir(&bin).unwrap();
     // Answers "nothing installed" after two seconds, so the install is next
     // with most of the budget gone. The gap the assertion reads is two seconds
-    // wide by construction: reclamped, the install is killed with the ~1s that
-    // is left and the run ends near 3s; given the budget again, it is killed
-    // after another 3s and the run ends near 5s.
+    // wide by construction: reclamped, the install is killed with the ~8s that
+    // is left and the step ends near 10s; given the budget again, it is killed
+    // after another 10s and the step ends near 12s.
     fake_manager(
         &bin,
         "dpkg-query",
@@ -3773,7 +3780,7 @@ exit 0
             "apply",
             path.to_str().expect("temp paths are UTF-8"),
             "--deadline",
-            "3s",
+            "10s",
             "--json",
         ])
         .env(
@@ -3793,8 +3800,8 @@ exit 0
 
     assert_eq!(out.status.code(), Some(124), "{text}");
     // The step's own `duration_ms`, not wall clock. The gap is two seconds
-    // wide by construction -- reclamped the step ends near 3s, given the
-    // budget twice it ends near 5s -- but a wall-clock reading of it also
+    // wide by construction -- reclamped the step ends near 10s, given the
+    // budget twice it ends near 12s -- but a wall-clock reading of it also
     // carries process startup and this binary's own build-and-launch, which
     // on a loaded machine ate most of the margin and failed the test for
     // reasons that had nothing to do with the clamp. provision measures the
@@ -3806,13 +3813,13 @@ exit 0
         .and_then(|r| r["duration_ms"].as_u64())
         .expect("the step reported a duration");
     assert!(
-        step_ms < 4000,
+        step_ms < 11000,
         "the second command was given the budget the first had already spent: {step_ms}ms\n{text}"
     );
     // The outer bound, loose on purpose: it catches a run that hung without
     // competing with the assertion above for the same margin.
     assert!(
-        elapsed < std::time::Duration::from_secs(15),
+        elapsed < std::time::Duration::from_secs(30),
         "the run did not end: {elapsed:?}\n{text}"
     );
 }
@@ -3822,27 +3829,38 @@ exit 0
 // not contain. The flag deciding that wording was read once, before the
 // action's first command, while the duration was reclamped per command — so a
 // step with its own `timeout:` entered unbound by the deadline, was clamped by
-// it on a later command, and reported `timed out after 3.0s`: a step timeout
-// wording after a number neither the file's `4s` nor the run's `6s` holds.
+// it on a later command, and reported a step timeout wording after a number
+// neither the file's `timeout:` nor the run's deadline holds.
 //
 // The sibling above cannot catch it — it declares no step `timeout:`, so the
 // deadline is the smaller from the start and the flag is right by accident.
+//
+// The three numbers are a squeeze and they were set too tight (#64). What
+// this needs is for the install to start with time left on the run's clock
+// but less of it than its own ceiling: 0 < remaining < `timeout:`. The upper
+// half is free — load only ever makes `remaining` smaller — so the whole
+// margin is the lower half, and that is `deadline` minus the query. At 6s
+// against a 3s query it was three seconds, and a host that lost three
+// seconds to spawn let the deadline fire before the install was reached,
+// changing the wording the test reads. At 12s against a 2s query it is ten.
+// `timeout:` is 11s, one second above the ~10s that will be left, so it
+// stays the losing clock whichever way the host drifts.
 #[test]
 fn a_deadline_kill_is_not_worded_as_the_steps_own_timeout() {
     let dir = tempfile::tempdir().unwrap();
     let bin = dir.path().join("bin");
     std::fs::create_dir(&bin).unwrap();
-    // Answers "nothing installed", slowly but inside its own 4s budget: the
+    // Answers "nothing installed", slowly but inside its own budget: the
     // query is bound by the step's `timeout:`, not by the run's clock.
     fake_manager(
         &bin,
         "dpkg-query",
-        "sleep 3
+        "sleep 2
 exit 0
 ",
     );
-    // The install is reached with ~3s left against a 4s ceiling, so it is the
-    // deadline that binds it and the deadline that kills it.
+    // The install is reached with ~10s left against an 11s ceiling, so it is
+    // the deadline that binds it and the deadline that kills it.
     fake_manager(
         &bin,
         "apt-get",
@@ -3853,7 +3871,7 @@ exit 0
     std::fs::write(
         &path,
         "- name: An install behind a slow query, under its own timeout
-  timeout: 4s
+  timeout: 11s
   pkg:
     names: [yarn]
     manager: apt
@@ -3866,7 +3884,7 @@ exit 0
             "apply",
             path.to_str().expect("temp paths are UTF-8"),
             "--deadline",
-            "6s",
+            "12s",
         ])
         .env(
             "PATH",
