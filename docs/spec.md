@@ -1619,8 +1619,24 @@ gates, so it has a wall clock worth bounding too. There is no
   <action>` answers "which keys does `git` take"; nothing answered "which
   keys may any step carry", and the envelope — `when`, `register`,
   `creates`, `unless`, `changed_when`, `tags` and the rest — is what makes a
-  step *correct* rather than merely parseable. Each carries where it is
-  legal, because four of the sixteen are legal on one kind of step only.
+  step *correct* rather than merely parseable. Each carries **where it is
+  legal**, because a modifier is not uniformly legal: the field ranges from
+  `any step` through `command steps` and `action steps` down to a single
+  structural key, and §4's table is where every modifier's own answer is.
+
+  **No tally of the restricted ones appears here, on purpose.** This
+  sentence used to carry one — "four of the sixteen are legal on one kind of
+  step only" — and it was two claims pointing at two different rows of that
+  table: the four is `command steps`, which is a class of three actions and
+  so precisely not one kind of step, while the two legal on one named kind
+  are `props` and `optional`. Neither half was true under the reading that
+  made the other one true. A tally in prose is the same hand-kept second
+  list this section refuses two paragraphs above, for the same reason: §4's
+  table is the one place, `list --json` returns that table, and a test pins
+  the whole set against it — so the table cannot drift, and a number here is
+  checked by nothing that runs. This one was wrong from the day it was
+  written and stood until the **Applies to** column made it checkable at
+  all.
 
   The same one-table rule holds: the unknown-key check reads the modifier
   table the dump prints, so a modifier that is documented is one the parser
