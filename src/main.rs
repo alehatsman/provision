@@ -370,11 +370,12 @@ fn run() -> Result<u8, Diag> {
             // the whole point, so it is on by default there. A task or
             // component file legitimately has none, and stays opt-in. The
             // flag only ever forces it on, never off.
-            let by_root = strict_by_root(&plan)?;
+            let root = Root::of(&plan)?;
+            let by_root = root.strict_by_default();
             let mut ex = expander(&vars, Mode::Validate, selection)?
                 .strict(strict || by_root)
                 .gate_from_root(by_root);
-            walk_root(&mut ex, &plan, &props)?;
+            walk_root(&mut ex, root, &plan, &props)?;
             let base = cwd();
             if ex.diags.is_empty() {
                 // Nothing to say on the stream: no diagnostics is the whole
@@ -405,13 +406,14 @@ fn run() -> Result<u8, Diag> {
             let mode = Mode::Plan {
                 probe: !plan_no_probe,
             };
+            let root = Root::of(&plan)?;
             let mut ex = expander(&run.vars, mode, run.selection())?
                 // D26. Plan does not need a preflight the way apply does: it
                 // executes nothing, so a diag is non-fatal mid-walk and the
                 // report after it turns the walk into exit 3, which is the
                 // path every other plan-time diagnostic already takes.
-                .strict(strict_by_root(&plan)?)
-                .gate_from_root(strict_by_root(&plan)?)
+                .strict(root.strict_by_default())
+                .gate_from_root(root.strict_by_default())
                 // Gates run with their step's sudo (§4), so plan has to know
                 // whether root is reachable. Unlike apply it must not fail
                 // when it is not: plan is the read-only command, and a root
@@ -431,7 +433,7 @@ fn run() -> Result<u8, Diag> {
             // prevent under `apply`, and a gate is just as much a child.
             exec::process::catch_interrupts();
             let started = Instant::now();
-            walk_root(&mut ex, &plan, &props)?;
+            walk_root(&mut ex, root, &plan, &props)?;
 
             // Before `summarize`, not after. A summary of a walk that found
             // problems is a summary of nothing, and under `--json` a
@@ -499,10 +501,11 @@ fn run() -> Result<u8, Diag> {
             // have run — which is the regression D20 named. Here it lands
             // before `Sudo::preflight`, before `catch_interrupts`, and
             // before the apply expander exists.
+            let root = Root::of(&plan)?;
             let mut check = expander(&run.vars, Mode::Validate, run.selection())?
-                .strict(strict_by_root(&plan)?)
-                .gate_from_root(strict_by_root(&plan)?);
-            walk_root(&mut check, &plan, &props)?;
+                .strict(root.strict_by_default())
+                .gate_from_root(root.strict_by_default());
+            walk_root(&mut check, root, &plan, &props)?;
             if !check.diags.is_empty() {
                 // The preflight runs before the apply expander and its sink
                 // exist, which is why `apply --json` on a bad file used to
@@ -540,7 +543,7 @@ fn run() -> Result<u8, Diag> {
             ex.manifest(&plan, &check.manifest);
 
             let started = Instant::now();
-            walk_root(&mut ex, &plan, &props)?;
+            walk_root(&mut ex, root, &plan, &props)?;
 
             if !ex.diags.is_empty() {
                 if run.json {
@@ -578,8 +581,13 @@ fn run() -> Result<u8, Diag> {
 /// `--prop` on a plan is a usage error rather than a value quietly dropped:
 /// a plan has no props to set, and the caller who typed one believes it took
 /// effect.
-fn walk_root(ex: &mut Expander, root: &Path, props: &[(String, String)]) -> Result<(), Diag> {
-    let out = walk_root_inner(ex, root, props);
+fn walk_root(
+    ex: &mut Expander,
+    root: Root,
+    path: &Path,
+    props: &[(String, String)],
+) -> Result<(), Diag> {
+    let out = walk_root_inner(ex, root, path, props);
     // One place, after the whole walk: naming a register the walk saw needs
     // the set of every register bound anywhere, which only exists once the
     // walk is over. Mid-walk the fatality checks read `diags` for whether it
@@ -588,18 +596,23 @@ fn walk_root(ex: &mut Expander, root: &Path, props: &[(String, String)]) -> Resu
     out
 }
 
-fn walk_root_inner(ex: &mut Expander, root: &Path, props: &[(String, String)]) -> Result<(), Diag> {
-    if is_component(root)? {
-        return ex.run_component(root, props);
+fn walk_root_inner(
+    ex: &mut Expander,
+    root: Root,
+    path: &Path,
+    props: &[(String, String)],
+) -> Result<(), Diag> {
+    if root == Root::Component {
+        return ex.run_component(path, props);
     }
     if let Some((key, _)) = props.first() {
         return Err(Diag::file_level(
-            root,
+            path,
             format!("`--prop {key}=…` but this file is a plan, not a component"),
         )
         .with_note("props are declared at a component's root; a plan takes `--var`"));
     }
-    ex.run(root)
+    ex.run(path)
 }
 
 /// D25: under `--json` every problem rides the stream as its own event,
@@ -652,17 +665,35 @@ fn pairs(given: &[String], flag: &str) -> Result<Vec<(String, String)>, Diag> {
 /// D17: a component is a mapping and a plan is a sequence. Reading the root
 /// node is enough to tell, and it is the same distinction both parsers make
 /// in their own error messages.
-/// D21, D26: a plan has state to declare, and `--strict` catching a
-/// forgotten gate is the whole point there, so it is on by default for a
-/// list root under every verb that walks it. A task or component file
-/// legitimately has none and stays opt-in. `--strict` on the command line
-/// only ever turns it on, never off.
-fn strict_by_root(path: &Path) -> Result<bool, Diag> {
-    Ok(!is_component(path)?)
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Root {
+    Plan,
+    Component,
 }
 
-fn is_component(path: &Path) -> Result<bool, Diag> {
-    Ok(yaml::Doc::load(path)?.node().as_map().is_ok())
+impl Root {
+    /// Spec §8: the shape is read once per command. Two things ask for it —
+    /// `strict_by_default` and which entry point `walk_root` takes — and
+    /// asking twice meant loading and parsing the root file twice, because
+    /// this bypasses the `Loader` cache the walk itself uses (#62). The
+    /// answer cannot change between the two, so it is derived here and
+    /// carried.
+    fn of(path: &Path) -> Result<Root, Diag> {
+        Ok(if yaml::Doc::load(path)?.node().as_map().is_ok() {
+            Root::Component
+        } else {
+            Root::Plan
+        })
+    }
+
+    /// D21, D26: a plan has state to declare, and `--strict` catching a
+    /// forgotten gate is the whole point there, so it is on by default for a
+    /// list root under every verb that walks it. A task or component file
+    /// legitimately has none and stays opt-in. `--strict` on the command line
+    /// only ever turns it on, never off.
+    fn strict_by_default(self) -> bool {
+        self == Root::Plan
+    }
 }
 
 /// `provision list` at its two granularities (spec §8): a directory says what
@@ -723,7 +754,7 @@ fn action_json(name: &str, doc: &config::model::ActionDoc) -> serde_json::Value 
 /// modifier, in one document.
 ///
 /// D25's "verbs that answer return a document". A writer of plan files needs
-/// the envelope at least as much as it needs the ten actions — `when`,
+/// the envelope at least as much as it needs the eleven actions — `when`,
 /// `register`, `creates`, `unless` and the rest are what make a step correct
 /// rather than merely parseable — and until this existed nothing described
 /// them anywhere a program could read.
