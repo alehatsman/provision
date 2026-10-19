@@ -754,7 +754,7 @@ fn action_json(name: &str, doc: &config::model::ActionDoc) -> serde_json::Value 
 /// modifier, in one document.
 ///
 /// D25's "verbs that answer return a document". A writer of plan files needs
-/// the envelope at least as much as it needs the ten actions — `when`,
+/// the envelope at least as much as it needs the eleven actions — `when`,
 /// `register`, `creates`, `unless` and the rest are what make a step correct
 /// rather than merely parseable — and until this existed nothing described
 /// them anywhere a program could read.
