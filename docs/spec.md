@@ -1478,7 +1478,11 @@ gates, so it has a wall clock worth bounding too. There is no
   `apply` takes a plan or a component. A file whose root is a sequence is a
   plan; one whose root is a mapping is a component — the distinction both
   parsers already make in their own error messages, so no command needs a
-  flag saying which it got. A component as the root gets its props from
+  flag saying which it got. The shape is read **once per command**: the
+  `--strict` default below and the entry point the walk takes are two
+  readings of one answer, and that answer cannot change between them, so
+  the root file is classified once and the result is carried to both (#62).
+  A component as the root gets its props from
   `--prop k=v`; an unknown prop, a missing required prop or a wrong type is
   a validation error, the same three `validate` reports at a `use` site,
   and `validate` applies them too: a required prop with no value is an
