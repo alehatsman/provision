@@ -1,0 +1,5 @@
+# Issue #59: what a nested `use` reports when it finishes. Two levels, so the
+# snapshot shows them closing innermost first, and the outer line counting the
+# inner one's steps as its own (spec §9.1).
+- name: Developer toolchains
+  use: ./nested_use/outer.yml

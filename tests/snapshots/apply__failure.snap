@@ -7,6 +7,6 @@ expression: out
   ✗ This one does not                                FAILED  [t]
     │ context line
     │ sed: can't read /etc/pacman.conf: No such file or directory
-    │ (exit 2 · stderr, last 20 lines · --verbose for all)
+    │ (exit 2)
 
   tests/fixtures/apply/failure.yml · 2 steps · 1 ok · 1 failed · [t]

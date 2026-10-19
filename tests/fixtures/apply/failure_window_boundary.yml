@@ -1,0 +1,15 @@
+# The two sides of the cap, in one run, because a cap with no negative case is
+# a cap nobody can trust. The first step prints exactly the window's 10 + 20
+# and must print whole with no marker and no `--verbose` offer; the second
+# prints one more and elides exactly that one. `--keep-going` is what lets one
+# snapshot hold both (spec §8).
+- name: Exactly the window
+  shell: |
+    for i in $(seq 1 30); do echo "line $i"; done
+    exit 1
+  changed_when: "false"
+- name: One line past the window
+  shell: |
+    for i in $(seq 1 31); do echo "line $i"; done
+    exit 1
+  changed_when: "false"

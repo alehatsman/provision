@@ -1049,9 +1049,16 @@ fn a_failure_shows_stdout_as_well_as_stderr() {
     let report = out.find("finding: /etc").expect("checked above");
     let verdict = out.find("gate failed on").expect("checked above");
     assert!(report < verdict, "stdout comes first:\n{out}");
+    // Both streams fit the window whole, so the note names neither and offers
+    // no `--verbose`: the reader has everything, and an offer of more would be
+    // a lie (§9.1). The absence of an elision marker is the announcement.
     assert!(
-        out.contains("stdout+stderr, last 20 lines each"),
-        "the note must name both streams:\n{out}"
+        !out.contains("elided"),
+        "nothing was cut, so nothing says it was:\n{out}"
+    );
+    assert!(
+        !out.contains("--verbose for all"),
+        "there is nothing left to offer:\n{out}"
     );
 }
 
@@ -1084,12 +1091,128 @@ fn a_failure_with_no_streams_still_shows_its_reason() {
     assert_eq!(code, 1, "{out}");
     assert!(out.contains("`unless` could not run"), "{out}");
     assert!(
-        out.contains("stderr, last 20 lines"),
-        "one stream, so the note reads as it always did:\n{out}"
+        !out.contains("stdout"),
+        "there was no stdout to name:\n{out}"
     );
     assert!(
-        !out.contains("stdout+stderr"),
-        "there was no stdout to name:\n{out}"
+        !out.contains("elided"),
+        "a one-line reason is not a stream the window cut:\n{out}"
+    );
+}
+
+// ── issue #59: the failure window, and what a nested `use` reports ────────
+
+// The defect, exactly: a linter prints the rule it broke first, and a window
+// that kept only the tail dropped it — so the one line the failure was about
+// was invisible and the reader had to run the command again by hand.
+#[test]
+fn a_failing_step_shows_the_head_of_its_output_not_only_the_tail() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(dir.path(), "failure_long_output.yml", &[]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("biome ▸ lint/suspicious/noExplicitAny"),
+        "the rule name is the first line and must survive the window:\n{out}"
+    );
+    assert!(
+        out.contains("15 files checked, 1 error"),
+        "the tail is still shown:\n{out}"
+    );
+    // Both numbers, because either alone is a half-answer: how much was
+    // dropped, out of how much there was.
+    assert!(
+        out.contains("… 25 of 55 lines elided …"),
+        "the elision names what it dropped and out of what:\n{out}"
+    );
+    assert!(
+        !out.contains("line 20 of the middle"),
+        "the middle is what was cut:\n{out}"
+    );
+    assert!(
+        out.contains("stdout, first 10 + last 20 lines · --verbose for all"),
+        "the note names the stream the window narrowed and the way out:\n{out}"
+    );
+    snapshot!("failure_head_and_tail", out);
+}
+
+// The other side of the cap. A window that never says "I let this through
+// whole" is one a reader cannot trust, so the boundary is pinned: exactly
+// 10 + 20 prints whole with no marker and no offer, and one line more elides
+// exactly one.
+#[test]
+fn the_window_fires_only_when_there_is_something_to_cut() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, out) = apply(dir.path(), "failure_window_boundary.yml", &["--keep-going"]);
+    assert_eq!(code, 1, "{out}");
+    let (at_cap, over) = out
+        .split_once("One line past the window")
+        .expect("both steps ran under --keep-going");
+    assert!(
+        !at_cap.contains("elided") && !at_cap.contains("--verbose for all"),
+        "a stream that fit says nothing about a cap:\n{at_cap}"
+    );
+    assert!(
+        over.contains("… 1 of 31 lines elided …"),
+        "one line past the window elides exactly one:\n{over}"
+    );
+    snapshot!("failure_window_boundary", out);
+}
+
+// `--verbose` already printed every nested step and its output; what it could
+// not say was how a nested block came out. Two levels, closing innermost
+// first, the outer counting the inner's steps as its own.
+#[test]
+fn a_nested_use_closes_with_its_own_summary_under_verbose() {
+    let dir = tempfile::tempdir().unwrap();
+    let (quiet_code, quiet) = apply(dir.path(), "nested_use.yml", &[]);
+    assert_eq!(quiet_code, 0, "{quiet}");
+    assert!(
+        !quiet.contains("└"),
+        "a block's roll-up is detail, and a quiet run reports the run:\n{quiet}"
+    );
+
+    let (code, out) = apply(dir.path(), "nested_use.yml", &["--verbose"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("└ ui gate · 2 steps · 1 changed · 1 ok ·"),
+        "the inner call site answers for its own two steps:\n{out}"
+    );
+    assert!(
+        out.contains("└ Developer toolchains · 3 steps · 1 changed · 2 ok ·"),
+        "the outer counts every step under it, nested ones included:\n{out}"
+    );
+    let inner = out.find("└ ui gate").expect("checked above");
+    let outer = out.find("└ Developer").expect("checked above");
+    assert!(inner < outer, "the levels close innermost first:\n{out}");
+    snapshot!("nested_use_summary", out);
+}
+
+#[test]
+fn snapshot_colored_failure_window_and_nested_summary() {
+    // The TTY form of both new shapes: the elision marker is dim inside the
+    // failure's red gutter, and a call site's summary line is dim like the
+    // header it answers (spec §9.1). What a captured run can pin down is the
+    // color — the spinner needs a real terminal.
+    let dir = tempfile::tempdir().unwrap();
+    let colored = |plan: &str, extra: &[&str]| {
+        let path = fixture(plan);
+        let mut args = vec!["apply", path.to_str().unwrap(), "--color", "always"];
+        args.extend_from_slice(extra);
+        let out = Command::new(env!("CARGO_BIN_EXE_provision"))
+            .args(&args)
+            .env("PROVISION_SCRATCH", dir.path())
+            .env_remove("NO_COLOR")
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).replace('\x1b', "ESC")
+    };
+    snapshot!(
+        "failure_head_and_tail_colored",
+        colored("failure_long_output.yml", &[])
+    );
+    snapshot!(
+        "nested_use_summary_colored",
+        colored("nested_use.yml", &["--verbose"])
     );
 }
 
