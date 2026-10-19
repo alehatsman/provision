@@ -301,10 +301,15 @@ merely awkward to write portably. The engine underneath it is not: the four
 verdicts, stop-on-failure, `--keep-going`, a register read by a later step,
 the `--json` shape, `--deadline`, a `file` step converging, and tag
 selection run on both, in `tests/apply_cross_platform.rs`, with every
-command spelled so that `bash` and `powershell` both accept it. With
+command spelled so that `bash` and `powershell` both accept it. Since
+2026-10-19 the *rendered* output runs there too — the step render, a `file`
+diff block and a `template` tree's — and it needed no per-platform snapshot,
+because nothing in the render is allowed to differ: the name column is a
+const rather than the console's width, the glyphs are unconditional, and a
+printed path is normalised to `/` (D29). With
 `cli.rs`, `component.rs`, `list.rs` and the unit tests, what a Windows host
 now covers is parsing, validation, `list`, components, the CLI, every exit
-code they reach, and the apply engine's own contract.
+code they reach, the apply engine's own contract, and what it prints.
 
 What stays untested there is `pkg` against winget, `service` beyond its
 refusal, and Ctrl-C. The first two would have to install or start something

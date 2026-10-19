@@ -616,11 +616,22 @@ Gate
     skips instead of failing as `Exec format error`.
   - Wiring either into `gate.yml` stays a one-line change if the fleet ever
     stops being the place they run.
-- **Known and open (#60, carved out of #52 when that closed):** no `apply`
-  snapshot renders on Windows. Every one lives in `tests/apply.rs`, which is
-  `#![cfg(unix)]`, so the Windows job pins verdicts and the JSON shape but no
-  rendered terminal output. A per-platform snapshot suffix would close it and
-  costs a second file per snapshot; not taken yet.
+- ~~**Known and open (#60, carved out of #52 when that closed):** no `apply`
+  snapshot renders on Windows~~ — **closed 2026-10-19, and not the way this
+  row expected.** The cost that kept it open was a per-platform snapshot
+  suffix, a second file per snapshot. That was not paid: the render cannot
+  diverge, and the fix was to show it. `NAME_WIDTH` is a const in
+  `output/text.rs`, not the console's; the glyphs are unconditional; a
+  printed path goes through `error::show` per D29. So three snapshots — the
+  step render, a `file` diff block, a `template` tree's — went into
+  `tests/apply_cross_platform.rs`, the file the Windows job already runs,
+  with zero forks. The one real divergence was fixed in `src` rather than
+  snapshotted around it: `actions/template.rs` labelled a tree's diff with
+  `rel.display()`, which spells `sub\x.conf` on Windows. The Windows verdict
+  still comes from the gate job, not from a local run — the confidence rests
+  on `tests/cli.rs`, which is not `cfg(unix)` and has pinned a relative `/`
+  path on the Windows job since #31. `tests/apply.rs` is still `#![cfg(unix)]`
+  and the three untested things above are still untested.
 - **Owner's:** moongit's runner actually reading the stream, cancelling with
   TERM and passing `--deadline`. That is the real gate and it lives in that
   repo. **Check on 2026-12-12**: unexercised by then means D17's CI half and
