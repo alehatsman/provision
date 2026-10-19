@@ -263,6 +263,15 @@ impl Expander {
         self.sink.summary(plan, &s);
     }
 
+    /// The root file, through the cache the walk itself uses. `main` reads
+    /// its shape to settle `--strict` (D21, D26) before the walk starts, and
+    /// the walk then loads the same path again — so classifying it with a
+    /// direct `Doc::load` parsed it twice and leaked the second copy (#62).
+    /// Going through the `Loader` makes the second a cache hit.
+    pub(crate) fn root_doc(&mut self, root: &Path) -> Result<&'static Doc> {
+        self.loader.load(root)
+    }
+
     pub(crate) fn run(&mut self, root: &Path) -> Result<()> {
         let mut scope = Scope::root(Rc::clone(&self.globals));
         let doc = self.loader.load(root)?;
