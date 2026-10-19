@@ -3845,8 +3845,16 @@ exit 0
 // Spec §8: each step's effective timeout is the lesser of its own and the
 // time left, so no step runs past the deadline it was admitted under. A typed
 // action took the timeout computed before its `unless` ran — so the gate's
-// two seconds were spent twice, and the hung query below ran to ~5s against a
-// 3s deadline and said `timed out` about a step timeout the file never wrote.
+// two seconds were spent twice, and the hung query below ran to ~8s against a
+// 6s deadline and said `timed out` about a step timeout the file never wrote.
+//
+// The deadline is 6s against a 2s gate, not the 3s this was written with.
+// Three left the gate about a second of room: a slow enough host spent the
+// whole deadline inside the gate, the query never ran at all, and the step
+// failed as `unless` deadline exceeded — a green test's premise quietly gone
+// (#64). Six leaves four seconds of spawn slack and does not change what is
+// being measured, because the gap under test is the gate's two seconds
+// wherever the deadline is set.
 #[test]
 fn a_typed_action_after_its_gate_gets_only_the_time_left() {
     let dir = tempfile::tempdir().unwrap();
@@ -3882,9 +3890,10 @@ fn a_typed_action_after_its_gate_gets_only_the_time_left() {
     .unwrap();
 
     // Wall clock as well as the monotonic one: the log below is stamped in
-    // epoch seconds, and the question the probe has to answer is *where* the
-    // time goes — before the gate, between the gate and the query, or after
+    // epoch seconds, and the question a failure has to answer is *where* the
+    // time went — before the gate, between the gate and the query, or after
     // the kill. Only an absolute start makes those three distinguishable.
+    // Diagnostic only: nothing is asserted against it.
     let wall = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs_f64())
@@ -3895,7 +3904,8 @@ fn a_typed_action_after_its_gate_gets_only_the_time_left() {
             "apply",
             path.to_str().expect("temp paths are UTF-8"),
             "--deadline",
-            "3s",
+            "6s",
+            "--json",
         ])
         .env(
             "PATH",
@@ -3914,13 +3924,34 @@ fn a_typed_action_after_its_gate_gets_only_the_time_left() {
 
     assert_eq!(out.status.code(), Some(124), "{text}");
     let calls = std::fs::read_to_string(&log).unwrap_or_default();
+    // The step's own `duration_ms`, not wall clock — the same reading
+    // `a_typed_actions_second_command_gets_what_is_left_after_its_first`
+    // takes, and for the same reason. The gap is the gate's two seconds by
+    // construction: reclamped the step ends at the 6s deadline, given the
+    // budget a second time it ends near 8s. A wall-clock reading of that gap
+    // also carries process spawn and this binary's launch, which on a loaded
+    // host ate the margin and failed the test for reasons that had nothing to
+    // do with the clamp (#64). provision measures the step itself, so the
+    // noise is not in the number.
+    let step_ms = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .find(|r| r["event"] == "step")
+        .and_then(|r| r["duration_ms"].as_u64())
+        .expect("the step reported a duration");
     assert!(
-        elapsed < std::time::Duration::from_millis(4500),
-        "the query ran past the deadline: {elapsed:?}\nstarted at {wall:.3}\ncommands the step ran:\n{calls}\n{text}"
+        step_ms < 7000,
+        "the query was given the whole deadline instead of what the gate left: {step_ms}ms\nstarted at {wall:.3}\ncommands the step ran:\n{calls}\n{text}"
     );
     assert!(
         text.contains("deadline exceeded after"),
         "named a step timeout the file does not contain:\n{text}"
+    );
+    // Loose on purpose: this only catches a run that never ended, and must
+    // not compete with the assertion above for the same margin.
+    assert!(
+        elapsed < std::time::Duration::from_secs(30),
+        "the run did not end: {elapsed:?}\n{text}"
     );
 }
 
