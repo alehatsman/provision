@@ -1,0 +1,40 @@
+---
+source: tests/apply.rs
+expression: "colored(\"failure_long_output.yml\", &[])"
+---
+  ESC[2mtests/fixtures/apply/failure_long_output.yml · 1 step to runESC[0m
+  ESC[1mESC[31m✗ESC[0m A linter that names the rule first               ESC[1mESC[31mFAILEDESC[0m  ESC[2m[t]ESC[0m
+    ESC[31m│ESC[0m biome ▸ lint/suspicious/noExplicitAny
+    ESC[31m│ESC[0m src/App.tsx:12:5 — Unexpected any. Specify a different type.
+    ESC[31m│ESC[0m line 3 of the middle
+    ESC[31m│ESC[0m line 4 of the middle
+    ESC[31m│ESC[0m line 5 of the middle
+    ESC[31m│ESC[0m line 6 of the middle
+    ESC[31m│ESC[0m line 7 of the middle
+    ESC[31m│ESC[0m line 8 of the middle
+    ESC[31m│ESC[0m line 9 of the middle
+    ESC[31m│ESC[0m line 10 of the middle
+    ESC[31m│ESC[0m ESC[2m… 25 of 55 lines elided …ESC[0m
+    ESC[31m│ESC[0m line 36 of the middle
+    ESC[31m│ESC[0m line 37 of the middle
+    ESC[31m│ESC[0m line 38 of the middle
+    ESC[31m│ESC[0m line 39 of the middle
+    ESC[31m│ESC[0m line 40 of the middle
+    ESC[31m│ESC[0m line 41 of the middle
+    ESC[31m│ESC[0m line 42 of the middle
+    ESC[31m│ESC[0m line 43 of the middle
+    ESC[31m│ESC[0m line 44 of the middle
+    ESC[31m│ESC[0m line 45 of the middle
+    ESC[31m│ESC[0m line 46 of the middle
+    ESC[31m│ESC[0m line 47 of the middle
+    ESC[31m│ESC[0m line 48 of the middle
+    ESC[31m│ESC[0m line 49 of the middle
+    ESC[31m│ESC[0m line 50 of the middle
+    ESC[31m│ESC[0m line 51 of the middle
+    ESC[31m│ESC[0m line 52 of the middle
+    ESC[31m│ESC[0m line 53 of the middle
+    ESC[31m│ESC[0m 14 files checked, 1 error
+    ESC[31m│ESC[0m 15 files checked, 1 error
+    ESC[2m│ (exit 1 · stdout, first 10 + last 20 lines · --verbose for all)ESC[0m
+
+  tests/fixtures/apply/failure_long_output.yml · 1 step · 1 failed · [t]

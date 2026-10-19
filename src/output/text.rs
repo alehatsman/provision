@@ -3,7 +3,7 @@
 //! two switches rather than two that drift apart.
 
 use super::Sink;
-use super::event::{Event, Status, Summary, human, tail};
+use super::event::{Event, Status, Summary, human, window};
 use anstyle::{AnsiColor, Style};
 use std::fmt::Write as _;
 use std::io::{IsTerminal, Write};
@@ -12,10 +12,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-/// How many lines of each captured stream the failure block shows. Spec §9.1
-/// says 20, and says it per stream rather than 20 shared between the two: the
-/// cap is there so a noisy step cannot bury the summary, and a shared budget,
-/// spent by whichever stream printed first, is how stdout used to vanish.
+/// The head-and-tail window of §9.1, per captured stream and not shared
+/// between the two: the cap is there so a noisy step cannot bury the summary,
+/// and a shared budget, spent by whichever stream printed first, is how stdout
+/// used to vanish. The tail is the larger end because a command that fails
+/// usually fails last; the head is there at all because that is where a tool
+/// says what is wrong (#59).
+const HEAD: usize = 10;
 const TAIL: usize = 20;
 const NAME_WIDTH: usize = 48;
 
@@ -43,7 +46,19 @@ pub(crate) struct Text {
     /// component are two pieces of work: keying on the file alone printed
     /// one header for both and made a plan under-report what it was doing.
     current: Option<(Vec<String>, PathBuf)>,
+    /// The nested call sites the walk is currently inside, outermost first,
+    /// each accumulating the steps under it. §9.1: a call site closes with
+    /// its own summary line under `--verbose`, so the counts have to be kept
+    /// while it is open — the run's own summary cannot answer for a block.
+    open: Vec<Call>,
     live: Option<Spinner>,
+}
+
+/// One open call site: the label its header printed, and what has happened
+/// under it so far.
+struct Call {
+    label: String,
+    summary: Summary,
 }
 
 impl Text {
@@ -60,6 +75,7 @@ impl Text {
             no_diff: false,
             base,
             current: None,
+            open: Vec::new(),
             live: None,
         }
     }
@@ -113,6 +129,16 @@ impl Text {
         // — two pieces of work reported as one (§9.1).
         let previous = self.current.take().unwrap_or_default();
         let dim = Style::new().dimmed();
+        // A level the step's call path no longer carries is a block the walk
+        // has left, and that is where its summary line belongs. Innermost
+        // first, mirroring the headers that opened them.
+        let keep = self
+            .open
+            .iter()
+            .zip(ev.via.iter())
+            .take_while(|(call, label)| &call.label == *label)
+            .count();
+        self.close_to(keep);
         // The latch: once a level differs from the last step's path, every
         // level under it is new too, whatever its label says. Two components
         // that each `use` the same file unnamed produce the same label at
@@ -127,6 +153,14 @@ impl Text {
             }
             diverged = true;
             self.write(format_args!("  {}{dim}{label}{dim:#}\n", indent(i)));
+        }
+        // `close_to` left the open stack at the levels this step shares, so
+        // what remains of its call path is what the header loop just printed.
+        for label in ev.via.iter().skip(self.open.len()) {
+            self.open.push(Call {
+                label: label.clone(),
+                summary: Summary::default(),
+            });
         }
         // At depth 0 there is no call site, so the file is the header — and
         // a bare `import` chain inside one file still changes it.
@@ -153,10 +187,25 @@ impl Sink for Text {
         if let Some(s) = self.live.take() {
             s.stop();
         }
-        if self.hide_skipped && matches!(ev.status, Status::Skipped(_)) {
+        let hidden = self.hide_skipped && matches!(ev.status, Status::Skipped(_));
+        if !hidden {
+            self.header(ev);
+        }
+        // Counted before the hidden step leaves: `--hide-skipped` drops the
+        // line and the counts still stand (§9.1). A hidden step cannot open a
+        // block — nothing of it was shown — so it is counted into the levels
+        // already open that its call path still carries, and a block whose
+        // every step was hidden was never opened and reports nothing.
+        for (i, call) in self.open.iter_mut().enumerate() {
+            if ev.via.get(i) != Some(&call.label) {
+                break;
+            }
+            call.summary.count(&ev.status);
+            call.summary.duration += ev.duration;
+        }
+        if hidden {
             return;
         }
-        self.header(ev);
 
         let style = style_for(&ev.status);
         let name = truncate(&format!("{}{}", indent(ev.depth), ev.name), NAME_WIDTH);
@@ -226,6 +275,9 @@ impl Sink for Text {
     }
 
     fn summary(&mut self, plan: &Path, s: &Summary) {
+        // The run ending is the last way to leave a call site, and the one a
+        // walk that reached the end of the file always takes.
+        self.close_to(0);
         let name = crate::error::show(plan.strip_prefix(&self.base).unwrap_or(plan));
         let mut parts = vec![format!(
             "{} step{}",
@@ -249,6 +301,37 @@ impl Sink for Text {
 }
 
 impl Text {
+    /// Close the open call sites below `keep`, innermost first, printing each
+    /// one's summary line. Spec §9.1: the duration is the sum of the steps it
+    /// covers, not a wall clock — those are the numbers the lines above it
+    /// already showed, and a reader adding them up has to get this answer.
+    ///
+    /// The counts are kept whatever the verbosity and printed only under
+    /// `--verbose`: a block's roll-up is detail, and the run's own summary is
+    /// what a quiet run reports.
+    fn close_to(&mut self, keep: usize) {
+        while self.open.len() > keep {
+            let call = self.open.pop().expect("the loop condition is the test");
+            if !self.verbose {
+                continue;
+            }
+            let mut parts = vec![format!(
+                "{} step{}",
+                call.summary.total,
+                if call.summary.total == 1 { "" } else { "s" }
+            )];
+            parts.extend(call.summary.parts());
+            parts.push(human(call.summary.duration));
+            let dim = Style::new().dimmed();
+            self.write(format_args!(
+                "  {}{dim}└ {} · {}{dim:#}\n",
+                indent(self.open.len()),
+                call.label,
+                parts.join(" · ")
+            ));
+        }
+    }
+
     /// A diff, or a metadata delta, under the step's own line. Unified diffs
     /// arrive already marked up; `+`/`-` get their color here so the diff
     /// itself stays plain text everywhere else (json, tests).
@@ -291,13 +374,33 @@ impl Text {
 
         // A body that survived the trim has a line with something on it, so a
         // stream in this list always prints and the note can name the list.
-        for (_, body) in &streams {
-            let lines = if self.verbose {
-                body.lines().collect::<Vec<_>>()
-            } else {
-                tail(body, TAIL)
-            };
-            for line in lines {
+        // Only the streams the window actually narrowed are named there: a
+        // note claiming a cap bit a stream it let through whole is the kind
+        // of half-truth that sends a reader looking for lines that are
+        // already on the screen.
+        let mut narrowed: Vec<&str> = Vec::new();
+        for (name, body) in &streams {
+            if self.verbose {
+                for line in body.lines() {
+                    self.write(format_args!("    {red}│{red:#} {line}\n"));
+                }
+                continue;
+            }
+            let w = window(body, HEAD, TAIL);
+            for line in w.head {
+                self.write(format_args!("    {red}│{red:#} {line}\n"));
+            }
+            if w.elided > 0 {
+                narrowed.push(name);
+                // The marker sits between the two ends, in the gutter of the
+                // stream it cut, because two streams have two totals and one
+                // note cannot honestly carry both.
+                self.write(format_args!(
+                    "    {red}│{red:#} {dim}… {} of {} lines elided …{dim:#}\n",
+                    w.elided, w.total
+                ));
+            }
+            for line in w.tail {
                 self.write(format_args!("    {red}│{red:#} {line}\n"));
             }
         }
@@ -309,14 +412,14 @@ impl Text {
         if f.msg != "exit" {
             note.push(f.msg.clone());
         }
-        if !streams.is_empty() && !self.verbose {
-            // `each` only when there were two, so the one-stream note — which
-            // is every failure that only ever had one — reads as it always did.
-            let each = if streams.len() > 1 { " each" } else { "" };
-            let names: Vec<&str> = streams.iter().map(|(n, _)| *n).collect();
+        if !narrowed.is_empty() {
+            // `each` only when the window bit both, so the one-stream note —
+            // which is every failure that only ever had one — reads as a
+            // sentence about that stream.
+            let each = if narrowed.len() > 1 { " each" } else { "" };
             note.push(format!(
-                "{}, last {TAIL} lines{each} · --verbose for all",
-                names.join("+")
+                "{}, first {HEAD} + last {TAIL} lines{each} · --verbose for all",
+                narrowed.join("+")
             ));
         }
         if !note.is_empty() {

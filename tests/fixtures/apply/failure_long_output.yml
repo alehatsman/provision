@@ -1,0 +1,14 @@
+# Issue #59: the real shape of a failing linter. The rule it broke is the
+# first thing it prints and the file tally is the last, so a window that kept
+# only the tail showed the tally and dropped the rule — the one line the
+# failure was about. 55 lines of output against a 10 + 20 window, so the
+# elision is real and its arithmetic is checkable from the snapshot.
+- name: A linter that names the rule first
+  shell: |
+    echo "biome ▸ lint/suspicious/noExplicitAny"
+    echo "src/App.tsx:12:5 — Unexpected any. Specify a different type."
+    for i in $(seq 3 53); do echo "line $i of the middle"; done
+    echo "14 files checked, 1 error"
+    echo "15 files checked, 1 error"
+    exit 1
+  changed_when: "false"

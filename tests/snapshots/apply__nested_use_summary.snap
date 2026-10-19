@@ -1,0 +1,17 @@
+---
+source: tests/apply.rs
+expression: out
+---
+  tests/fixtures/apply/nested_use.yml · 3 steps to run · 2 files
+  Developer toolchains
+  ✓   install the toolchain                          ok  [t]
+    │ toolchain present
+    ui gate
+  ✓     biome                                        ok  [t]
+    │ biome ok
+  ~     tsc                                          changed  [t]
+    │ tsc ok
+    └ ui gate · 2 steps · 1 changed · 1 ok · [t]
+  └ Developer toolchains · 3 steps · 1 changed · 2 ok · [t]
+
+  tests/fixtures/apply/nested_use.yml · 3 steps · 1 changed · 2 ok · [t]

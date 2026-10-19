@@ -1,0 +1,40 @@
+---
+source: tests/apply.rs
+expression: out
+---
+  tests/fixtures/apply/failure_long_output.yml · 1 step to run
+  ✗ A linter that names the rule first               FAILED  [t]
+    │ biome ▸ lint/suspicious/noExplicitAny
+    │ src/App.tsx:12:5 — Unexpected any. Specify a different type.
+    │ line 3 of the middle
+    │ line 4 of the middle
+    │ line 5 of the middle
+    │ line 6 of the middle
+    │ line 7 of the middle
+    │ line 8 of the middle
+    │ line 9 of the middle
+    │ line 10 of the middle
+    │ … 25 of 55 lines elided …
+    │ line 36 of the middle
+    │ line 37 of the middle
+    │ line 38 of the middle
+    │ line 39 of the middle
+    │ line 40 of the middle
+    │ line 41 of the middle
+    │ line 42 of the middle
+    │ line 43 of the middle
+    │ line 44 of the middle
+    │ line 45 of the middle
+    │ line 46 of the middle
+    │ line 47 of the middle
+    │ line 48 of the middle
+    │ line 49 of the middle
+    │ line 50 of the middle
+    │ line 51 of the middle
+    │ line 52 of the middle
+    │ line 53 of the middle
+    │ 14 files checked, 1 error
+    │ 15 files checked, 1 error
+    │ (exit 1 · stdout, first 10 + last 20 lines · --verbose for all)
+
+  tests/fixtures/apply/failure_long_output.yml · 1 step · 1 failed · [t]

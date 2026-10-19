@@ -1,0 +1,17 @@
+---
+source: tests/apply.rs
+expression: "colored(\"nested_use.yml\", &[\"--verbose\"])"
+---
+  ESC[2mtests/fixtures/apply/nested_use.yml · 3 steps to run · 2 filesESC[0m
+  ESC[2mDeveloper toolchainsESC[0m
+  ESC[32m✓ESC[0m   install the toolchain                          ESC[32mokESC[0m  ESC[2m[t]ESC[0m
+    ESC[2m│ toolchain presentESC[0m
+    ESC[2mui gateESC[0m
+  ESC[32m✓ESC[0m     biome                                        ESC[32mokESC[0m  ESC[2m[t]ESC[0m
+    ESC[2m│ biome okESC[0m
+  ESC[33m~ESC[0m     tsc                                          ESC[33mchangedESC[0m  ESC[2m[t]ESC[0m
+    ESC[2m│ tsc okESC[0m
+    ESC[2m└ ui gate · 2 steps · 1 changed · 1 ok · [t]ESC[0m
+  ESC[2m└ Developer toolchains · 3 steps · 1 changed · 2 ok · [t]ESC[0m
+
+  tests/fixtures/apply/nested_use.yml · 3 steps · 1 changed · 2 ok · [t]

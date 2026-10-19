@@ -632,7 +632,8 @@ shell:                         # long form
   provision genuinely cannot know: `pkg` `latest` under plan (§6.5), a `git`
   branch ref under plan (§6.8), `defaults` off macOS (§6.10).
 - Streaming: stdout/stderr captured. On failure **both** are shown, stdout
-  first, each tailed to its own last 20 lines; `--verbose` shows both in
+  first, each through §9.1's head-and-tail window — its first 10 and last 20
+  lines, with the middle elided and counted; `--verbose` shows both in
   full, on a failure and on a step that worked alike; `--stream` tees them
   to the terminal live as they arrive *and* still captures them, so a
   failure under `--stream` prints its block after the live output rather
@@ -1742,9 +1743,22 @@ One line per step, updated in place while running (spinner), then frozen:
   ✓ cargo test --workspace                         ok        0.9s
   ✗ Enable multilib                                FAILED    0.1s
     │ sed: can't read /etc/pacman.conf: No such file or directory
-    │ (exit 2 · stderr, last 20 lines · --verbose for all)
+    │ (exit 2)
 
   x1.yml · 5 steps · 1 changed · 2 ok · 1 skipped · 1 failed · 1.7s
+```
+
+A step that said more than the window holds is elided in the middle, and
+the elision says how much it dropped out of how many:
+
+```
+  ✗ full gate                                      FAILED    8.2s
+    │ biome ▸ lint/suspicious/noExplicitAny
+    │ src/App.tsx:12:5
+    │ …
+    │ … 26 of 56 lines elided …
+    │ 14 files checked, 1 error
+    │ (exit 1 · stdout, first 10 + last 20 lines · --verbose for all)
 ```
 
 - Glyphs and colors: `✓` green ok, `~` yellow changed, `-` dim skipped, `?`
@@ -1765,22 +1779,76 @@ One line per step, updated in place while running (spinner), then frozen:
   header per call site**, not per file: two `use`s of the same component are
   two entries, because they are two pieces of work and collapsing them to
   one header made a plan under-report what it was about to do.
+- **Under `--verbose`, a nested call site closes with its own summary
+  line**, dim, indented to the header it answers and marked `└`: the call
+  site's label, how many steps ran under it, the same counts the run's
+  summary uses, and how long they took.
+
+  ```
+    Developer toolchains
+      rust
+      ✓ cargo fmt                                  ok        0.4s
+      ~ cargo install cargo-deny                   changed   9.1s
+      └ rust · 2 steps · 1 changed · 1 ok · 9.5s
+    └ Developer toolchains · 2 steps · 1 changed · 1 ok · 9.5s
+  ```
+
+  It is printed when the walk leaves the call site — when a step's call path
+  diverges from it, or when the run ends — so the levels close innermost
+  first, mirroring the headers that opened them. The duration is the **sum
+  of the durations of the steps it covers**, not a wall clock: those are the
+  numbers the lines above it already showed, and a reader adding them up has
+  to get the printed answer. A call site counts every step under it,
+  including those of call sites nested inside it, which is why the two lines
+  above can carry the same counts.
+
+  A block whose every step `--hide-skipped` dropped prints no header, and so
+  no summary line either: a verdict on work a reader was never shown is
+  noise. A block that printed any step counts the hidden ones, exactly as
+  the run's summary does.
+
+  **It is a roll-up, not a per-step breakdown of a component's work.** Where
+  a component is one step that runs a script — a `shell:` calling a gate —
+  that script's checks are lines in one step's output, not steps, and
+  nothing in the renderer can make them steps. `--verbose` prints that
+  step's captured output in full under its line, and that is where those
+  checks are to be read. Reporting them individually is the component's to
+  fix, by being more than one step.
 - Skipped steps collapse to one dim line each; `--hide-skipped` drops them
   and the summary still counts them.
 - The failure block under a `✗` line is the step's own captured output:
-  stdout first, then stderr, each tailed to its last 20 lines, with a
-  parenthesised note naming the exit code and which streams it is showing
-  under what cap — the cap is announced whether or not it bit, because a
-  reader cannot tell a step that said exactly this much from one that was
-  trimmed, and the offer of `--verbose` costs nothing when it was. A
+  stdout first, then stderr, each shown through a **head-and-tail window** —
+  its first 10 lines and its last 20 — with a parenthesised note naming the
+  exit code and, when the window bit, which streams it narrowed and how to
+  see them whole. A
   failure with no command behind it — a typed action, an `unless` that
   could not run, a program that could not be spawned — has no streams to
   show and prints the synthesized reason in that slot instead. `--verbose`
-  drops the tail and prints both streams whole. The two streams are not
+  drops the window and prints both streams whole. The two streams are not
   labelled: they are printed in a fixed order, which is the same order and
   the same `│` gutter `--verbose` uses on a step that worked, and one
   shape for captured output is worth more than a header telling a reader
   something the note already says.
+- **The window keeps the head because that is where a tool says what is
+  wrong.** A tail alone was the whole of it, and a linter that prints the
+  rule it broke first and a file-by-file tally after showed the tally and
+  dropped the rule — the one line the failure was about — so the reader had
+  to run the command again by hand to learn it (#59). A cap is still needed:
+  a step that printed ten thousand lines must not bury the summary under
+  them. Two windows onto one stream is what satisfies both, and the tail
+  stays the larger of the two because a command that fails usually fails
+  last.
+- **An elision is printed, counted, and placed where it happened**: between
+  a stream's head and its tail, in that stream's own gutter, as
+  `… 26 of 56 lines elided …`. It carries both numbers because either alone
+  is a half-answer — how much was dropped, out of how much there was — and
+  it sits per stream because two streams have two totals and one note
+  cannot honestly carry both. The note above it therefore no longer
+  announces a cap that did not bite: **when nothing was elided, the note
+  names no stream and offers no `--verbose`**, because the reader has
+  everything and an offer of more is a lie. The marker's absence is the
+  announcement, and it is a better one than a sentence was: it is where the
+  cut would have been.
 - Plan mode uses `would change` / `would run` in place of `changed`, and
   prints diffs under the line, indented, colored: unified, three lines of
   context. `--no-diff` suppresses them. The flag exists on `apply` too, where

@@ -1,0 +1,7 @@
+description: a component whose own step sits beside a nested use
+steps:
+  - name: install the toolchain
+    shell: echo "toolchain present"
+    changed_when: "false"
+  - name: ui gate
+    use: ./inner.yml

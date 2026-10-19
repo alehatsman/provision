@@ -7,6 +7,6 @@ expression: out
     │ checked 5 things
     │ finding: /etc/pacman.conf has no multilib section
     │ gate failed on the findings above
-    │ (exit 1 · stdout+stderr, last 20 lines each · --verbose for all)
+    │ (exit 1)
 
   tests/fixtures/apply/failure_both_streams.yml · 1 step · 1 failed · [t]

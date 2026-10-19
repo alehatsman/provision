@@ -1,0 +1,8 @@
+description: the inner component, which is more than one step
+steps:
+  - name: biome
+    shell: echo "biome ok"
+    changed_when: "false"
+  - name: tsc
+    shell: echo "tsc ok"
+    changed_when: "true"

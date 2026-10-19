@@ -1,0 +1,72 @@
+---
+source: tests/apply.rs
+expression: out
+---
+  tests/fixtures/apply/failure_window_boundary.yml · 2 steps to run
+  ✗ Exactly the window                               FAILED  [t]
+    │ line 1
+    │ line 2
+    │ line 3
+    │ line 4
+    │ line 5
+    │ line 6
+    │ line 7
+    │ line 8
+    │ line 9
+    │ line 10
+    │ line 11
+    │ line 12
+    │ line 13
+    │ line 14
+    │ line 15
+    │ line 16
+    │ line 17
+    │ line 18
+    │ line 19
+    │ line 20
+    │ line 21
+    │ line 22
+    │ line 23
+    │ line 24
+    │ line 25
+    │ line 26
+    │ line 27
+    │ line 28
+    │ line 29
+    │ line 30
+    │ (exit 1)
+  ✗ One line past the window                         FAILED  [t]
+    │ line 1
+    │ line 2
+    │ line 3
+    │ line 4
+    │ line 5
+    │ line 6
+    │ line 7
+    │ line 8
+    │ line 9
+    │ line 10
+    │ … 1 of 31 lines elided …
+    │ line 12
+    │ line 13
+    │ line 14
+    │ line 15
+    │ line 16
+    │ line 17
+    │ line 18
+    │ line 19
+    │ line 20
+    │ line 21
+    │ line 22
+    │ line 23
+    │ line 24
+    │ line 25
+    │ line 26
+    │ line 27
+    │ line 28
+    │ line 29
+    │ line 30
+    │ line 31
+    │ (exit 1 · stdout, first 10 + last 20 lines · --verbose for all)
+
+  tests/fixtures/apply/failure_window_boundary.yml · 2 steps · 2 failed · [t]
