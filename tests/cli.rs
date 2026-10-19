@@ -1344,6 +1344,105 @@ fn a_literal_typed_modifier_is_still_checked_at_parse_time() {
     assert!(err.contains("`nope` is not a duration"), "{err}");
 }
 
+// #61. `is_template` matched only `{{`, so a modifier holding a `{% … %}`
+// block was classified a literal and handed to the bool/duration/int parser
+// as raw text. Spec §3.4 now says a template is any Jinja delimiter.
+#[test]
+fn a_statement_block_is_a_template_in_every_typed_modifier() {
+    // All four fields §3.4 names, together, as a cross-platform plan writes
+    // them.
+    let (code, text) = validate_with(
+        "templated_mods/statement_blocks.yml",
+        &["--prop", "root=true"],
+    );
+    assert_eq!(code, 0, "{text}");
+}
+
+#[test]
+fn each_typed_modifier_takes_a_statement_block_on_its_own() {
+    // One plan per field, so a regression names the field that broke rather
+    // than failing the four of them as a lump.
+    let dir = tempfile::tempdir().unwrap();
+    for (field, line) in [
+        (
+            "sudo",
+            "sudo: \"{% if yes %}true{% else %}false{% endif %}\"",
+        ),
+        (
+            "timeout",
+            "timeout: \"{% if yes %}5m{% else %}30s{% endif %}\"",
+        ),
+        (
+            "retry.attempts",
+            "retry: {attempts: \"{% if yes %}5{% else %}2{% endif %}\"}",
+        ),
+        (
+            "retry.delay",
+            "retry: {attempts: 2, delay: \"{% if yes %}10s{% else %}1s{% endif %}\"}",
+        ),
+    ] {
+        let plan = dir.path().join("plan.yml");
+        std::fs::write(
+            &plan,
+            format!(
+                "- vars: {{yes: true}}\n- name: x\n  shell: \"true\"\n  changed_when: \"false\"\n  {line}\n"
+            ),
+        )
+        .unwrap();
+        let out = run(&["validate", &plan.display().to_string()]);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{field}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
+#[test]
+fn a_statement_block_that_renders_to_the_wrong_type_is_still_refused() {
+    // The deferral is a deferral, not an escape: the check happens when the
+    // block has rendered, against the text it produced.
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("plan.yml");
+    std::fs::write(
+        &plan,
+        "- name: x\n  shell: \"true\"\n  changed_when: \"false\"\n  timeout: \"{% if true %}banana{% endif %}\"\n",
+    )
+    .unwrap();
+    let out = run(&["validate", &plan.display().to_string()]);
+    assert_eq!(out.status.code(), Some(EXIT_VALIDATION));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("`banana` is not a duration"), "{err}");
+}
+
+#[test]
+fn a_templated_sudo_must_spell_the_bool_exactly() {
+    // §3.4's typed rule, kept: a block renders text, so `true`/`false` is
+    // read — but nothing else is, and `is_true()`'s coercion stays out.
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("plan.yml");
+    std::fs::write(
+        &plan,
+        "- name: x\n  shell: \"true\"\n  changed_when: \"false\"\n  sudo: \"{% if true %}yes{% endif %}\"\n",
+    )
+    .unwrap();
+    let out = run(&["validate", &plan.display().to_string()]);
+    assert_eq!(out.status.code(), Some(EXIT_VALIDATION));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("expected true or false"), "{err}");
+    // The note is the part a user acts on, so it is pinned verbatim — a
+    // wrapped string literal is one `cargo fmt` away from carrying its own
+    // indentation into the output.
+    assert!(
+        err.contains(
+            "a sole `{{ expr }}` keeps its type, so point it at a bool; \
+             any other template must render exactly `true` or `false`"
+        ),
+        "{err}"
+    );
+}
+
 // ── `defaults` (spec §6.10) ───────────────────────────────────────────────
 
 // `defaults_strict.yml` is a plan too, so this is on by default now.

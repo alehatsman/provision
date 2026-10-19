@@ -1,0 +1,14 @@
+# #61: a `{% ... %}` modifier is a template, not a literal. All four fields
+# §3.4 names, each driven by a statement block rather than an expression.
+props:
+  root: {type: bool, required: true}
+  slow: {type: bool, default: false}
+steps:
+  - name: every typed modifier from a jinja statement block
+    shell: echo hi
+    changed_when: "false"
+    sudo: "{% if props.root %}true{% else %}false{% endif %}"
+    timeout: "{% if props.slow %}5m{% else %}30s{% endif %}"
+    retry:
+      attempts: "{% if props.slow %}5{% else %}2{% endif %}"
+      delay: "{% if props.slow %}10s{% else %}1s{% endif %}"

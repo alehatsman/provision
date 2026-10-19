@@ -675,8 +675,16 @@ pub(crate) fn duration_from_str(s: &str) -> std::result::Result<Duration, BadDur
 /// because the value does not exist until there is a scope. So parsing defers
 /// exactly the nodes that hold a template and keeps checking every literal,
 /// which is what almost every step writes.
+///
+/// A template is any Jinja delimiter, not just `{{`: a statement block is one
+/// too, and `timeout: "{% if facts.os == 'darwin' %}5m{% else %}30s{% endif %}"`
+/// is the cross-platform shape §3.4 exists for — read as a literal, it went to
+/// the duration parser as raw text (#61). The wider test gives up no check that
+/// could have passed, since no duration, bool or whole number literal holds a
+/// delimiter.
 pub(crate) fn is_template(at: N<'_>) -> bool {
-    at.as_str().is_ok_and(|s| s.contains("{{"))
+    at.as_str()
+        .is_ok_and(|s| s.contains("{{") || s.contains("{%") || s.contains("{#"))
 }
 
 /// Render a typed modifier and read it as a bool. §3.4's sole-expression rule
@@ -693,16 +701,24 @@ pub(crate) fn mod_bool(at: N<'_>, engine: &Engine, ctx: &Value) -> Result<bool> 
         .map_err(|e| at.err(format!("`{src}` could not be rendered: {e}")))?;
     // `is_true()` is not the test: it would take "no", 0 and [] for false and
     // a non-empty string for true, which is the silent coercion §3.4's typed
-    // rule exists to avoid. The value has to *be* a bool.
-    if !matches!(v.kind(), minijinja::value::ValueKind::Bool) {
-        return Err(at
+    // rule exists to avoid. The value has to *be* a bool — or spell one, since
+    // a `{% … %}` block has no type to keep and can only render text (#61).
+    if matches!(v.kind(), minijinja::value::ValueKind::Bool) {
+        return Ok(v.is_true());
+    }
+    match v.as_str().map(str::trim) {
+        Some("true") => Ok(true),
+        Some("false") => Ok(false),
+        _ => Err(at
             .err(format!(
                 "expected true or false, `{src}` rendered to {}",
                 describe_kind(&v)
             ))
-            .with_note("a sole `{{ expr }}` keeps its type, so point it at a bool"));
+            .with_note(concat!(
+                "a sole `{{ expr }}` keeps its type, so point it at a bool; ",
+                "any other template must render exactly `true` or `false`"
+            ))),
     }
-    Ok(v.is_true())
 }
 
 /// The same for a field read as text and then parsed: `timeout` and
