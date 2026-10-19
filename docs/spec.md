@@ -310,6 +310,20 @@ is rendered instead, at the step's own position, under every verb. A
 literal is still checked at parse time, which is almost every one. Templates in
 `.j2` files rendered by `template` use the same engine and scope.
 
+A modifier **holds a template when its text contains a Jinja delimiter** —
+`{{`, `{%` or `{#` — and is a literal otherwise. The statement form counts,
+and is the shape this rule exists for:
+
+```yaml
+timeout: "{% if facts.os == 'darwin' %}5m{% else %}30s{% endif %}"
+```
+
+The wider test gives up no parse-time check that could ever have passed: no
+duration, bool or whole number literal contains a Jinja delimiter, so every
+value it newly defers is one the parse-time check could only have rejected.
+The deferred check is the same check, at the step's own position, against
+the text the template actually rendered (#61).
+
 - Undefined variable: error at plan time, with file:line and the variable name.
 - Filters available: minijinja built-ins plus `expanduser`, `basename`,
   `dirname`, `quote` (shell-quote), `to_yaml`, `to_json`, `crc32`.
