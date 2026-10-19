@@ -539,7 +539,24 @@ fn sigterm_reaches_a_child_still_holding_the_pipe() {
         .spawn()
         .expect("provision failed to start");
 
-    std::thread::sleep(std::time::Duration::from_millis(600));
+    // Wait for the first attempt to have run, rather than sleeping a fixed
+    // 600ms and hoping. The old guess raced provision's own startup: on a
+    // loaded host the TERM arrived before the handler was installed, the
+    // default disposition killed the run outright, and the test failed with
+    // no exit code at all rather than the 143 it asserts -- three times in
+    // six runs on a busy box (#64). The marker is written by the step, so
+    // seeing it proves the walk is under way and the handler is up.
+    let attempted = dir.path().join("attempted");
+    let waited = std::time::Instant::now();
+    while !attempted.exists() {
+        assert!(
+            waited.elapsed() < std::time::Duration::from_secs(30),
+            "the first attempt never ran"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    // And let it reach the `delay` it is meant to be interrupted inside.
+    std::thread::sleep(std::time::Duration::from_millis(200));
     #[expect(
         clippy::let_underscore_must_use,
         reason = "the child's own output is the assertion"
@@ -1658,8 +1675,16 @@ fn a_deadline_stops_a_retry_between_attempts() {
     // 1s deadline before anything reports it. The between-step deadline
     // check alone still yields exit 124, so only wall-clock time tells the
     // two apart.
+    //
+    // Ten seconds, not five. The gap being read is one second against
+    // twenty, so anything between the two separates them just as well, and
+    // the bound's only other job is to not go off on a busy host. Five left
+    // four seconds for provision to start and run an attempt, which a loaded
+    // box can eat (#64); ten leaves nine and still sits ten short of the
+    // twenty a stale timeout would take. Costs nothing when the test passes:
+    // a passing run ends in about a second either way.
     assert!(
-        elapsed < std::time::Duration::from_secs(5),
+        elapsed < std::time::Duration::from_secs(10),
         "the retry ran past the deadline instead of stopping between attempts: {elapsed:?}"
     );
 }
@@ -1680,8 +1705,11 @@ fn a_deadline_reaches_into_a_retry_delay_and_keeps_the_last_attempt() {
     );
     let elapsed = started.elapsed();
     assert_eq!(code, 124, "{out}");
+    // Ten seconds, not five: the delay this must not sleep out is thirty, so
+    // the bound has twenty to spare below the regression and nine above a
+    // passing run, instead of the four that a loaded host could eat (#64).
     assert!(
-        elapsed < std::time::Duration::from_secs(5),
+        elapsed < std::time::Duration::from_secs(10),
         "slept out the delay past the deadline: {elapsed:?}\n{out}"
     );
     assert!(
@@ -1750,8 +1778,11 @@ fn sigterm_reaches_into_a_retry_delay() {
         String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
 
     assert_eq!(out.status.code(), Some(143), "{text}");
+    // Ten seconds, not five, for the same reason as the deadline half above:
+    // the delay is thirty, so ten separates stopped-now from slept-it-out
+    // with room on both sides that a busy host cannot close (#64).
     assert!(
-        elapsed < std::time::Duration::from_secs(5),
+        elapsed < std::time::Duration::from_secs(10),
         "slept out the delay past the TERM: {elapsed:?}\n{text}"
     );
     assert!(
