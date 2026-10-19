@@ -3,11 +3,17 @@
 #
 # The delay is far longer than any test waits: a run that sleeps it out in
 # full instead of noticing `--deadline` or a TERM is the bug, and wall time is
-# how the test tells. The failing attempt writes to stderr and exits 5, so the
+# how the test tells.
+#
+# The attempt touches `attempted` before it fails so a test that has to signal
+# this run can wait for the walk to be under way instead of sleeping a fixed
+# guess. A signal sent before provision installs its handler is not the stop
+# being tested -- it is the default disposition, and the run dies by signal
+# with no exit code at all (#64). The failing attempt writes to stderr and exits 5, so the
 # step's result can be checked for the attempt that actually ran — not a
 # stand-in invented for the stop.
 - name: Fails and waits to retry
-  shell: echo boom >&2; exit 5
+  shell: echo boom >&2; touch "{{ env.PROVISION_SCRATCH }}/attempted"; exit 5
   retry:
     attempts: 3
     delay: 30s
