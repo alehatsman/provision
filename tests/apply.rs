@@ -1654,11 +1654,16 @@ fn a_steps_own_timeout_wins_when_it_is_the_smaller() {
 
 // The clamp has to hold across a retry, not just at the first attempt: a
 // step whose gate keeps failing can burn through a short `--deadline` one
-// `delay` at a time even though no single attempt ever ran long. Without a
-// recheck before each attempt, the loop would keep going on the stale
-// timeout computed once at prepare time and blow well past the deadline
-// (attempts: 20, delay: 1s — twenty seconds of retrying against a
-// one-second deadline).
+// `delay` at a time even though no single attempt ever ran long.
+//
+// Two separate guards defend that, and this test pins both — which it did
+// not always do. The wall clock below catches a `delay` that sleeps on past
+// the deadline. It does NOT catch the per-attempt recheck going missing:
+// `pause` honours the deadline on its own, so with the recheck removed the
+// loop still unwinds in about three seconds and a wall-clock bound stays
+// green (#66). The recheck is pinned by its own words instead — see the
+// `before attempt` assertion — which is exact rather than timed and cannot
+// flake on a busy host.
 #[test]
 fn a_deadline_stops_a_retry_between_attempts() {
     let dir = tempfile::tempdir().unwrap();
@@ -1671,12 +1676,23 @@ fn a_deadline_stops_a_retry_between_attempts() {
         !out.contains("Must not run after the deadline"),
         "the walk did not stop:\n{out}"
     );
-    // The regression this guards: without a per-attempt recheck the loop
-    // keeps retrying on the stale prepare-time timeout and only stops
-    // between steps, burning all 20 attempts * 1s delay (~20s) against a
-    // 1s deadline before anything reports it. The between-step deadline
-    // check alone still yields exit 124, so only wall-clock time tells the
-    // two apart.
+    // The per-attempt recheck, pinned by the only thing that distinguishes
+    // it from `pause`: refusing to *start* attempt 2 has its own wording,
+    // and nothing else in the loop produces it. Drop the recheck and the
+    // attempt runs on the stale prepare-time timeout, the loop ends on a
+    // plain `exit 1` at attempt 20/20, and this assertion is what notices —
+    // the exit code is 124 either way and the wall clock stays inside its
+    // bound (#66).
+    assert!(
+        out.contains("deadline exceeded before attempt 2/20"),
+        "the loop started an attempt the deadline had already closed:\n{out}"
+    );
+    // The regression this one guards is the other half: a `delay` that is
+    // not deadline-aware sleeps all 20 attempts * 1s (~20s) against a 1s
+    // deadline before anything reports it. The between-step deadline check
+    // alone still yields exit 124, so only wall-clock time tells those two
+    // apart. It takes both defects together to reach that twenty seconds;
+    // either one alone is caught by one of the two assertions here (#66).
     //
     // Ten seconds, not five. The gap being read is one second against
     // twenty, so anything between the two separates them just as well, and
