@@ -1,0 +1,8 @@
+---
+# The parent exists already and is 0700; the step must not widen it.
+- name: A file under an existing private directory
+  file:
+    path: "{{ env.PROVISION_SCRATCH }}/locked/provision.conf"
+    state: file
+    content: "x\n"
+  sudo: true

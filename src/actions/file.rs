@@ -810,6 +810,14 @@ impl Spec {
         }
         if ctx.sudo {
             let dir = parent.display().to_string();
+            // `install -d -m` re-modes a directory that is already there, so
+            // probe as root first and leave an existing parent alone.
+            let there = ctx
+                .as_root(&["test", "-e", &dir])
+                .map_err(|e| format!("cannot run test: {e}"))?;
+            if there.rc == 0 {
+                return Ok(());
+            }
             return match ctx.perform(&["install", "-d", "-m", "0755", &dir], true) {
                 Some(bad) => Err(describe(bad)),
                 None => Ok(()),

@@ -2515,6 +2515,29 @@ fn the_sudo_write_path_stages_outside_the_destination() {
     );
 }
 
+#[test]
+fn the_sudo_write_path_leaves_an_existing_parent_mode_alone() {
+    // Spec §6.3: "A parent that already exists is not touched." `install -d
+    // -m 0755` on the way to the target used to widen it, every apply.
+    if !root_is_reachable() {
+        eprintln!("skipped: needs a warm `sudo -n`");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let locked = dir.path().join("locked");
+    std::fs::create_dir(&locked).unwrap();
+    set_mode(&locked, 0o700);
+
+    let (code, first) = apply(dir.path(), "file_sudo_parent.yml", &[]);
+    let (code2, second) = apply(dir.path(), "file_sudo_parent.yml", &[]);
+    let after = mode_of(&locked);
+    let _ = sudo(&["rm", "-rf", locked.to_str().unwrap()]);
+
+    assert_eq!(code, 0, "{first}");
+    assert_eq!(code2, 0, "{second}");
+    assert_eq!(after, 0o700, "the existing parent was re-moded");
+}
+
 fn sudo(args: &[&str]) -> bool {
     let mut all = vec!["-n"];
     all.extend_from_slice(args);
