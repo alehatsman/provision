@@ -1,0 +1,81 @@
+---
+description: install this repo's own gates as git hooks — ci-fast on commit, ci on push
+
+# Run once per clone. `tasks/ci-fast.yml` calls itself the pre-commit gate and
+# `tasks/ci.yml` the pre-push gate, and until this existed neither was wired to
+# anything: `.git/hooks` held the fourteen `.sample` files git ships and
+# nothing else, so both were an intention run by hand or not at all.
+#
+# The machine sets `core.hooksPath`, which REPLACES `.git/hooks` rather than
+# adding to it. That dispatcher's last act is `exec "$git_common_dir/hooks/$hook"`
+# when one is executable, so writing here is still the right place — and
+# `--git-common-dir` means one install covers every worktree of this clone.
+
+steps:
+  # A worktree's `.git` is a file, so `.git/hooks/` cannot be created there and
+  # the `file` steps below would fail on a missing parent. Say why first.
+  - name: This is the clone, not one of its worktrees
+    assert:
+      command: test -d .git
+    tags: [hooks]
+
+  # Ours, or absent -- never a hook someone else wrote. `creates:` is the
+  # wrong modifier for this: it would also skip a *stale* hook from an
+  # earlier revision of this task, which is exactly the one that must be
+  # rewritten. The marker is the installed hook's own first comment line.
+  - name: .git/hooks/pre-commit is ours, or absent
+    assert:
+      command: >-
+        ! test -e .git/hooks/pre-commit ||
+        grep -q 'tasks/setup-hooks.yml' .git/hooks/pre-commit
+      msg: >-
+        .git/hooks/pre-commit exists and this task did not write it. Move it
+        aside and re-run; a hook you wrote is not this task's to replace.
+    tags: [hooks]
+
+  - name: pre-commit runs the fast gate
+    file:
+      path: .git/hooks/pre-commit
+      state: file
+      mode: "0755"
+      content: |
+        #!/bin/sh
+        # Installed by `provision apply tasks/setup-hooks.yml`. Edit there.
+        #
+        # A gate that skips when its tool is missing is not a gate -- that is
+        # how ci-fast came to be documentation of an intention. Fail loudly.
+        command -v provision >/dev/null || {
+          echo "pre-commit: provision is not on PATH; run tasks/install.yml" >&2
+          exit 1
+        }
+        exec provision apply tasks/ci-fast.yml
+    tags: [hooks]
+
+  # Ours, or absent -- never a hook someone else wrote. `creates:` is the
+  # wrong modifier for this: it would also skip a *stale* hook from an
+  # earlier revision of this task, which is exactly the one that must be
+  # rewritten. The marker is the installed hook's own first comment line.
+  - name: .git/hooks/pre-push is ours, or absent
+    assert:
+      command: >-
+        ! test -e .git/hooks/pre-push ||
+        grep -q 'tasks/setup-hooks.yml' .git/hooks/pre-push
+      msg: >-
+        .git/hooks/pre-push exists and this task did not write it. Move it
+        aside and re-run; a hook you wrote is not this task's to replace.
+    tags: [hooks]
+
+  - name: pre-push runs the full gate
+    file:
+      path: .git/hooks/pre-push
+      state: file
+      mode: "0755"
+      content: |
+        #!/bin/sh
+        # Installed by `provision apply tasks/setup-hooks.yml`. Edit there.
+        command -v provision >/dev/null || {
+          echo "pre-push: provision is not on PATH; run tasks/install.yml" >&2
+          exit 1
+        }
+        exec provision apply tasks/ci.yml
+    tags: [hooks]
