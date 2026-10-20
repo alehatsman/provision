@@ -981,6 +981,10 @@ pub(crate) fn set_mode(path: &Path, mode: u32) -> std::io::Result<()> {
 }
 
 #[cfg(not(unix))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the unix twin's signature, so six callers are not cfg-split"
+)]
 pub(crate) fn set_mode(_path: &Path, _mode: u32) -> std::io::Result<()> {
     Ok(())
 }

@@ -29,9 +29,9 @@ pub(crate) fn interrupted() -> bool {
     STOP_SIGNAL.load(Ordering::SeqCst) != 0
 }
 
-/// The shell's `128 + signal`. `130` when nothing was recorded: Windows
-/// installs no handler, so a stop there has no signal number to report and
-/// Ctrl-C is the only way one arrives.
+/// The shell's `128 + signal`. `130` when nothing was recorded: Windows has
+/// no signal numbers, so its console handler records SIGINT's and a stop
+/// there always reads as Ctrl-C.
 pub(crate) fn stop_code() -> u8 {
     let sig = STOP_SIGNAL.load(Ordering::SeqCst);
     u8::try_from(sig)
@@ -72,6 +72,84 @@ pub(crate) fn catch_interrupts() {
             libc::signal(libc::SIGTERM, handler);
         }
     }
+
+    // Windows has no signals; the console calls a handler on a thread of its
+    // own. Without one, the default handler ends the process on the spot:
+    // exit 0xC000013A, no summary, no `interrupted` — measured on a Windows
+    // host, where spec §10's Ctrl-C row had never been true.
+    //
+    // Ctrl-Break is the same request by another key, and the only one a
+    // program can aim at a single process group, so it is taken too. Close,
+    // logoff and shutdown are not: the system ends the process when the
+    // handler returns whatever it says, so recording a stop there would
+    // promise a summary nobody gets to print.
+    #[cfg(windows)]
+    #[expect(
+        unsafe_code,
+        reason = "SetConsoleCtrlHandler has no safe equivalent in std"
+    )]
+    {
+        const CTRL_C_EVENT: u32 = 0;
+        const CTRL_BREAK_EVENT: u32 = 1;
+        /// SIGINT's number, so the exit code is the 130 spec §8 gives Ctrl-C.
+        const SIGINT: i32 = 2;
+
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn SetConsoleCtrlHandler(
+                handler: Option<unsafe extern "system" fn(u32) -> i32>,
+                add: i32,
+            ) -> i32;
+        }
+
+        unsafe extern "system" fn on_ctrl(event: u32) -> i32 {
+            if event == CTRL_C_EVENT || event == CTRL_BREAK_EVENT {
+                STOP_SIGNAL.store(SIGINT, Ordering::SeqCst);
+                1
+            } else {
+                0
+            }
+        }
+
+        // SAFETY: `on_ctrl` matches `PHANDLER_ROUTINE` and only stores into
+        // an `AtomicI32`, which is sound from the thread the console starts
+        // it on. A failed registration leaves the default handler, which is
+        // the behaviour before this existed; there is nothing better to do.
+        unsafe {
+            SetConsoleCtrlHandler(Some(on_ctrl), 1);
+        }
+    }
+}
+
+/// Whether a child that exited on its own was in fact stopped by the run's
+/// stop. On unix the terminal's SIGINT never reaches a step's group, so it
+/// never is. On Windows a console event goes to every process on the
+/// console, and `CREATE_NEW_PROCESS_GROUP` does not keep it from a step:
+/// PowerShell and cmd both re-enable Ctrl-C for themselves. So the child
+/// and provision hear it together, and a child that dies of it can be
+/// reaped before the console's thread has run `on_ctrl` — which reported
+/// the step as failed, with the exit code `0xC000013A`, instead of
+/// interrupted.
+#[cfg(unix)]
+fn stopped_with_us(_st: std::process::ExitStatus) -> bool {
+    false
+}
+
+#[cfg(windows)]
+fn stopped_with_us(st: std::process::ExitStatus) -> bool {
+    /// `STATUS_CONTROL_C_EXIT`: what a process ended by Ctrl-C exits with.
+    const CONTROL_C_EXIT: u32 = 0xC000_013A;
+    if st.code().map(i32::cast_unsigned) != Some(CONTROL_C_EXIT) {
+        return false;
+    }
+    // The same event is on its way to this process, so wait for it a little.
+    // Bounded, because a child can raise one on its own console and that is
+    // its exit code and not a stop.
+    let until = Instant::now() + Duration::from_millis(500);
+    while !interrupted() && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    interrupted()
 }
 
 pub(crate) struct Spawn<'a> {
@@ -254,6 +332,8 @@ fn wait_for(child: &mut Child, pid: u32, deadline: Instant) -> How {
     let tick = Duration::from_millis(100);
     loop {
         match child.try_wait() {
+            // Nothing is left to kill: the stop reached the child first.
+            Ok(Some(st)) if stopped_with_us(st) => return How::Interrupted,
             // A child that has exited and a child we cannot ask about are the
             // same answer here: stop waiting and let the exit code speak.
             Ok(Some(_)) | Err(_) => return How::Exited,

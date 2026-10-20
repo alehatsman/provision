@@ -311,11 +311,15 @@ printed path is normalised to `/` (D29). With
 now covers is parsing, validation, `list`, components, the CLI, every exit
 code they reach, the apply engine's own contract, and what it prints.
 
-What stays untested there is `pkg` against winget, `service` beyond its
-refusal, and Ctrl-C. The first two would have to install or start something
-on the machine running them; the third needs a console control event rather
-than a signal, which is a different mechanism from the one the Unix test
-drives.
+What stays untested there is `pkg` against winget and `service` beyond its
+refusal: both would have to install or start something on the machine
+running them. Ctrl-C was the third, and testing it found that it had never
+worked: with no console handler installed, Windows ended provision on the
+spot, with no summary and exit `0xC000013A`. Since 2026-10-20 a handler
+records the stop and the run takes the same path as on unix, and
+`tests/apply_cross_platform.rs` drives it with a Ctrl-Break aimed at
+provision's process group. That is the one console event a test can send
+to a single process.
 
 That is evidence about **a** runner, not about moongit. The `mgitci.yml` and
 the Rust CI image still wait on moongit's runner switching to `provision apply
