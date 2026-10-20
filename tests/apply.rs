@@ -2946,6 +2946,31 @@ struct Unit {
     path: PathBuf,
 }
 
+/// Whether a skipped `service` test is a failure.
+///
+/// The two tests below return `None` from `Unit::new` and pass when no
+/// systemd user session is reachable, which is right on the Mac this is
+/// developed on and on Windows, where `service` is not supported at all.
+/// It is also indistinguishable from a real run: libtest reports `ok` and
+/// the `eprintln!` is captured. `PROVISION_SERVICE_TESTS=1` is how a
+/// machine that *does* have a user session demands the real thing, the way
+/// `PROVISION_CONTAINER_TESTS=1` does for the container tests (#52).
+fn service_tests_demanded() -> bool {
+    std::env::var("PROVISION_SERVICE_TESTS").is_ok_and(|v| v == "1")
+}
+
+/// Skip, unless this machine was told it has a systemd user session.
+fn no_systemd(why: &str) -> Option<Unit> {
+    assert!(
+        !service_tests_demanded(),
+        "PROVISION_SERVICE_TESTS=1, but {why}. Either this machine has no \
+         systemd user session and should not set it, or the session is not \
+         reachable from the test process."
+    );
+    eprintln!("skipped: {why}");
+    None
+}
+
 impl Unit {
     fn new() -> Option<Unit> {
         // Tests share one process, so the pid alone is not unique enough:
@@ -2953,9 +2978,13 @@ impl Unit {
         // remove the other's file.
         static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-        let runtime = std::env::var("XDG_RUNTIME_DIR").ok()?;
+        let Ok(runtime) = std::env::var("XDG_RUNTIME_DIR") else {
+            return no_systemd("XDG_RUNTIME_DIR is unset");
+        };
         let dir = Path::new(&runtime).join("systemd/user");
-        std::fs::create_dir_all(&dir).ok()?;
+        if std::fs::create_dir_all(&dir).is_err() {
+            return no_systemd("cannot create $XDG_RUNTIME_DIR/systemd/user");
+        }
         let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let name = format!("provision-test-{}-{n}.service", std::process::id());
         let path = dir.join(&name);
@@ -2967,12 +2996,14 @@ impl Unit {
         )
         .ok()?;
         if !systemctl(&["daemon-reload"]) {
+            // The unit file landed but systemd would not take it: the session
+            // is not reachable, which is the same skip as an unset runtime dir.
             #[expect(
                 clippy::let_underscore_must_use,
                 reason = "unwinding a unit that was never accepted"
             )]
             let _ = std::fs::remove_file(&path);
-            return None;
+            return no_systemd("`systemctl --user daemon-reload` failed");
         }
         Some(Unit { name, path })
     }
@@ -3010,10 +3041,9 @@ fn service_plan(dir: &Path, name: &str, body: &str) -> PathBuf {
 
 #[test]
 fn a_user_unit_starts_stops_and_restarts_idempotently() {
-    let Some(unit) = Unit::new() else {
-        eprintln!("skipped: no systemd user manager reachable");
-        return;
-    };
+    // `Unit::new` has already said why, or panicked if this machine was
+    // told to have a session.
+    let Some(unit) = Unit::new() else { return };
     let dir = tempfile::tempdir().unwrap();
 
     let run = |body: &str| {
@@ -3066,10 +3096,9 @@ fn enabled_is_probed_without_being_set() {
     // `systemctl --user enable` writes its symlink into ~/.config/systemd/user,
     // which no test of ours may touch, so the *setting* of `enabled` is
     // manual (plan.md says so). The probe is read-only and tested here.
-    let Some(unit) = Unit::new() else {
-        eprintln!("skipped: no systemd user manager reachable");
-        return;
-    };
+    // `Unit::new` has already said why, or panicked if this machine was
+    // told to have a session.
+    let Some(unit) = Unit::new() else { return };
     let dir = tempfile::tempdir().unwrap();
 
     let plan = service_plan(dir.path(), &unit.name, "    enabled: true\n");
