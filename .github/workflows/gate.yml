@@ -36,6 +36,15 @@ jobs:
           ls -la /run/user/ 2>&1 || echo "RESULT: no /run/user"
           echo "--- loginctl ---"
           loginctl list-sessions 2>&1 || echo "RESULT: no loginctl sessions"
+      - uses: actions/checkout@v4
+      - name: Do the service tests actually run here?
+        env:
+          PROVISION_SERVICE_TESTS: "1"
+        run: |
+          cargo test --locked --test apply \
+            a_user_unit_starts_stops_and_restarts_idempotently -- --nocapture
+          cargo test --locked --test apply \
+            enabled_is_probed_without_being_set -- --nocapture
 
   gate:
     name: ${{ matrix.name }}
