@@ -1451,7 +1451,7 @@ impl Expander {
             action,
             unless: text(step.mods.unless),
             creates: text(step.mods.creates).map(|path| {
-                load::resolve(step.at.file, &expanduser_in(ctx, &path))
+                load::resolve(step.at.file, &path)
                     .to_string_lossy()
                     .into_owned()
             }),
