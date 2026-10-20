@@ -2095,3 +2095,27 @@ fn a_json_src_that_is_not_an_object_is_refused() {
     assert_ne!(code, 0, "{out}");
     assert!(out.contains("not a JSON object"), "{out}");
 }
+
+/// §6.7 shows `command` and `expr` as alternatives. Both used to parse, and
+/// `command` was never run. The error lands on the second key, whichever
+/// order they are written in.
+#[test]
+fn an_assert_with_command_and_expr_is_refused_at_the_second_key() {
+    let dir = tempfile::tempdir().unwrap();
+    for (what, body) in [
+        (
+            "command first",
+            "    assert:\n      command: \"true\"\n      expr: \"1 == 1\"\n",
+        ),
+        (
+            "expr first",
+            "    assert:\n      expr: \"1 == 1\"\n      command: \"true\"\n",
+        ),
+    ] {
+        let (code, out) = validate_step(dir.path(), body);
+        assert_eq!(code, EXIT_VALIDATION, "{what}: {out}");
+        assert!(out.contains("mutually exclusive"), "{what}: {out}");
+        assert!(out.contains("p.yml:6:"), "{what}: {out}");
+        assert!(!out.contains("p.yml:5:"), "{what}: {out}");
+    }
+}

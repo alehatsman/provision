@@ -279,6 +279,18 @@ impl Action {
                 let field = |k: &str| -> Option<String> {
                     body.get(k).and_then(|n| n.as_str().ok()).and_then(render)
                 };
+                // The second of the two in document order, whichever it is.
+                let mut forms = body
+                    .keys()?
+                    .into_iter()
+                    .filter(|(k, _)| matches!(*k, "command" | "expr"));
+                if let (Some(_), Some((_, second))) = (forms.next(), forms.next()) {
+                    return Err(second
+                        .err("`command` and `expr` are mutually exclusive")
+                        .with_note(
+                            "command runs a shell command; expr is evaluated, nothing runs",
+                        ));
+                }
                 let command = field("command");
                 // An `expr` is an expression, not a template: it is evaluated
                 // against the scope at run time, not rendered into text first.
