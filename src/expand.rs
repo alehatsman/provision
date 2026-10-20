@@ -1450,7 +1450,11 @@ impl Expander {
         Some(Prepared {
             action,
             unless: text(step.mods.unless),
-            creates: text(step.mods.creates),
+            creates: text(step.mods.creates).map(|path| {
+                load::resolve(step.at.file, &path)
+                    .to_string_lossy()
+                    .into_owned()
+            }),
             cwd,
             env,
             sudo: step
