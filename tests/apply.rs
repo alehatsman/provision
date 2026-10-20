@@ -3709,6 +3709,30 @@ fn latest_fails_an_install_that_did_nothing() {
     );
 }
 
+// Issue #71: `cask` is checked at validate only where the manager is named.
+// An unnamed one is met on the host, and `reach` is where that is said —
+// otherwise the flag is silently dropped and the plain package installs.
+#[test]
+fn cask_on_an_unnamed_manager_that_has_none_fails_on_the_host() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    fake_manager(&bin, "apt-get", "exit 0");
+    fake_manager(&bin, "dpkg-query", "exit 0");
+
+    let step = "- name: A cask\n  pkg:\n    name: git\n    cask: true\n";
+    let (code, out) = pkg_run_with_only(dir.path(), "validate", step, &bin);
+    assert_eq!(code, 0, "{out}");
+    for verb in ["plan", "apply"] {
+        let (code, out) = pkg_run_with_only(dir.path(), verb, step, &bin);
+        assert_eq!(code, 1, "{verb}:\n{out}");
+        assert!(
+            out.contains("`cask` does not apply to `apt`"),
+            "{verb}:\n{out}"
+        );
+    }
+}
+
 // Issue #72: spec §6.5 scopes `update_cache` to the install call, and only
 // when there is something to install. A removal does not need fresh lists.
 #[test]

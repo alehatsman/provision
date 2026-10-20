@@ -589,6 +589,12 @@ impl Spec {
                 m.name, m.name
             ));
         }
+        if self.cask && m.cask_flag.is_none() {
+            return Effect::fail(format!(
+                "`cask` does not apply to `{}`; casks are a brew concept",
+                m.name
+            ));
+        }
         // No unprobed guard here, unlike `file`: the query reads a local
         // database and never escalates, plan never mutates, and
         // `update_cache` never runs under plan. There is nothing for root to
