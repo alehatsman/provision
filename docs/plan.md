@@ -1,6 +1,6 @@
 # provision — build plan
 
-Status: phases 0–7 code complete · 2026-10-17
+Status: phases 0–7 code complete · 2026-10-20
 
 ## Where this stands
 
@@ -126,7 +126,11 @@ anything.
 | Process | `std::process` + `libc` (unix) | no tokio. `wait-timeout` was dropped: a watchdog thread gives one kill path for both `timeout` and Ctrl-C, and the kill itself needs `libc::killpg` either way. `Command::process_group` is std |
 | Diff | `similar` | unified diffs with color |
 | Terminal | `anstyle` + `anstream` | NO_COLOR, non-TTY fallback for free. `indicatif` was dropped: the spinner is one live line, and `\r` + erase is 40 lines against several transitive deps |
-| Paths | `home`/`dirs` for `~`, `which` for manager detection | |
+| Paths | `home` for `~`, `which` for manager detection | |
+| Host name | `gethostname` | the `hostname` fact; std has no portable call |
+| JSON | `serde_json` | `--json` output (`output/json.rs`) and the `json` action, which edits a document in place |
+| Checksums | `sha2` | `download`'s `sha256`. Owner-approved 2026-09-08, in `Cargo.toml` |
+| Secrets | `zeroize` | the `--ask-sudo-pass` password is zeroed on drop. Owner-approved 2026-09-12 (#5), in `Cargo.toml` |
 | Temp files | `tempfile` | atomic writes |
 | Tests | `assert_cmd`, `insta`, `tempfile` | |
 
@@ -154,7 +158,7 @@ src/
     process.rs     spawn, capture, kill process group
   actions/
     mod.rs         enum Action, the parse dispatch, shell/cmd/assert inline
-    file.rs template.rs pkg.rs service.rs git.rs download.rs defaults.rs
+    file.rs template.rs pkg.rs service.rs git.rs download.rs defaults.rs json.rs
   output/
     mod.rs         trait Sink
     text.rs json.rs
@@ -167,7 +171,12 @@ tests/
 
 A `Probe` is what `plan` prints; an `Outcome` is what `apply` prints. Both
 carry `status` ∈ {ok, changed, skipped, unknown, failed} and an optional
-diff or message. The output layer knows nothing about actions.
+diff or message. The output layer does not branch on what kind of action
+produced an event — a step reaches it as a name, a status and a duration —
+but it is not independent of the rest of the crate: `Sink::manifest` takes
+`expand::Manifest`, and `output::event` is imported by `actions/`, `exec/`,
+`expand.rs`, `facts.rs` and `template.rs`. Where `event` should live is a
+separate question, tracked outside this file.
 
 **Where this differs from the sketch it started as**, because the shape the
 code took is the one worth describing:
@@ -207,7 +216,7 @@ under `plan --plan-no-probe`. It found one hole here — action bodies were
 not key-checked — now closed by `model::action_body_keys`. See
 migration.md §8 and §9.
 
-Phase 1 is next: the execution core.
+Phase 1 was next; phases 1–7 have since shipped (see the table at the top).
 
 Deliverables
 
@@ -329,7 +338,8 @@ Gate
   the symlink but also change the meaning — enablement that does not survive a
   reboot is not what a provisioning tool means by enabled — so the action does
   not pass it. The `enabled` *probe* is read-only and is tested.
-- launchd is manual. There is no mac in this loop.
+- launchd is manual. The development machine is a mac, but no test drives a
+  real launchd job.
 
 Not part of the gate, and said plainly rather than counted green: `provision
 plan` on x1 showing zero changes against a mooncake-converged machine. x1 is
@@ -340,7 +350,7 @@ not the development box and cannot be reached from it. It waits for the owner.
 Deliverables
 
 - **Done** (`df451a8`, `e88c41f`) `--tags`, `--skip-tags`, `always`, applied
-  post-expansion. `expand.rs:59`.
+  post-expansion. `Selection::selects` in `expand.rs`.
 - **Done** (`df451a8`) `--hide-skipped`, `--no-diff`, `--stream`,
   `--verbose`, `--color`. All in `main.rs`.
 - **Not implemented, deliberately** `--explain-var`. Nothing in the fleet
@@ -348,13 +358,16 @@ Deliverables
   `file:line:col` and the name. Ruled 2026-09-08 — it stays written down in
   §10, marked there as spec'd but unbuilt, rather than being built or cut.
 - **Done** Windows build: PowerShell is the default interpreter
-  (`actions/mod.rs:48`), `~` expands, `sudo` is rejected at `model.rs:284`,
-  and the process-group and `taskkill` paths exist (`process.rs:247,274`).
+  (`Interpreter::default_for_host` in `actions/mod.rs`), `~` expands, `sudo`
+  is rejected on Windows in `config/model.rs` (D8), and the process-group and
+  `taskkill` paths exist (the `cfg(unix)`/`cfg(windows)` pair of `kill_group`
+  in `exec/process.rs`).
 - **Done** (`df451a8`) `validate --strict`.
 
 Gate
 
-- **Done** (`tests/cli.rs:228,250`) tag tests for the two mooncake bugs
+- **Done** (`a_positive_tag_filter_excludes_untagged_steps` and
+  `an_excluded_step_is_never_rendered` in `tests/cli.rs`) tag tests for the two mooncake bugs
   (#191, #196): a positive tag filter excludes untagged steps; plan with a
   tag does not touch excluded steps.
 - **Done** the binary cross-compiles and is self-contained.
@@ -367,8 +380,9 @@ Gate
   steps, 16 unprobed, 2 skipped, exit 0. Without a vars file it is 10
   undefined variables and exit 3, which is the file header's own
   instruction being enforced. Running `validate` and `plan` **on a Windows
-  box** is not something this machine can do, and is not counted green. It
-  waits for the owner, like x1.
+  box** was not possible from this machine when this gate was written. It
+  was done natively on 2026-09-08 (see "Where this stands" above), and
+  `tests (windows)` has run on `windows-latest` on every push since D24.
 
 ### Phase 4 — migration and cut-over
 
@@ -412,6 +426,10 @@ Gate
   keep `just` until the owner says otherwise; the justfile is interim.
 
 ### Phase 5 — `run`: tasks and CI steps
+
+**Superseded by Phase 5b below.** `provision run`, `run <dir>/` and `--step`
+described here were built and then withdrawn; the verb does not exist. Read
+what follows as history.
 
 D17. Provisioning, repo tasks and CI steps share one executor; this phase
 adds the entry point and the verdict rule that let the other two use it,
@@ -601,9 +619,9 @@ Gate
   being moved into CI. They run on the fleet's own machines, which is where
   this tool is used.
   - *macOS.* `defaults` (§6.10) and the macOS `stat` format
-    (`src/actions/file.rs:403`) are exercised by
+    (`stat_format` in `src/actions/file.rs`) are exercised by
     `defaults_applies_twice_changed_then_ok` and the branch at
-    `tests/apply.rs:2298` — on every local suite run, because the machine
+    `every_file_state_applies_twice_changed_then_ok` in `tests/apply.rs` — on every local suite run, because the machine
     this is developed on is the macOS machine. A `macos-latest` gate job
     would re-run on GitHub what already runs here before every push. Free on
     a public repo and still not worth the wall-clock.
