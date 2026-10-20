@@ -4,7 +4,7 @@
 //! stable, and never from the terminal wording, which is not.
 
 use super::Sink;
-use super::event::{Event, Summary};
+use crate::report::{Event, Manifest, Summary};
 use serde_json::json;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -59,7 +59,7 @@ impl Sink for Json {
             m.insert("stdout".into(), json!(ev.stdout));
             m.insert("stderr".into(), json!(ev.stderr));
         }
-        if let super::event::Status::Skipped(why) = &ev.status {
+        if let crate::report::Status::Skipped(why) = &ev.status {
             m.insert("reason".into(), json!(why));
         }
         // D30: a failure carries `rc` and `stderr` whatever it ran, because
@@ -76,7 +76,7 @@ impl Sink for Json {
         // `stderr` is the reason provision synthesized. `stdout` is the key
         // that stays absent there: it is the one that only a command can
         // fill.
-        if let super::event::Status::Failed(f) = &ev.status {
+        if let crate::report::Status::Failed(f) = &ev.status {
             m.insert("message".into(), json!(f.msg));
             // Only where no command ran. Where one did, the pair above is
             // already its own `rc` and `stderr` — the same values the step's
@@ -116,7 +116,7 @@ impl Sink for Json {
         Self::emit(&o);
     }
 
-    fn manifest(&mut self, plan: &Path, m: &crate::expand::Manifest) {
+    fn manifest(&mut self, plan: &Path, m: &Manifest) {
         Self::emit(&json!({
             "event": "manifest",
             "plan": self.rel(plan),

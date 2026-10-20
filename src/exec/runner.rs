@@ -16,7 +16,7 @@ use crate::config::model::Retry;
 use crate::error::{Diag, Result};
 use crate::exec::process::{self, How, Output, Spawn};
 use crate::exec::sudo::Sudo;
-use crate::output::event::{Failure, Status};
+use crate::report::{Failure, Status};
 use crate::template::expanduser;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -76,7 +76,7 @@ impl Prepared {
 }
 
 fn timed_out_msg(timeout: Duration, deadline_bound: bool) -> String {
-    let d = crate::output::event::human(timeout);
+    let d = crate::report::human(timeout);
     if deadline_bound {
         format!("deadline exceeded after {d}")
     } else {

@@ -3,7 +3,8 @@
 //! two switches rather than two that drift apart.
 
 use super::Sink;
-use super::event::{Event, Status, Summary, human, window};
+use super::window::window;
+use crate::report::{Event, Manifest, Status, Summary, human};
 use anstyle::{AnsiColor, Style};
 use std::fmt::Write as _;
 use std::io::{IsTerminal, Write};
@@ -238,7 +239,7 @@ impl Sink for Text {
 
     /// One line before the first step: how much is about to happen, and
     /// whether any of it is root. Not a diff — see `Manifest`.
-    fn manifest(&mut self, plan: &Path, m: &crate::expand::Manifest) {
+    fn manifest(&mut self, plan: &Path, m: &Manifest) {
         // This *is* the root file's header, with the counts on it, so claim
         // the slot rather than printing a second line saying the same name.
         self.current = Some((Vec::new(), plan.to_path_buf()));
@@ -360,7 +361,7 @@ impl Text {
     /// event carries no output at all, so it fills the same slot there and
     /// nowhere else. Where a command did run it is a copy of `ev.stderr`, and
     /// reading the event instead keeps one of those two from going stale.
-    fn failure(&self, ev: &Event, f: &super::event::Failure) {
+    fn failure(&self, ev: &Event, f: &crate::report::Failure) {
         let dim = Style::new().dimmed();
         let red = Style::new().fg_color(Some(AnsiColor::Red.into()));
         let captured = [("stdout", &ev.stdout), ("stderr", &ev.stderr)];

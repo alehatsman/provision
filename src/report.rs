@@ -1,8 +1,11 @@
-//! One event type that `plan` and `apply` both emit. Spec §9.
+//! What a run reports: the event vocabulary `plan` and `apply` both emit
+//! (spec §9) and the `Manifest` the walk prints first.
 //!
-//! The output layer knows nothing about actions: it is handed a name, a
-//! status and a duration, and its whole job is to render them three ways.
+//! Neutral ground. `expand`, `exec` and `actions` produce these types and
+//! `output` renders them; none of them owns the vocabulary, so it lives in
+//! neither direction's module.
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -198,46 +201,17 @@ pub(crate) fn human(d: Duration) -> String {
     }
 }
 
-/// The failure block's view of one captured stream: its first `head` lines,
-/// its last `tail`, how many fell between them, and how many there were.
-/// Spec §9.1 shows 10 and 20.
+/// The shape of a run, not its outcome: how many steps, spread over how many
+/// files, how many of them ask for root.
 ///
-/// Two windows rather than one, because the two ends answer different
-/// questions. A linter names the rule it broke first and tallies files last,
-/// so a tail alone showed the tally and dropped the rule — the one line the
-/// failure was about (#59). The cap itself stays: a step that printed ten
-/// thousand lines must not bury the summary under them.
-///
-/// A stream short enough to fit comes back whole with nothing elided, and the
-/// caller prints no marker. That absence is how a reader knows nothing was
-/// cut, which is why the elided count is returned rather than inferred.
-pub(crate) fn window(text: &str, head: usize, tail: usize) -> Window<'_> {
-    let mut lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
-    let total = lines.len();
-    if total <= head + tail {
-        return Window {
-            head: lines,
-            tail: Vec::new(),
-            elided: 0,
-            total,
-        };
-    }
-    let rest = lines.split_off(total - tail);
-    lines.truncate(head);
-    Window {
-        head: lines,
-        tail: rest,
-        elided: total - head - tail,
-        total,
-    }
-}
-
-/// What `window` returns: the two ends it kept, and the two numbers the
-/// elision marker names — what was dropped, out of what there was. Either
-/// number alone is a half-answer, so they travel together.
-pub(crate) struct Window<'a> {
-    pub head: Vec<&'a str>,
-    pub tail: Vec<&'a str>,
-    pub elided: usize,
-    pub total: usize,
+/// Deliberately not a diff. `plan`'s verdicts are best-effort by D11 and
+/// explicitly unprobed for a register-gated step by D14, so a summary of
+/// *what would change* is a promise provision cannot keep before it starts.
+/// How much is about to happen, and whether any of it is root, is a promise
+/// it can.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct Manifest {
+    pub steps: usize,
+    pub sudo: usize,
+    pub files: BTreeSet<PathBuf>,
 }
