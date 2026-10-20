@@ -138,7 +138,22 @@ impl Action {
             Action::Assert {
                 command: Some(c), ..
             } => Some(Interpreter::default_for_host().argv(c, false)),
-            _ => None,
+            // Named rather than `_`, for the reason the runner's typed
+            // dispatch is: the only caller does `.expect("every remaining
+            // action runs a command")`, so an action that runs one and is
+            // missed here panics at run time instead of failing the build.
+            // `assert` with an `expr` runs nothing, and a typed action does
+            // its own work without an argv.
+            Action::Assert { command: None, .. }
+            | Action::Defaults(_)
+            | Action::Download(_)
+            | Action::File(_)
+            | Action::Git(_)
+            | Action::Json(_)
+            | Action::Pkg(_)
+            | Action::Service(_)
+            | Action::Template(_)
+            | Action::Gate => None,
         }
     }
 
