@@ -149,6 +149,10 @@ pub(crate) struct Field {
 /// What one action is, in a line, for `provision list <action>`.
 pub(crate) struct ActionDoc {
     pub summary: &'static str,
+    /// One step that uses the action, as YAML to put under `- name:`. The
+    /// smoke test runs every one through `validate` and `plan`, so a row
+    /// without a working example fails the build.
+    pub example: &'static str,
     /// The body fields, or empty for an action whose body is not a mapping.
     pub fields: &'static [Field],
     /// What the body is when it is not a mapping. `None` where it is one.
@@ -169,6 +173,7 @@ static ACTIONS: &[(&str, ActionDoc)] = &[
     (
         "shell",
         ActionDoc {
+            example: "shell: \"true\"",
             summary: "Run a script through an interpreter.",
             fields: &[
                 f("script", "required", "the script to run"),
@@ -185,6 +190,7 @@ static ACTIONS: &[(&str, ActionDoc)] = &[
     (
         "cmd",
         ActionDoc {
+            example: "cmd: [echo, hello]",
             summary: "Run an argv without a shell.",
             fields: &[],
             shape: Some("a list of arguments: `cmd: [mv, src, dest]`"),
@@ -193,6 +199,7 @@ static ACTIONS: &[(&str, ActionDoc)] = &[
     (
         "file",
         ActionDoc {
+            example: "file: {path: ./out/dir, state: dir}",
             summary: "Ensure a filesystem entry.",
             fields: &[
                 f("path", "required", "the entry to ensure"),
@@ -226,6 +233,7 @@ static ACTIONS: &[(&str, ActionDoc)] = &[
     (
         "json",
         ActionDoc {
+            example: "json: {path: ./out/settings.json, content: {a: 1}}",
             summary: "Ensure a JSON file contains the declared keys, leaving every other key alone.",
             fields: &[
                 f("path", "required", "the JSON file to merge into"),
@@ -247,6 +255,7 @@ static ACTIONS: &[(&str, ActionDoc)] = &[
     (
         "template",
         ActionDoc {
+            example: "template: {src: ./t.j2, dest: ./out/rendered}",
             summary: "Render a `.j2` file and ensure `dest` matches, with `file` semantics.",
             fields: &[
                 f(
@@ -269,6 +278,7 @@ static ACTIONS: &[(&str, ActionDoc)] = &[
     (
         "pkg",
         ActionDoc {
+            example: "pkg: {name: git, manager: apt}",
             summary: "Ensure packages are present or absent through one manager.",
             fields: &[
                 f("name", "one of name/names", "a single package"),
@@ -306,6 +316,7 @@ static ACTIONS: &[(&str, ActionDoc)] = &[
     (
         "service",
         ActionDoc {
+            example: "service: {name: sshd, state: started}",
             summary: "Ensure a service state under systemd (system or user) or launchd.",
             fields: &[
                 f("name", "required", "the unit or service name"),
@@ -323,6 +334,7 @@ static ACTIONS: &[(&str, ActionDoc)] = &[
     (
         "assert",
         ActionDoc {
+            example: "assert: {expr: \"true\"}",
             summary: "Fail the run if a condition does not hold. Never changes anything.",
             fields: &[
                 f(
@@ -343,6 +355,7 @@ static ACTIONS: &[(&str, ActionDoc)] = &[
     (
         "git",
         ActionDoc {
+            example: "git: {repo: \"https://example.invalid/r.git\", dest: ./out/r}",
             summary: "Ensure a checkout of a repository at a ref.",
             fields: &[
                 f("repo", "required", "the URL to clone from"),
@@ -364,6 +377,7 @@ static ACTIONS: &[(&str, ActionDoc)] = &[
     (
         "download",
         ActionDoc {
+            example: "download: {url: \"https://example.invalid/x\", dest: ./out/x, sha256: \"0000000000000000000000000000000000000000000000000000000000000000\"}",
             summary: "Ensure a file fetched from a URL is at `dest`.",
             fields: &[
                 f("url", "required", "what to fetch"),
@@ -383,6 +397,7 @@ static ACTIONS: &[(&str, ActionDoc)] = &[
     (
         "defaults",
         ActionDoc {
+            example: "defaults: {domain: com.apple.finder, key: ShowPathbar, type: bool, value: true}",
             summary: "Ensure a macOS preference key holds a value.",
             fields: &[
                 f("domain", "required", "com.apple.finder, or NSGlobalDomain"),
