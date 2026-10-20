@@ -2177,3 +2177,93 @@ fn an_assert_with_command_and_expr_is_refused_at_the_second_key() {
         assert!(!out.contains("p.yml:5:"), "{what}: {out}");
     }
 }
+
+// The raw guard in `check_rendered_path` precedes the key match, so a `raw`
+// body is exempt in *every* path field. The older raw test puts its `{{` in
+// `content`, which that check never reads; this one puts it in the path.
+#[test]
+fn a_raw_body_path_holding_braces_is_not_flagged() {
+    let dir = tempfile::tempdir().unwrap();
+    for (what, step) in [
+        (
+            "file path",
+            "    file: { path: \"./{{ literal }}\", state: dir }\n    raw: true\n",
+        ),
+        (
+            "json path",
+            "    json: { path: \"./{{ literal }}.json\", content: {a: 1} }\n    raw: true\n",
+        ),
+    ] {
+        let (code, text) = validate_step(dir.path(), step);
+        assert_eq!(
+            code, 0,
+            "{what}: a raw body was checked as rendered:\n{text}"
+        );
+    }
+}
+
+// D18: `file: {state: absent}` removes a path, so it declares no output and a
+// later `src` under it is not pending. Any other state declares the path.
+#[test]
+fn file_state_absent_declares_no_output_but_other_states_do() {
+    let dir = tempfile::tempdir().unwrap();
+    let plan_for = |state: &str| {
+        let path = dir.path().join(format!("{state}.yml"));
+        std::fs::write(
+            &path,
+            format!(
+                "description: d\nsteps:\n\
+                 \x20 - name: first\n\
+                 \x20   file: {{path: ./gen, state: {state}}}\n\
+                 \x20 - name: link\n\
+                 \x20   file: {{path: ./out/l, state: file, src: ./gen/x}}\n"
+            ),
+        )
+        .unwrap();
+        let out = run(&["validate", &path.display().to_string()]);
+        (
+            out.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&out.stdout).into_owned()
+                + &String::from_utf8_lossy(&out.stderr),
+        )
+    };
+    let (code, text) = plan_for("absent");
+    assert_eq!(code, EXIT_VALIDATION, "absent declared an output:\n{text}");
+    assert!(text.contains("file src not found"), "{text}");
+    let (code, text) = plan_for("dir");
+    assert_eq!(code, 0, "a dir declares its path:\n{text}");
+}
+
+// D18's overturn clause, one action at a time. The existing deferral test
+// covers `git` alone; `download` and `json` each have their own arm in
+// `declared_output`, and an arm lost from it fails silently.
+#[test]
+fn a_file_src_under_a_declared_dest_is_deferred_for_download_and_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let sha = "0".repeat(64);
+    for (what, first) in [
+        (
+            "download",
+            format!(
+                "    download: {{url: \"https://example.invalid/x\", dest: ./gen, sha256: \"{sha}\"}}\n"
+            ),
+        ),
+        (
+            "json",
+            "    json: {path: ./gen, content: {a: 1}}\n".to_string(),
+        ),
+    ] {
+        let path = dir.path().join(format!("{what}.yml"));
+        std::fs::write(
+            &path,
+            format!(
+                "description: d\nsteps:\n  - name: first\n{first}  - name: link\n    file: {{path: ./out/l, state: file, src: ./gen/x}}\n"
+            ),
+        )
+        .unwrap();
+        let out = run(&["validate", &path.display().to_string()]);
+        let text = String::from_utf8_lossy(&out.stdout).into_owned()
+            + &String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(0), "{what} did not defer:\n{text}");
+    }
+}
