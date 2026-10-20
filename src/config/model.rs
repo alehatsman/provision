@@ -1060,3 +1060,42 @@ pub(crate) fn expression_fields<'a>(step: &Step<'a>) -> Vec<N<'a>> {
     .flatten()
     .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The actions whose `src` the expander checks, and where.
+    ///
+    /// `template` is `check_template_sources` — `src` is required, may be a
+    /// directory rendered as a tree, and the walk reads each file to derive
+    /// the variables it uses. `file` and `json` are `check_file_source` —
+    /// `src` is optional, `state: link` exempts it, and D18 may defer it past
+    /// a command step.
+    ///
+    /// Two shapes, so there is no one field on this table that collapses
+    /// them. What there is, is this: the set is already written down in
+    /// `fields`, and a twelfth action that declares a `src` without being
+    /// wired to one of the two checks is the one drift left in #81 that is
+    /// silently *wrong* rather than merely unwritten — its source would never
+    /// be checked for existence and the plan would call it clean.
+    const SRC_IS_CHECKED_BY_THE_EXPANDER: &[&str] = &["file", "json", "template"];
+
+    #[test]
+    fn every_action_declaring_a_src_is_checked_by_the_expander() {
+        let mut declared: Vec<&str> = action_docs()
+            .filter(|(_, d)| d.fields.iter().any(|f| f.name == "src"))
+            .map(|(name, _)| name)
+            .collect();
+        declared.sort_unstable();
+
+        assert_eq!(
+            declared, SRC_IS_CHECKED_BY_THE_EXPANDER,
+            "an action's `src` field and the expander's source checks have drifted.\n\
+             Wire the new action into `check_template_sources` (a required src, \
+             possibly a tree) or `check_file_source` (an optional src) in \
+             `src/expand.rs`, then add it here. Leaving it out means its `src` is \
+             never checked and a plan naming a missing file reports clean."
+        );
+    }
+}
