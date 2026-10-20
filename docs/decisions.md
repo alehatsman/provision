@@ -69,13 +69,20 @@ where `unknown` was answering a question the step had not asked.
 
 **Overturned by.** Nothing. The core idea — declared, never guessed — stands.
 
-## D4 — Seven typed actions, chosen by state inspection need
+## D4 — Eleven actions; an action is typed only if its verdict needs state inspection
 
-**Decision.** `file`, `template`, `pkg`, `service` exist because a correct
+**Decision.** There are eleven actions. `file`, `template`, `pkg`, `service`,
+`git`, `download`, `defaults` and `json` are typed because a correct
 `changed` verdict requires reading system state (bytes, modes, package
-database, unit status), which shell-plus-gate does badly. `assert` exists
-because "verify" deserves a distinct glyph. `shell` and `cmd` are the
-escape hatch. Nothing else.
+database, unit status, a checkout's HEAD, a checksum, a preference value, a
+JSON subtree), which shell-plus-gate does badly. `assert` exists because
+"verify" deserves a distinct glyph. `shell` and `cmd` are the escape hatch.
+Nothing else, and the rule for admission is unchanged by every amendment
+below: state inspection the shell does badly.
+
+**Originally (2026-09-07): seven.** Four typed actions — `file`, `template`,
+`pkg`, `service` — plus `assert`, `shell` and `cmd`. The amendments below
+took it to ten and then eleven.
 
 **Why.** The 2026-09-07 count of what the dotfiles use. Everything dropped
 (`text.replace`, `git.clone`, `pkg.repo`, `wait.http`, `container.image`,
@@ -267,18 +274,25 @@ above reopens only for a question the stream does not already answer. A
 stateless reader re-asking it every session is not that: it is a consumer
 that did not keep the file, and the fix is to keep the file.
 
-## D10 — No task runner
+## D10 — No task runner feature: a task is a component (D17)
 
-**Decision.** `provision` does not run project tasks. The nine repos using
-`mooncake task` move to `just` or a Makefile, and the `go-quality` presets
-become a shared `justfile` include or a small shell script.
+**Decision.** `provision` has no task-runner feature: no registry, no remote
+`use`, no fetch, no cache, no lockfile. A project task is a component file
+run by `provision apply <component.yml>` (`list` shows what a directory
+offers), with the same executor as a plan — see D17 and its 5b amendment.
+
+**Originally (2026-09-07): "`provision` does not run project tasks."** The
+nine repos using `mooncake task` were to move to `just` or a Makefile, and
+the `go-quality` presets to become a shared `justfile` include or a small
+shell script. **Overturned by D17 on 2026-09-08**; the amendment below says
+what survived.
 
 **Why.** Different job, different lifecycle, different users. Coupling
 them is why mooncake grew a preset registry, a module lockfile, and a
 marketplace plan.
 
-**Overturned by.** Nothing. If a task runner is wanted, it is a separate
-20-line justfile, not a feature here.
+**Overturned by.** D17. (As first written: "Nothing. If a task runner is
+wanted, it is a separate 20-line justfile, not a feature here.")
 
 **Amended by the owner 2026-09-08. See D17.** The reason above was about
 the registry, the lockfile and the marketplace — a distribution problem —
@@ -292,8 +306,9 @@ component as a task, which D17 specifies.
 ## D11 — Plan is best-effort and says so
 
 **Decision.** `plan` probes real state where an action can (`file`,
-`template`, `pkg`, `service`, `unless`, `creates`, `assert`) and reports
-`would run` for the rest. `--plan-no-probe` disables probing for CI. The
+`template`, `pkg`, `service`, `git`, `download`, `defaults`, `json`, `unless`,
+`creates`, `assert`) and reports `would run` for the rest — an ungated
+`shell` or `cmd`, which has nothing to probe. `--plan-no-probe` disables probing for CI. The
 output distinguishes `would change`, `would run`, and `would run (unprobed)`.
 
 **Why.** A dry-run that claims certainty it does not have trains the
@@ -515,6 +530,12 @@ nothing, so a script can pass the same arguments to both.
 **Overturned by.** The owner, in one pass over this section.
 
 ## D17 — One executor: tasks are components, distribution is provisioning's job
+
+**Current form: read the 5b amendment below first.** The verb is `apply`
+(or `validate`/`plan`), not `run`; a directory is listed with `list`; there
+is no `--step`; `plan` works on a component; and an ungated `shell` is
+judged by D20. The paragraphs naming `provision run`, `run <dir>/`, `--step`
+and "no `plan` for `run`" are the original and are kept as written.
 
 **Decided by the owner 2026-09-08**, after review showed that provisioning,
 repo tasks and moongit CI steps share everything but three things: how a run
@@ -1017,7 +1038,9 @@ gating.
 **The matrix is Linux and Windows.** Linux is where the fleet lives. Windows
 is the platform README Status names as cross-compiled and natively untested —
 `pkg` against winget, `service`, and Ctrl-C — which is the standing item from
-issue #5's "Later" queue. macOS is covered by the owner running the gate on a
+issue #5's "Later" queue. (Narrowed since: `tests/apply_cross_platform.rs`
+now drives `taskkill /T` on Windows through the timeout path, so the kill
+path is covered; Ctrl-C itself is not.) macOS is covered by the owner running the gate on a
 Mac, which happens, and `defaults` stays unit-tested against captured
 `defaults read` output until a probed run on a mac says otherwise.
 
