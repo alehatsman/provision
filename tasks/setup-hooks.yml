@@ -19,6 +19,20 @@ steps:
       command: test -d .git
     tags: [hooks]
 
+  # Ours, or absent -- never a hook someone else wrote. `creates:` is the
+  # wrong modifier for this: it would also skip a *stale* hook from an
+  # earlier revision of this task, which is exactly the one that must be
+  # rewritten. The marker is the installed hook's own first comment line.
+  - name: .git/hooks/pre-commit is ours, or absent
+    assert:
+      command: >-
+        ! test -e .git/hooks/pre-commit ||
+        grep -q 'tasks/setup-hooks.yml' .git/hooks/pre-commit
+      msg: >-
+        .git/hooks/pre-commit exists and this task did not write it. Move it
+        aside and re-run; a hook you wrote is not this task's to replace.
+    tags: [hooks]
+
   - name: pre-commit runs the fast gate
     file:
       path: .git/hooks/pre-commit
@@ -35,6 +49,20 @@ steps:
           exit 1
         }
         exec provision apply tasks/ci-fast.yml
+    tags: [hooks]
+
+  # Ours, or absent -- never a hook someone else wrote. `creates:` is the
+  # wrong modifier for this: it would also skip a *stale* hook from an
+  # earlier revision of this task, which is exactly the one that must be
+  # rewritten. The marker is the installed hook's own first comment line.
+  - name: .git/hooks/pre-push is ours, or absent
+    assert:
+      command: >-
+        ! test -e .git/hooks/pre-push ||
+        grep -q 'tasks/setup-hooks.yml' .git/hooks/pre-push
+      msg: >-
+        .git/hooks/pre-push exists and this task did not write it. Move it
+        aside and re-run; a hook you wrote is not this task's to replace.
     tags: [hooks]
 
   - name: pre-push runs the full gate
