@@ -699,6 +699,10 @@ file:
   existing regular file or directory at `path` requires `force: true`;
   without it the step fails naming the path. `mode`, `owner` and `group` do
   not apply to a symlink, and setting them is a validation error.
+  On Windows a symlink needs an elevated shell or Developer Mode. Without
+  either, a link to an existing directory is made as a junction instead,
+  which holds `src` resolved to an absolute path and counts as pointing at
+  `src` when it resolves to the same place; a link to a file fails saying so.
 - `absent` removes a file, a symlink, or an empty directory; a non-empty
   directory requires `force: true`. A path that is already gone is `ok`, not
   `changed`.
