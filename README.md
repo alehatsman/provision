@@ -311,9 +311,15 @@ printed path is normalised to `/` (D29). With
 now covers is parsing, validation, `list`, components, the CLI, every exit
 code they reach, the apply engine's own contract, and what it prints.
 
-What stays untested there is `pkg` against winget and `service` beyond its
-refusal: both would have to install or start something on the machine
-running them. Ctrl-C was the third, and testing it found that it had never
+What the gate does not test there is `pkg` against winget and `service`
+beyond its refusal: both would have to install or start something on the
+machine running them. winget was run by hand on mini_pc on 2026-10-20:
+install and remove, each changed and then ok. It also showed that a failed
+winget command read `winget failed: failed`. winget prints its errors to
+stdout, so a typed action's failure now falls back to the last line of
+stdout when stderr is empty. The error in that run was winget refusing to
+remove a user-scope package from an elevated shell, which is winget's rule
+and not provision's. Ctrl-C was the third, and testing it found that it had never
 worked: with no console handler installed, Windows ended provision on the
 spot, with no summary and exit `0xC000013A`. Since 2026-10-20 a handler
 records the stop and the run takes the same path as on unix, and

@@ -504,16 +504,10 @@ impl Ctx<'_> {
             return Some(bad);
         }
         if got.rc != 0 {
-            let stderr = got.stderr_text();
-            let why = stderr
-                .lines()
-                .map(str::trim)
-                .find(|l| !l.is_empty())
-                .unwrap_or("failed")
-                .to_string();
+            let (why, detail) = failure_reason(&got);
             return Some(Effect::Failed {
                 msg: format!("{} failed: {why}", command_name(argv)),
-                detail: stderr.trim().to_string(),
+                detail,
                 interrupted: false,
             });
         }
@@ -588,6 +582,28 @@ impl Effect {
     }
 }
 
+/// Why a command failed, and the output to show under it.
+///
+/// stderr when it says anything. winget does not: it prints its errors to
+/// stdout, after a progress spinner drawn with `\r`, so a failed `winget
+/// uninstall` read `winget failed: failed` with nothing under it. Its last
+/// stdout line is the error, which is where a tool that reports on stdout
+/// puts it. The exit code when neither stream says anything at all.
+fn failure_reason(got: &process::Raw) -> (String, String) {
+    let stderr = got.stderr_text();
+    if let Some(first) = stderr.lines().map(str::trim).find(|l| !l.is_empty()) {
+        return (first.to_string(), stderr.trim().to_string());
+    }
+    let stdout = String::from_utf8_lossy(&got.stdout);
+    // What a terminal would show of each line: the text after its last `\r`.
+    let shown = |l: &'_ str| l.rsplit('\r').next().unwrap_or(l).trim().to_string();
+    let last = stdout.lines().map(shown).rfind(|l| !l.is_empty());
+    match last {
+        Some(why) => (why, stdout.trim().to_string()),
+        None => (format!("exit {}", got.rc), String::new()),
+    }
+}
+
 /// The command a failure should be named after. `env VAR=… prog` is a way of
 /// setting the environment, not a program anyone means to read about.
 fn command_name<'a>(argv: &[&'a str]) -> &'a str {
@@ -606,6 +622,47 @@ mod tests {
     use super::*;
     use crate::exec::sudo::Sudo;
     use std::time::Instant;
+
+    fn raw(rc: i32, stdout: &str, stderr: &str) -> process::Raw {
+        process::Raw {
+            rc,
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+            how: process::How::Exited,
+        }
+    }
+
+    // What `winget uninstall` printed on a Windows host, spinner and all,
+    // with nothing on stderr. It read `winget failed: failed`.
+    #[test]
+    fn a_failure_reported_on_stdout_names_its_last_line() {
+        let (why, detail) = failure_reason(&raw(
+            -1_978_335_107,
+            "Found jq [jqlang.jq]\n\r   - \r   \\ \rThe package installed for user scope \
+             cannot be uninstalled when running with administrator privileges.\r\n",
+            "",
+        ));
+        assert_eq!(
+            why,
+            "The package installed for user scope cannot be uninstalled when running \
+             with administrator privileges."
+        );
+        assert!(detail.starts_with("Found jq"), "{detail}");
+    }
+
+    #[test]
+    fn stderr_still_wins_when_it_says_something() {
+        let (why, detail) = failure_reason(&raw(1, "progress\n", "\nE: no such package\n"));
+        assert_eq!(why, "E: no such package");
+        assert_eq!(detail, "E: no such package");
+    }
+
+    #[test]
+    fn a_silent_failure_names_its_exit_code() {
+        let (why, detail) = failure_reason(&raw(3, " \n", ""));
+        assert_eq!(why, "exit 3");
+        assert_eq!(detail, "");
+    }
 
     /// A context whose run clock ran out a second ago.
     fn spent<'a>(escalate: &'a Sudo, env: &'a BTreeMap<String, String>) -> Ctx<'a> {
