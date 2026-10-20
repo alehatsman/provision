@@ -254,6 +254,46 @@ fn a_file_step_with_a_mode_converges() {
     );
 }
 
+// §6.3's `state: link` to a directory, the shape a dotfiles plan is mostly
+// made of. On Windows it failed outright — "symlinks are not supported on
+// this platform" — because the only link maker was unix's (#124). A plain
+// user there cannot make a symlink either, so a directory gets a junction
+// when the symlink is refused; either way it has to converge on the second
+// apply and `absent` has to take the link and leave what it pointed at.
+#[test]
+fn a_link_to_a_directory_converges_and_removes_cleanly() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("cloud")).unwrap();
+    std::fs::write(dir.path().join("cloud").join("note.md"), "kept").unwrap();
+    let link = "  - name: link it\n    file: { path: ./notes, state: link, src: ./cloud }\n";
+
+    let (code, out) = apply(dir.path(), link, &[]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(verdict(&out, "link it"), "changed", "{out}");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("notes").join("note.md")).unwrap(),
+        "kept"
+    );
+
+    let (code, out) = apply(dir.path(), link, &[]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(
+        verdict(&out, "link it"),
+        "ok",
+        "a second apply relinked:\n{out}"
+    );
+
+    let gone = "  - name: unlink it\n    file: { path: ./notes, state: absent }\n";
+    let (code, out) = apply(dir.path(), gone, &[]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(verdict(&out, "unlink it"), "changed", "{out}");
+    assert!(!dir.path().join("notes").exists(), "{out}");
+    assert!(
+        dir.path().join("cloud").join("note.md").exists(),
+        "removing the link removed what it pointed at"
+    );
+}
+
 // §8: tag selection is filtering, not failure — the steps it excludes are
 // reported skipped and the run is green.
 #[test]

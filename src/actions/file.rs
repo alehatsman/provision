@@ -583,7 +583,10 @@ impl Spec {
         match meta.kind {
             Kind::Link => {
                 let have = self.read_link(ctx);
-                if have.as_deref() == Some(want) {
+                if have
+                    .as_deref()
+                    .is_some_and(|h| same_target(h, want, &self.path))
+                {
                     return Effect::Ok;
                 }
                 if act && let Err(e) = self.make_link(ctx, want) {
@@ -862,7 +865,7 @@ impl Spec {
             clippy::let_underscore_must_use,
             reason = "removing what may not exist; the symlink below is the operation"
         )]
-        let _ = std::fs::remove_file(&self.path);
+        let _ = remove_link(&self.path);
         symlink(target, &self.path).map_err(|e| format!("cannot link {}: {e}", self.path))
     }
 
@@ -877,6 +880,7 @@ impl Spec {
         let r = match kind {
             Kind::Dir if self.force => std::fs::remove_dir_all(&self.path),
             Kind::Dir => std::fs::remove_dir(&self.path),
+            Kind::Link => remove_link(&self.path),
             _ => std::fs::remove_file(&self.path),
         };
         r.map_err(|e| format!("cannot remove {}: {e}", self.path))
@@ -1025,11 +1029,193 @@ fn symlink(target: &str, path: &str) -> std::io::Result<()> {
     std::os::unix::fs::symlink(target, path)
 }
 
-#[cfg(not(unix))]
+/// Windows has no one symlink: a link to a directory and a link to a file are
+/// different objects, so which one is made depends on what `target` names.
+/// Both need `SeCreateSymbolicLinkPrivilege` — an elevated shell, or
+/// Developer Mode — and a plain user has neither (#124). A directory still
+/// gets a link without it: a junction, which needs no privilege at all. The
+/// symlink is tried first because it is the closer match to §6.3: a junction
+/// can only hold an absolute target, so a relative `src` stops being relative.
+#[cfg(windows)]
+fn symlink(target: &str, path: &str) -> std::io::Result<()> {
+    use std::os::windows::fs::{symlink_dir, symlink_file};
+    /// What `CreateSymbolicLinkW` fails with when the privilege is missing.
+    const ERROR_PRIVILEGE_NOT_HELD: i32 = 1314;
+
+    let resolved = link_base(path).join(target);
+    let is_dir = resolved.is_dir();
+    let made = if is_dir {
+        symlink_dir(target, path)
+    } else {
+        symlink_file(target, path)
+    };
+    match made {
+        Err(e) if e.raw_os_error() == Some(ERROR_PRIVILEGE_NOT_HELD) => {
+            if is_dir {
+                junction(&resolved, Path::new(path))
+            } else {
+                Err(std::io::Error::new(
+                    e.kind(),
+                    format!(
+                        "{e}; a link to a file needs Developer Mode or an elevated shell \
+                         on Windows (a link to an existing directory does not)"
+                    ),
+                ))
+            }
+        }
+        other => other,
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 fn symlink(_target: &str, _path: &str) -> std::io::Result<()> {
     Err(std::io::Error::other(
         "symlinks are not supported on this platform",
     ))
+}
+
+/// The directory a relative link target is read from: the link's own.
+#[cfg(windows)]
+fn link_base(path: &str) -> &Path {
+    Path::new(path).parent().unwrap_or_else(|| Path::new(""))
+}
+
+/// Point the new directory `path` at `target` as an NTFS junction.
+///
+/// std makes symlinks but not junctions, and the only way to make one is to
+/// write the mount-point reparse data onto an empty directory by hand. The
+/// layout is `REPARSE_DATA_BUFFER`'s `MountPointReparseBuffer`: the NT path
+/// (`\??\C:\…`) and then the display path, each NUL-terminated.
+#[cfg(windows)]
+#[expect(unsafe_code, reason = "std has no way to make a junction")]
+fn junction(target: &Path, path: &Path) -> std::io::Result<()> {
+    use std::os::windows::{ffi::OsStrExt, fs::OpenOptionsExt, io::AsRawHandle};
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    const FSCTL_SET_REPARSE_POINT: u32 = 0x0009_00A4;
+    const IO_REPARSE_TAG_MOUNT_POINT: u32 = 0xA000_0003;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn DeviceIoControl(
+            device: *mut std::ffi::c_void,
+            code: u32,
+            in_buf: *const std::ffi::c_void,
+            in_size: u32,
+            out_buf: *mut std::ffi::c_void,
+            out_size: u32,
+            returned: *mut u32,
+            overlapped: *mut std::ffi::c_void,
+        ) -> i32;
+    }
+
+    let too_long = |e: std::num::TryFromIntError| {
+        std::io::Error::other(format!("target path is too long for a junction ({e})"))
+    };
+    let shown: Vec<u16> = std::path::absolute(target)?
+        .as_os_str()
+        .encode_wide()
+        .collect();
+    // `absolute` keeps a `\\?\` prefix it was given; the NT path adds its own.
+    let shown = match shown.strip_prefix(&r"\\?\".encode_utf16().collect::<Vec<_>>()[..]) {
+        Some(rest) => rest.to_vec(),
+        None => shown,
+    };
+    let nt: Vec<u16> = r"\??\"
+        .encode_utf16()
+        .chain(shown.iter().copied())
+        .collect();
+    let nt_len = u16::try_from(nt.len() * 2).map_err(too_long)?;
+    let shown_len = u16::try_from(shown.len() * 2).map_err(too_long)?;
+    // Four u16 offsets and lengths, then both strings with their NULs.
+    let data_len = 8 + u32::from(nt_len) + 2 + u32::from(shown_len) + 2;
+    let data_len = u16::try_from(data_len).map_err(too_long)?;
+
+    let mut buf = Vec::with_capacity(8 + usize::from(data_len));
+    buf.extend(IO_REPARSE_TAG_MOUNT_POINT.to_le_bytes());
+    buf.extend(data_len.to_le_bytes());
+    buf.extend(0u16.to_le_bytes());
+    buf.extend(0u16.to_le_bytes());
+    buf.extend(nt_len.to_le_bytes());
+    buf.extend((nt_len + 2).to_le_bytes());
+    buf.extend(shown_len.to_le_bytes());
+    for unit in nt.iter().chain(&[0]).chain(&shown).chain(&[0]) {
+        buf.extend(unit.to_le_bytes());
+    }
+    let buf_len = u32::try_from(buf.len()).map_err(too_long)?;
+
+    std::fs::create_dir(path)?;
+    let set = std::fs::OpenOptions::new()
+        .write(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)
+        .and_then(|dir| {
+            let mut returned = 0u32;
+            // SAFETY: the handle is an open directory owned by `dir` for the
+            // whole call; `buf` is a complete mount-point reparse buffer whose
+            // length is `buf_len`; there is no output buffer and no overlapped
+            // I/O, so nothing is written through a pointer but `returned`.
+            let ok = unsafe {
+                DeviceIoControl(
+                    dir.as_raw_handle(),
+                    FSCTL_SET_REPARSE_POINT,
+                    buf.as_ptr().cast(),
+                    buf_len,
+                    std::ptr::null_mut(),
+                    0,
+                    &raw mut returned,
+                    std::ptr::null_mut(),
+                )
+            };
+            if ok == 0 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        });
+    if set.is_err() {
+        // Leave nothing behind: an empty directory where the link was meant
+        // to be would read as "exists and is not a symlink" next run.
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the error being returned is the one worth reporting"
+        )]
+        let _ = std::fs::remove_dir(path);
+    }
+    set
+}
+
+/// Remove a link without touching what it points at.
+///
+/// To Windows a directory symlink or junction is a directory, so
+/// `remove_file` refuses it and `remove_dir` is what removes the link alone.
+fn remove_link(path: &str) -> std::io::Result<()> {
+    let removed = std::fs::remove_file(path);
+    #[cfg(windows)]
+    if removed.is_err() {
+        return std::fs::remove_dir(path);
+    }
+    removed
+}
+
+/// Whether the link read back from `path` is the one asked for.
+///
+/// On unix it is the same string or it is not. On Windows a junction holds
+/// only an absolute path and reads back with a `\\?\` prefix, so a link this
+/// made from a relative `src` is compared by where it resolves to instead.
+#[cfg(not(windows))]
+fn same_target(have: &str, want: &str, _path: &str) -> bool {
+    have == want
+}
+
+#[cfg(windows)]
+fn same_target(have: &str, want: &str, path: &str) -> bool {
+    if have == want {
+        return true;
+    }
+    let have = have.strip_prefix(r"\\?\").unwrap_or(have);
+    std::path::absolute(link_base(path).join(want))
+        .is_ok_and(|w| w.to_string_lossy().eq_ignore_ascii_case(have))
 }
 
 #[cfg(test)]
@@ -1072,6 +1258,44 @@ mod tests {
         assert_eq!(
             parse_stat_in("Verzeichnis|root|root", 16).kind,
             Kind::Missing
+        );
+    }
+
+    // The fallback a non-elevated Windows user lands on (#124). Called
+    // directly, because whether `symlink` reaches it depends on the machine's
+    // Developer Mode, and the path that only runs without it is the one a
+    // developer's own box would never exercise.
+    #[cfg(windows)]
+    #[test]
+    fn a_junction_reads_as_the_link_it_was_asked_to_be() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("cloud");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(target.join("note.md"), "kept").unwrap();
+        let link = dir.path().join("notes");
+        let link_s = link.to_str().unwrap();
+
+        junction(&target, &link).unwrap();
+
+        let meta = std::fs::symlink_metadata(&link).unwrap();
+        assert_eq!(kind_of(&meta), Kind::Link);
+        assert_eq!(
+            std::fs::read_to_string(link.join("note.md")).unwrap(),
+            "kept"
+        );
+        let have = std::fs::read_link(&link).unwrap().display().to_string();
+        assert!(
+            same_target(&have, target.to_str().unwrap(), link_s),
+            "{have}"
+        );
+        assert!(same_target(&have, "cloud", link_s), "{have}");
+        assert!(!same_target(&have, "elsewhere", link_s), "{have}");
+
+        remove_link(link_s).unwrap();
+        assert!(!link.exists());
+        assert!(
+            target.join("note.md").exists(),
+            "removing the link removed its target's contents"
         );
     }
 }
