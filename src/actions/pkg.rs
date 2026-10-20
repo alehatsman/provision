@@ -220,7 +220,7 @@ fn parse_dpkg(out: &str) -> BTreeMap<String, String> {
 /// winget prints a fixed-width table. Splitting on whitespace would take the
 /// second *word* of the name — "Google Chrome" and "Visual Studio Code" are
 /// the common case — so the columns are cut at the offsets the header gives.
-/// Read against a live `winget list` on mini_pc on 2026-10-20; the gate has
+/// Read against a live `winget list` on `mini_pc` on 2026-10-20; the gate has
 /// only the fixture tests below.
 fn parse_winget(out: &str) -> BTreeMap<String, String> {
     let mut lines = out.lines();
