@@ -11,10 +11,6 @@ use crate::yaml::N;
 use minijinja::Value;
 use std::time::Duration;
 
-pub(crate) const ACTION_KEYS: &[&str] = &[
-    "shell", "cmd", "file", "template", "pkg", "service", "assert", "git", "defaults", "download",
-    "json",
-];
 pub(crate) const STRUCTURAL_KEYS: &[&str] = &["vars", "vars_file", "import", "use"];
 /// What one step modifier is, for `provision list --json` (D25).
 ///
@@ -126,10 +122,8 @@ pub(crate) fn modifier_keys() -> impl Iterator<Item = &'static str> {
 
 /// Every key a step may carry, for the unknown-key check.
 pub(crate) fn all_step_keys() -> Vec<&'static str> {
-    ACTION_KEYS
-        .iter()
-        .chain(STRUCTURAL_KEYS)
-        .copied()
+    action_keys()
+        .chain(STRUCTURAL_KEYS.iter().copied())
         .chain(modifier_keys())
         .collect()
 }
@@ -146,8 +140,42 @@ pub(crate) struct Field {
     pub note: &'static str,
 }
 
+/// Where a step's action writes, for the two checks that read it: D18's
+/// deferral of a later `file` `src`, and the unrendered-`{{` check on a path
+/// provision reads itself.
+#[derive(Clone, Copy)]
+pub(crate) enum Dest {
+    /// The action names no path of its own. `shell` and `cmd` are the reason
+    /// a plan defers every later `src`: they declare nothing.
+    None,
+    /// The body field naming the path the action always writes.
+    Path(&'static str),
+    /// As `Path`, but `state: absent` removes it, which is no output.
+    PathUnlessAbsent(&'static str),
+}
+
+impl Dest {
+    /// The field to check for an unrendered `{{`, whatever the state.
+    pub(crate) fn field(self) -> Option<&'static str> {
+        match self {
+            Dest::None => None,
+            Dest::Path(f) | Dest::PathUnlessAbsent(f) => Some(f),
+        }
+    }
+}
+
 /// What one action is, in a line, for `provision list <action>`.
+///
+/// `typed` and `dest` have no default on purpose: a new row cannot be written
+/// without deciding both, and a decision nobody made is how an action ends up
+/// silently missing from the runner's typed path or from D18.
 pub(crate) struct ActionDoc {
+    /// The step key.
+    pub name: &'static str,
+    /// An action that inspects and changes state itself rather than reporting
+    /// through an exit code. It never reaches the runner's argv path.
+    pub typed: bool,
+    pub dest: Dest,
     pub summary: &'static str,
     /// One step that uses the action, as YAML to put under `- name:`. The
     /// smoke test runs every one through `validate` and `plan`, so a row
@@ -169,255 +197,275 @@ const fn f(name: &'static str, need: &'static str, note: &'static str) -> Field 
 /// a printed key list kept by hand beside the one the validator enforces is
 /// how a tool grows a help text that lies. The summaries and glosses are §6's
 /// own words.
-static ACTIONS: &[(&str, ActionDoc)] = &[
-    (
-        "shell",
-        ActionDoc {
-            example: "shell: \"true\"",
-            summary: "Run a script through an interpreter.",
-            fields: &[
-                f("script", "required", "the script to run"),
-                f(
-                    "interpreter",
-                    "optional",
-                    "bash (default on unix) | sh | zsh | powershell (default on windows) | pwsh",
-                ),
-                f("login", "optional", "run the interpreter as a login shell"),
-            ],
-            shape: Some("a script string: `shell: |`, with the long form below"),
-        },
-    ),
-    (
-        "cmd",
-        ActionDoc {
-            example: "cmd: [echo, hello]",
-            summary: "Run an argv without a shell.",
-            fields: &[],
-            shape: Some("a list of arguments: `cmd: [mv, src, dest]`"),
-        },
-    ),
-    (
-        "file",
-        ActionDoc {
-            example: "file: {path: ./out/dir, state: dir}",
-            summary: "Ensure a filesystem entry.",
-            fields: &[
-                f("path", "required", "the entry to ensure"),
-                f(
-                    "state",
-                    "optional",
-                    "file | dir | absent | link (default: file)",
-                ),
-                f(
-                    "content",
-                    "one of content/src",
-                    "state=file only: the bytes",
-                ),
-                f(
-                    "src",
-                    "one of content/src",
-                    "state=file: a file to copy; state=link: the link target",
-                ),
-                f("mode", "optional", "octal, quoted: \"0644\""),
-                f("owner", "optional", "requires sudo"),
-                f("group", "optional", "requires sudo"),
-                f(
-                    "force",
-                    "optional",
-                    "replace a file with a link, or remove a non-empty directory",
-                ),
-            ],
-            shape: None,
-        },
-    ),
-    (
-        "json",
-        ActionDoc {
-            example: "json: {path: ./out/settings.json, content: {a: 1}}",
-            summary: "Ensure a JSON file contains the declared keys, leaving every other key alone.",
-            fields: &[
-                f("path", "required", "the JSON file to merge into"),
-                f(
-                    "content",
-                    "one of content/src",
-                    "the keys this plan owns, as a mapping",
-                ),
-                f(
-                    "src",
-                    "one of content/src",
-                    "a .json file holding those keys",
-                ),
-                f("mode", "optional", "octal, quoted: \"0644\""),
-            ],
-            shape: None,
-        },
-    ),
-    (
-        "template",
-        ActionDoc {
-            example: "template: {src: ./t.j2, dest: ./out/rendered}",
-            summary: "Render a `.j2` file and ensure `dest` matches, with `file` semantics.",
-            fields: &[
-                f(
-                    "src",
-                    "required",
-                    "a file, or a directory to render as a tree",
-                ),
-                f("dest", "required", "the output file, or the tree root"),
-                f(
-                    "mode",
-                    "optional",
-                    "as `file` takes it; every rendered file",
-                ),
-                f("owner", "optional", "requires sudo"),
-                f("group", "optional", "requires sudo"),
-            ],
-            shape: None,
-        },
-    ),
-    (
-        "pkg",
-        ActionDoc {
-            example: "pkg: {name: git, manager: apt}",
-            summary: "Ensure packages are present or absent through one manager.",
-            fields: &[
-                f("name", "one of name/names", "a single package"),
-                f("names", "one of name/names", "a list of packages"),
-                f(
-                    "state",
-                    "optional",
-                    "present | absent | latest (default: present)",
-                ),
-                f(
-                    "version",
-                    "optional",
-                    "a `>=` floor, `present` only: `>=24`",
-                ),
-                f(
-                    "manager",
-                    "optional",
-                    "apt | pacman | yay | brew | winget; default: first available",
-                ),
-                f("cask", "optional", "brew only"),
-                f(
-                    "adopt",
-                    "optional",
-                    "brew casks only; takes over an app already there",
-                ),
-                f(
-                    "update_cache",
-                    "optional",
-                    "apt update / pacman -Sy / brew update before install",
-                ),
-            ],
-            shape: None,
-        },
-    ),
-    (
-        "service",
-        ActionDoc {
-            example: "service: {name: sshd, state: started}",
-            summary: "Ensure a service state under systemd (system or user) or launchd.",
-            fields: &[
-                f("name", "required", "the unit or service name"),
-                f(
-                    "state",
-                    "one of state/enabled",
-                    "started | stopped | restarted | reloaded",
-                ),
-                f("enabled", "one of state/enabled", "start at boot"),
-                f("scope", "optional", "system | user (systemd only)"),
-            ],
-            shape: None,
-        },
-    ),
-    (
-        "assert",
-        ActionDoc {
-            example: "assert: {expr: \"true\"}",
-            summary: "Fail the run if a condition does not hold. Never changes anything.",
-            fields: &[
-                f(
-                    "command",
-                    "one of command/expr",
-                    "a shell command that exits 0",
-                ),
-                f(
-                    "expr",
-                    "one of command/expr",
-                    "an expression over the scope, evaluated not rendered",
-                ),
-                f("msg", "optional", "what to print when it does not hold"),
-            ],
-            shape: None,
-        },
-    ),
-    (
-        "git",
-        ActionDoc {
-            example: "git: {repo: \"https://example.invalid/r.git\", dest: ./out/r}",
-            summary: "Ensure a checkout of a repository at a ref.",
-            fields: &[
-                f("repo", "required", "the URL to clone from"),
-                f("dest", "required", "the directory the checkout lives in"),
-                f(
-                    "ref",
-                    "optional",
-                    "tag, sha, or branch; default: the remote's default branch",
-                ),
-                f(
-                    "depth",
-                    "optional",
-                    "shallow; requires a `ref` naming a tag or a commit",
-                ),
-            ],
-            shape: None,
-        },
-    ),
-    (
-        "download",
-        ActionDoc {
-            example: "download: {url: \"https://example.invalid/x\", dest: ./out/x, sha256: \"0000000000000000000000000000000000000000000000000000000000000000\"}",
-            summary: "Ensure a file fetched from a URL is at `dest`.",
-            fields: &[
-                f("url", "required", "what to fetch"),
-                f("dest", "required", "where it goes"),
-                f(
-                    "sha256",
-                    "optional",
-                    "strongly recommended; the content's digest",
-                ),
-                f("mode", "optional", "as `file` takes it"),
-                f("owner", "optional", "requires sudo"),
-                f("group", "optional", "requires sudo"),
-            ],
-            shape: None,
-        },
-    ),
-    (
-        "defaults",
-        ActionDoc {
-            example: "defaults: {domain: com.apple.finder, key: ShowPathbar, type: bool, value: true}",
-            summary: "Ensure a macOS preference key holds a value.",
-            fields: &[
-                f("domain", "required", "com.apple.finder, or NSGlobalDomain"),
-                f("key", "required", "the preference key"),
-                f("type", "required", "bool | int | float | string"),
-                f("value", "required", "the value, in that type"),
-                f("current_host", "optional", "`defaults -currentHost`"),
-            ],
-            shape: None,
-        },
-    ),
+pub(crate) static SHELL: ActionDoc = ActionDoc {
+    name: "shell",
+    example: "shell: \"true\"",
+    typed: false,
+    dest: Dest::None,
+    summary: "Run a script through an interpreter.",
+    fields: &[
+        f("script", "required", "the script to run"),
+        f(
+            "interpreter",
+            "optional",
+            "bash (default on unix) | sh | zsh | powershell (default on windows) | pwsh",
+        ),
+        f("login", "optional", "run the interpreter as a login shell"),
+    ],
+    shape: Some("a script string: `shell: |`, with the long form below"),
+};
+
+pub(crate) static CMD: ActionDoc = ActionDoc {
+    name: "cmd",
+    example: "cmd: [echo, hello]",
+    typed: false,
+    dest: Dest::None,
+    summary: "Run an argv without a shell.",
+    fields: &[],
+    shape: Some("a list of arguments: `cmd: [mv, src, dest]`"),
+};
+
+pub(crate) static FILE: ActionDoc = ActionDoc {
+    name: "file",
+    example: "file: {path: ./out/dir, state: dir}",
+    typed: true,
+    dest: Dest::PathUnlessAbsent("path"),
+    summary: "Ensure a filesystem entry.",
+    fields: &[
+        f("path", "required", "the entry to ensure"),
+        f(
+            "state",
+            "optional",
+            "file | dir | absent | link (default: file)",
+        ),
+        f(
+            "content",
+            "one of content/src",
+            "state=file only: the bytes",
+        ),
+        f(
+            "src",
+            "one of content/src",
+            "state=file: a file to copy; state=link: the link target",
+        ),
+        f("mode", "optional", "octal, quoted: \"0644\""),
+        f("owner", "optional", "requires sudo"),
+        f("group", "optional", "requires sudo"),
+        f(
+            "force",
+            "optional",
+            "replace a file with a link, or remove a non-empty directory",
+        ),
+    ],
+    shape: None,
+};
+
+pub(crate) static JSON: ActionDoc = ActionDoc {
+    name: "json",
+    example: "json: {path: ./out/settings.json, content: {a: 1}}",
+    typed: true,
+    dest: Dest::Path("path"),
+    summary: "Ensure a JSON file contains the declared keys, leaving every other key alone.",
+    fields: &[
+        f("path", "required", "the JSON file to merge into"),
+        f(
+            "content",
+            "one of content/src",
+            "the keys this plan owns, as a mapping",
+        ),
+        f(
+            "src",
+            "one of content/src",
+            "a .json file holding those keys",
+        ),
+        f("mode", "optional", "octal, quoted: \"0644\""),
+    ],
+    shape: None,
+};
+
+pub(crate) static TEMPLATE: ActionDoc = ActionDoc {
+    name: "template",
+    example: "template: {src: ./t.j2, dest: ./out/rendered}",
+    typed: true,
+    dest: Dest::Path("dest"),
+    summary: "Render a `.j2` file and ensure `dest` matches, with `file` semantics.",
+    fields: &[
+        f(
+            "src",
+            "required",
+            "a file, or a directory to render as a tree",
+        ),
+        f("dest", "required", "the output file, or the tree root"),
+        f(
+            "mode",
+            "optional",
+            "as `file` takes it; every rendered file",
+        ),
+        f("owner", "optional", "requires sudo"),
+        f("group", "optional", "requires sudo"),
+    ],
+    shape: None,
+};
+
+pub(crate) static PKG: ActionDoc = ActionDoc {
+    name: "pkg",
+    example: "pkg: {name: git, manager: apt}",
+    typed: true,
+    dest: Dest::None,
+    summary: "Ensure packages are present or absent through one manager.",
+    fields: &[
+        f("name", "one of name/names", "a single package"),
+        f("names", "one of name/names", "a list of packages"),
+        f(
+            "state",
+            "optional",
+            "present | absent | latest (default: present)",
+        ),
+        f(
+            "version",
+            "optional",
+            "a `>=` floor, `present` only: `>=24`",
+        ),
+        f(
+            "manager",
+            "optional",
+            "apt | pacman | yay | brew | winget; default: first available",
+        ),
+        f("cask", "optional", "brew only"),
+        f(
+            "adopt",
+            "optional",
+            "brew casks only; takes over an app already there",
+        ),
+        f(
+            "update_cache",
+            "optional",
+            "apt update / pacman -Sy / brew update before install",
+        ),
+    ],
+    shape: None,
+};
+
+pub(crate) static SERVICE: ActionDoc = ActionDoc {
+    name: "service",
+    example: "service: {name: sshd, state: started}",
+    typed: true,
+    dest: Dest::None,
+    summary: "Ensure a service state under systemd (system or user) or launchd.",
+    fields: &[
+        f("name", "required", "the unit or service name"),
+        f(
+            "state",
+            "one of state/enabled",
+            "started | stopped | restarted | reloaded",
+        ),
+        f("enabled", "one of state/enabled", "start at boot"),
+        f("scope", "optional", "system | user (systemd only)"),
+    ],
+    shape: None,
+};
+
+pub(crate) static ASSERT: ActionDoc = ActionDoc {
+    name: "assert",
+    example: "assert: {expr: \"true\"}",
+    typed: false,
+    dest: Dest::None,
+    summary: "Fail the run if a condition does not hold. Never changes anything.",
+    fields: &[
+        f(
+            "command",
+            "one of command/expr",
+            "a shell command that exits 0",
+        ),
+        f(
+            "expr",
+            "one of command/expr",
+            "an expression over the scope, evaluated not rendered",
+        ),
+        f("msg", "optional", "what to print when it does not hold"),
+    ],
+    shape: None,
+};
+
+pub(crate) static GIT: ActionDoc = ActionDoc {
+    name: "git",
+    example: "git: {repo: \"https://example.invalid/r.git\", dest: ./out/r}",
+    typed: true,
+    dest: Dest::Path("dest"),
+    summary: "Ensure a checkout of a repository at a ref.",
+    fields: &[
+        f("repo", "required", "the URL to clone from"),
+        f("dest", "required", "the directory the checkout lives in"),
+        f(
+            "ref",
+            "optional",
+            "tag, sha, or branch; default: the remote's default branch",
+        ),
+        f(
+            "depth",
+            "optional",
+            "shallow; requires a `ref` naming a tag or a commit",
+        ),
+    ],
+    shape: None,
+};
+
+pub(crate) static DOWNLOAD: ActionDoc = ActionDoc {
+    name: "download",
+    example: "download: {url: \"https://example.invalid/x\", dest: ./out/x, sha256: \"0000000000000000000000000000000000000000000000000000000000000000\"}",
+    typed: true,
+    dest: Dest::Path("dest"),
+    summary: "Ensure a file fetched from a URL is at `dest`.",
+    fields: &[
+        f("url", "required", "what to fetch"),
+        f("dest", "required", "where it goes"),
+        f(
+            "sha256",
+            "optional",
+            "strongly recommended; the content's digest",
+        ),
+        f("mode", "optional", "as `file` takes it"),
+        f("owner", "optional", "requires sudo"),
+        f("group", "optional", "requires sudo"),
+    ],
+    shape: None,
+};
+
+pub(crate) static DEFAULTS: ActionDoc = ActionDoc {
+    name: "defaults",
+    example: "defaults: {domain: com.apple.finder, key: ShowPathbar, type: bool, value: true}",
+    typed: true,
+    dest: Dest::None,
+    summary: "Ensure a macOS preference key holds a value.",
+    fields: &[
+        f("domain", "required", "com.apple.finder, or NSGlobalDomain"),
+        f("key", "required", "the preference key"),
+        f("type", "required", "bool | int | float | string"),
+        f("value", "required", "the value, in that type"),
+        f("current_host", "optional", "`defaults -currentHost`"),
+    ],
+    shape: None,
+};
+
+/// Every builtin, in table order. A row is a named static so that
+/// `Action::doc` can return it from an exhaustive match: an action without a
+/// row fails the build, rather than being found missing by a lookup.
+static ACTIONS: &[&ActionDoc] = &[
+    &SHELL, &CMD, &FILE, &JSON, &TEMPLATE, &PKG, &SERVICE, &ASSERT, &GIT, &DOWNLOAD, &DEFAULTS,
 ];
 
 /// Every builtin, in table order, for `list --json`.
 pub(crate) fn action_docs() -> impl Iterator<Item = (&'static str, &'static ActionDoc)> {
-    ACTIONS.iter().map(|(n, d)| (*n, d))
+    ACTIONS.iter().map(|d| (d.name, *d))
+}
+
+/// The action keys, in table order.
+pub(crate) fn action_keys() -> impl Iterator<Item = &'static str> {
+    ACTIONS.iter().map(|d| d.name)
 }
 
 pub(crate) fn action_doc(action: &str) -> Option<&'static ActionDoc> {
-    ACTIONS.iter().find(|(n, _)| *n == action).map(|(_, d)| d)
+    ACTIONS.iter().find(|d| d.name == action).copied()
 }
 
 /// The fields each action's long form accepts (spec §6), for the unknown-key
@@ -543,7 +591,7 @@ pub(crate) fn parse_step<'a>(at: N<'a>) -> Result<Step<'a>> {
     let subjects: Vec<(&str, N<'a>)> = keys
         .iter()
         .copied()
-        .filter(|(k, _)| ACTION_KEYS.contains(k) || STRUCTURAL_KEYS.contains(k))
+        .filter(|(k, _)| action_doc(k).is_some() || STRUCTURAL_KEYS.contains(k))
         .collect();
 
     let (key, _key_at) = match subjects.len() {
@@ -606,7 +654,9 @@ pub(crate) fn parse_step<'a>(at: N<'a>) -> Result<Step<'a>> {
 }
 
 fn all_subject_keys() -> Vec<&'static str> {
-    ACTION_KEYS.iter().chain(STRUCTURAL_KEYS).copied().collect()
+    action_keys()
+        .chain(STRUCTURAL_KEYS.iter().copied())
+        .collect()
 }
 
 // ── modifier types ────────────────────────────────────────────────────────
@@ -938,7 +988,7 @@ pub(crate) fn check_modifiers(step: &Step<'_>) -> Result<()> {
     // A typed action returns before the runner builds its retry loop, so the
     // key validated and then did nothing.
     if let Some(n) = m.retry.filter(|_| {
-        ACTION_KEYS.contains(&step.key) && !matches!(step.key, "shell" | "cmd" | "assert")
+        action_doc(step.key).is_some() && !matches!(step.key, "shell" | "cmd" | "assert")
     }) {
         return Err(n
             .err(format!("`retry` has no effect on a `{}`", step.key))

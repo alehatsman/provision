@@ -1642,12 +1642,10 @@ impl Expander {
     /// output — and `shell` and `cmd` declare nothing at all, which is the
     /// whole reason they defer everything instead.
     fn declared_output(&self, step: &Step<'static>, ctx: &Value) -> Option<PathBuf> {
-        let key = match step.key {
-            "git" | "download" | "template" => "dest",
-            // A `json` step writes its path and never removes it, so it is
-            // always a declared output.
-            "json" => "path",
-            "file" => {
+        let key = match model::action_doc(step.key)?.dest {
+            model::Dest::None => return None,
+            model::Dest::Path(key) => key,
+            model::Dest::PathUnlessAbsent(key) => {
                 let absent = step
                     .body
                     .get("state")
@@ -1656,9 +1654,8 @@ impl Expander {
                 if absent {
                     return None;
                 }
-                "path"
+                key
             }
-            _ => return None,
         };
         self.resolved_path(step, key, ctx)
     }
@@ -1685,13 +1682,13 @@ impl Expander {
     /// the verb that touches the machine, which inverts what the two
     /// read-only verbs are for.
     fn check_rendered_path(&mut self, step: &Step<'static>, ctx: &Value, raw: bool) {
-        let body_keys: &[&str] = match step.key {
-            // A `raw` body is not rendered, so braces in it are the author's.
-            _ if raw => &[],
-            "file" | "json" => &["path"],
-            "template" | "download" | "git" => &["dest"],
-            _ => &[],
+        // A `raw` body is not rendered, so braces in it are the author's.
+        let body_key = if raw {
+            None
+        } else {
+            model::action_doc(step.key).and_then(|d| d.dest.field())
         };
+        let body_keys: &[&str] = body_key.as_slice();
         let fields = body_keys
             .iter()
             .map(|k| ((*k).to_string(), step.body.get(k)))

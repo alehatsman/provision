@@ -16,7 +16,7 @@ pub(crate) mod pkg;
 pub(crate) mod service;
 pub(crate) mod template;
 
-use crate::config::model::Step;
+use crate::config::model::{self, ActionDoc, Step};
 use crate::error::Result;
 use crate::exec::process;
 use crate::exec::sudo::Sudo;
@@ -148,20 +148,31 @@ impl Action {
         matches!(self, Action::Assert { .. })
     }
 
+    /// The table row this variant belongs to, or `None` for the gate's
+    /// stand-in. No wildcard, and each arm names its row's static: a new
+    /// variant fails the build until it points at a row.
+    pub(crate) fn doc(&self) -> Option<&'static ActionDoc> {
+        match self {
+            Action::Shell { .. } => Some(&model::SHELL),
+            Action::Cmd(_) => Some(&model::CMD),
+            Action::Assert { .. } => Some(&model::ASSERT),
+            Action::Defaults(_) => Some(&model::DEFAULTS),
+            Action::Download(_) => Some(&model::DOWNLOAD),
+            Action::File(_) => Some(&model::FILE),
+            Action::Git(_) => Some(&model::GIT),
+            Action::Json(_) => Some(&model::JSON),
+            Action::Template(_) => Some(&model::TEMPLATE),
+            Action::Service(_) => Some(&model::SERVICE),
+            Action::Pkg(_) => Some(&model::PKG),
+            Action::Gate => None,
+        }
+    }
+
     /// An action that inspects and changes state itself, rather than reporting
-    /// through an exit code. It never reaches the runner's argv path.
+    /// through an exit code. It never reaches the runner's argv path. Read from
+    /// the action's own table row, which the compiler guarantees it has.
     pub(crate) fn is_typed(&self) -> bool {
-        matches!(
-            self,
-            Action::File(_)
-                | Action::Template(_)
-                | Action::Service(_)
-                | Action::Pkg(_)
-                | Action::Git(_)
-                | Action::Defaults(_)
-                | Action::Download(_)
-                | Action::Json(_)
-        )
+        self.doc().is_some_and(|d| d.typed)
     }
 }
 
