@@ -123,6 +123,10 @@ enum Command {
     },
     /// Print the facts this machine reports.
     Facts {
+        /// One JSON document on stdout: the facts alone. The human form also
+        /// lists the other names a plan can read (`env.NAME`, `facts.NAME`,
+        /// `component_dir`), which are not facts.
+        // D25.
         #[arg(long)]
         json: bool,
     },
@@ -149,6 +153,7 @@ struct RunArgs {
     /// One JSON object per line on stdout; human output moves to stderr.
     #[arg(long)]
     json: bool,
+    /// When to color output. `NO_COLOR` is honored under `auto`.
     #[arg(long, value_enum, default_value_t = Color::Auto)]
     color: Color,
     /// A wall clock for the whole run: `30s`, `5m`, `1h`. Steps still carry
@@ -338,7 +343,7 @@ fn run() -> Result<u8, Diag> {
                 // Not facts, and the reason to print them here anyway: these
                 // are the other names a plan can read, and a reader who runs
                 // `provision facts` to find out what is available has just
-                // been given an answer that omits two of them. The `--json`
+                // been given an answer that omits three of them. The `--json`
                 // form is a contract (D25) and keeps only the facts.
                 output::line(format_args!(
                     "\nalso readable, and not facts:\n\
