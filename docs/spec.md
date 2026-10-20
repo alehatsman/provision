@@ -1039,6 +1039,8 @@ assert:
   msg: "wrong machine"
 ```
 
+- Exactly one of `command` and `expr`. Both is a validation error positioned
+  on whichever key is written second.
 - Always reports `ok` or `failed`. Plan runs asserts unless `--plan-no-probe`.
 - `command` runs like a `shell` script, with the step's `env`, `cwd` and
   `sudo` (§4): a readiness check reaches the same service the step around it
