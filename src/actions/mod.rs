@@ -560,7 +560,7 @@ impl Ctx<'_> {
                             } else {
                                 "timed out"
                             },
-                            crate::output::event::human(got)
+                            crate::report::human(got)
                         )
                     }
                 },

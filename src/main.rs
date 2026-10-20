@@ -12,6 +12,7 @@ mod exec;
 mod expand;
 mod facts;
 mod output;
+mod report;
 mod scope;
 mod template;
 mod yaml;

@@ -167,10 +167,10 @@ src/
   actions/
     mod.rs         enum Action, the parse dispatch, shell/cmd/assert inline
     file.rs template.rs pkg.rs service.rs git.rs download.rs defaults.rs json.rs
+  report.rs        the event vocabulary apply and plan both emit, and Manifest
   output/
     mod.rs         trait Sink
-    text.rs json.rs
-    event.rs       one event type both apply and plan emit
+    text.rs json.rs window.rs
 tests/
   fixtures/        small plans, one directory per command
   snapshots/       output (insta)
@@ -181,10 +181,11 @@ A `Probe` is what `plan` prints; an `Outcome` is what `apply` prints. Both
 carry `status` ∈ {ok, changed, skipped, unknown, failed} and an optional
 diff or message. The output layer does not branch on what kind of action
 produced an event — a step reaches it as a name, a status and a duration —
-but it is not independent of the rest of the crate: `Sink::manifest` takes
-`expand::Manifest`, and `output::event` is imported by `actions/`, `exec/`,
-`expand.rs`, `facts.rs` and `template.rs`. Where `event` should live is a
-separate question, tracked outside this file.
+and it owns none of the vocabulary: `Status`, `Event`, `Summary`, `Manifest`
+and `human` live in `report`, which `expand`, `exec/`, `actions/` and
+`output/` all import. `output/` depends on `report` and on `error::Diag`
+(for `Sink::diagnostic`), and the only thing the walk takes from
+`output/` is the `Sink` it reports into (`expand.rs`).
 
 **Where this differs from the sketch it started as**, because the shape the
 code took is the one worth describing:

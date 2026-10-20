@@ -14,7 +14,7 @@ use crate::error::{Diag, Diags, Result};
 use crate::exec::process::{How, Output};
 use crate::exec::runner::{Judge, Prepared, Runner};
 use crate::output::Sink;
-use crate::output::event::{Event, Status, Summary};
+use crate::report::{Event, Manifest, Status, Summary};
 use crate::scope::{Globals, Map, Scope};
 use crate::template::{Engine, expanduser_in};
 use crate::yaml::Doc;
@@ -57,21 +57,6 @@ impl Mode {
     fn reports(self) -> bool {
         !matches!(self, Mode::Validate)
     }
-}
-
-/// The shape of a run, not its outcome: how many steps, spread over how many
-/// files, how many of them ask for root.
-///
-/// Deliberately not a diff. `plan`'s verdicts are best-effort by D11 and
-/// explicitly unprobed for a register-gated step by D14, so a summary of
-/// *what would change* is a promise provision cannot keep before it starts.
-/// How much is about to happen, and whether any of it is root, is a promise
-/// it can.
-#[derive(Debug, Default, Clone)]
-pub(crate) struct Manifest {
-    pub steps: usize,
-    pub sudo: usize,
-    pub files: BTreeSet<PathBuf>,
 }
 
 pub(crate) struct Selection {

@@ -1,11 +1,12 @@
-//! Rendering. The output layer knows nothing about actions: it is handed a
-//! name, a status and a duration (spec §9).
+//! Rendering. The output layer knows nothing about actions: it is handed the
+//! events of `report` — a name, a status and a duration (spec §9) — and
+//! renders them. The vocabulary itself lives in `report`, not here.
 
-pub(crate) mod event;
 pub(crate) mod json;
 pub(crate) mod text;
+mod window;
 
-use event::{Event, Summary};
+use crate::report::{Event, Manifest, Summary};
 use std::path::Path;
 
 pub(crate) trait Sink {
@@ -16,7 +17,7 @@ pub(crate) trait Sink {
     fn summary(&mut self, plan: &Path, s: &Summary);
     /// The shape of the run, printed once before the first step. See
     /// `Manifest`: how much is about to happen, not what it will change.
-    fn manifest(&mut self, _plan: &Path, _m: &crate::expand::Manifest) {}
+    fn manifest(&mut self, _plan: &Path, _m: &Manifest) {}
     /// A problem found while walking. Default is to do nothing: the text
     /// renderer has its own path for these (`report`), because a diagnostic
     /// is the one thing provision prints that is not a step. `--json` wants
@@ -54,7 +55,7 @@ impl Sink for Both {
         self.0.diagnostic(d, base);
         self.1.diagnostic(d, base);
     }
-    fn manifest(&mut self, plan: &Path, m: &crate::expand::Manifest) {
+    fn manifest(&mut self, plan: &Path, m: &Manifest) {
         self.0.manifest(plan, m);
         self.1.manifest(plan, m);
     }
