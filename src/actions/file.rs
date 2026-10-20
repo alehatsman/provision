@@ -1042,6 +1042,7 @@ fn symlink(target: &str, path: &str) -> std::io::Result<()> {
     /// What `CreateSymbolicLinkW` fails with when the privilege is missing.
     const ERROR_PRIVILEGE_NOT_HELD: i32 = 1314;
 
+    let target = &native_separators(target);
     let resolved = link_base(path).join(target);
     let is_dir = resolved.is_dir();
     let made = if is_dir {
@@ -1072,6 +1073,15 @@ fn symlink(_target: &str, _path: &str) -> std::io::Result<()> {
     Err(std::io::Error::other(
         "symlinks are not supported on this platform",
     ))
+}
+
+/// `src` as Windows stores a link target. Path APIs accept `/`, but a
+/// relative symlink target is resolved by the filesystem, which does not:
+/// a link to `./cloud` was made and then could not be followed, failing
+/// with error 123, "the filename syntax is incorrect".
+#[cfg(windows)]
+fn native_separators(target: &str) -> String {
+    target.replace('/', "\\")
 }
 
 /// The directory a relative link target is read from: the link's own.
@@ -1210,7 +1220,7 @@ fn same_target(have: &str, want: &str, _path: &str) -> bool {
 
 #[cfg(windows)]
 fn same_target(have: &str, want: &str, path: &str) -> bool {
-    if have == want {
+    if have == want || have == native_separators(want) {
         return true;
     }
     let have = have.strip_prefix(r"\\?\").unwrap_or(have);
@@ -1290,6 +1300,9 @@ mod tests {
         );
         assert!(same_target(&have, "cloud", link_s), "{have}");
         assert!(!same_target(&have, "elsewhere", link_s), "{have}");
+        // What a relative symlink to `./cloud` reads back as, on a machine
+        // allowed to make one: the target as stored, separators and all.
+        assert!(same_target(r".\cloud", "./cloud", link_s));
 
         remove_link(link_s).unwrap();
         assert!(!link.exists());
