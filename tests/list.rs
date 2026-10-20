@@ -227,6 +227,14 @@ fn a_name_that_is_neither_a_path_nor_an_action_names_both_forms() {
     assert!(out.contains("builtin action"), "{out}");
 }
 
+/// The diagnostic an action gives, at parse, on a host it cannot run on.
+fn host_gate(key: &str) -> Option<&'static str> {
+    match key {
+        "service" if cfg!(windows) => Some("`service` is not supported on Windows"),
+        _ => None,
+    }
+}
+
 // The claim §8 makes about this listing: the names it prints are the names
 // `validate` accepts, because both read one table. And every row of that table
 // carries a one-step `example`, which this runs through the real dispatch --
@@ -287,7 +295,14 @@ fn every_action_row_runs_its_example_through_validate_and_plan() {
                 "`{key}` panicked ({args:?}):\n{text}"
             );
             assert!(
-                matches!(out.status.code(), Some(0 | 2)),
+                !text.contains("unknown key"),
+                "`{key}`'s example names a key the table does not ({args:?}):\n{text}"
+            );
+            // The point is that the dispatch exists, not that the action runs
+            // here: a host-gated action may refuse with its own diagnostic.
+            let gated = host_gate(key).is_some_and(|gate| text.contains(gate));
+            assert!(
+                matches!(out.status.code(), Some(0 | 2)) || gated,
                 "`{key}`'s example was not accepted by {args:?}:\n{text}"
             );
         }
