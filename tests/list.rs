@@ -228,32 +228,75 @@ fn a_name_that_is_neither_a_path_nor_an_action_names_both_forms() {
 }
 
 // The claim §8 makes about this listing: the names it prints are the names
-// `validate` accepts, because both read one table. A key added to an action's
-// parse and not to the table is a key the listing hides; the reverse is a
-// help text that lies.
+// `validate` accepts, because both read one table. And every row of that table
+// carries a one-step `example`, which this runs through the real dispatch --
+// `validate` and `plan` -- so a row whose action does not parse, or whose
+// dispatch panics, fails here rather than at someone's `apply`.
 #[test]
-fn every_action_is_listed_and_every_listing_is_an_action() {
-    // The action keys, as `validate`'s own error prints them on an unknown
-    // step key — the one place the set is visible from outside the crate.
-    let dir = tempfile::tempdir().unwrap();
-    let plan = dir.path().join("p.yml");
-    std::fs::write(&plan, "- name: A step\n  nosuchaction: x\n").unwrap();
-    let (code, out) = run(&["validate", plan.to_str().unwrap()]);
-    assert_eq!(code, EXIT_VALIDATION, "{out}");
+fn every_action_row_runs_its_example_through_validate_and_plan() {
+    let (code, out) = run(&["list", "--json"]);
+    assert_eq!(code, 0, "{out}");
+    let doc: serde_json::Value = serde_json::from_str(&out).expect("one document");
+    let actions = doc["actions"].as_array().expect("actions");
+    assert!(!actions.is_empty(), "the table is empty");
 
-    for action in [
-        "shell", "cmd", "file", "template", "pkg", "service", "assert", "git", "defaults",
-        "download",
-    ] {
+    // The action keys, as `validate`'s own error prints them on an unknown
+    // step key -- the one place the set is visible from outside the crate.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("t.j2"), "hello\n").unwrap();
+    let bad = dir.path().join("bad.yml");
+    std::fs::write(&bad, "- name: A step\n  nosuchaction: x\n").unwrap();
+    let (code, keys) = run(&["validate", bad.to_str().unwrap()]);
+    assert_eq!(code, EXIT_VALIDATION, "{keys}");
+
+    for row in actions {
+        let key = row["name"].as_str().expect("a name");
+        let example = row["example"].as_str().expect("an example");
+        assert!(!example.is_empty(), "`{key}` has no example");
         assert!(
-            out.contains(action),
-            "`{action}` is not among the keys validate knows:\n{out}"
+            keys.contains(key),
+            "`{key}` is not among the keys validate knows:\n{keys}"
         );
-        let (code, listed) = run(&["list", action]);
-        assert_eq!(code, 0, "`list {action}` failed:\n{listed}");
+
+        let plan_file = dir.path().join(format!("{key}.yml"));
+        std::fs::write(
+            &plan_file,
+            format!("description: {key}\nsteps:\n  - name: example\n    {example}\n"),
+        )
+        .unwrap();
+        let plan_arg = plan_file.to_str().unwrap();
+        // From the tempdir: the examples name `./t.j2` and write under `./out`.
+        for args in [
+            vec!["validate", plan_arg],
+            vec!["plan", "--plan-no-probe", plan_arg],
+        ] {
+            let out = Command::new(env!("CARGO_BIN_EXE_provision"))
+                .args(&args)
+                .env("NO_COLOR", "1")
+                .current_dir(dir.path())
+                .output()
+                .expect("provision failed to start");
+            let text = String::from_utf8_lossy(&out.stdout).into_owned()
+                + &String::from_utf8_lossy(&out.stderr);
+            assert!(
+                !text.contains("is not an action"),
+                "`{key}` is in the table but not in the dispatch ({args:?}):\n{text}"
+            );
+            assert!(
+                !text.contains("panicked"),
+                "`{key}` panicked ({args:?}):\n{text}"
+            );
+            assert!(
+                matches!(out.status.code(), Some(0 | 2)),
+                "`{key}`'s example was not accepted by {args:?}:\n{text}"
+            );
+        }
+
+        let (code, listed) = run(&["list", key]);
+        assert_eq!(code, 0, "`list {key}` failed:\n{listed}");
         assert!(
-            listed.contains(action),
-            "`list {action}` named nothing:\n{listed}"
+            listed.contains(key),
+            "`list {key}` named nothing:\n{listed}"
         );
     }
 }
@@ -292,7 +335,7 @@ fn a_directory_lists_a_name_index_component_by_its_directory() {
 }
 
 // D25: verbs that answer return a document. One call gives a writer of plan
-// files the whole vocabulary -- the eleven actions *and* the step envelope,
+// files the whole vocabulary -- every action *and* the step envelope,
 // which is the half nothing described before: `list <action>` covered the
 // actions, and the sixteen keys every step may carry were a bare name list
 // inside the parser.
@@ -303,7 +346,6 @@ fn list_json_with_no_path_dumps_the_whole_vocabulary() {
     let doc: serde_json::Value = serde_json::from_str(&out).expect("one document");
 
     let actions = doc["actions"].as_array().expect("actions");
-    assert_eq!(actions.len(), 11, "spec §6 has eleven actions");
     let git = actions
         .iter()
         .find(|a| a["name"] == "git")

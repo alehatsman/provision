@@ -745,6 +745,7 @@ fn action_json(name: &str, doc: &config::model::ActionDoc) -> serde_json::Value 
     serde_json::json!({
         "name": name,
         "summary": doc.summary,
+        "example": doc.example,
         "body": doc.shape,
         "fields": doc.fields.iter().map(|f| serde_json::json!({
             "name": f.name,
