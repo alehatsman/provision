@@ -4,7 +4,7 @@
 # arrives in phase 2, and this has to pass before then.
 #
 # Applied twice, this must report changed and then skipped. That is the whole
-# definition of idempotent for this project (spec §11).
+# definition of idempotent for this project (spec §6).
 
 - vars:
     scratch: "{{ env.PROVISION_SCRATCH }}"

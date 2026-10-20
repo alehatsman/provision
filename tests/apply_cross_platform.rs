@@ -441,7 +441,7 @@ fn read(dir: &Path, name: &str) -> String {
     std::fs::read_to_string(dir.join(name)).expect("the step should have left a file")
 }
 
-/// Spec §11's definition of idempotent, and §6.11's whole reason to exist:
+/// Spec §6's definition of idempotent, and §6.11's whole reason to exist:
 /// the keys the application owns are still there after the apply, and the
 /// second apply has nothing to do.
 #[test]
