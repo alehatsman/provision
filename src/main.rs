@@ -56,6 +56,7 @@ struct Cli {
 enum Command {
     /// Parse, check the schema, render every template, resolve every file.
     Validate {
+        /// The plan or component file.
         plan: PathBuf,
         /// Also reject `shell`/`cmd` steps with no idempotency gate.
         ///
@@ -65,14 +66,10 @@ enum Command {
         /// the check on.
         #[arg(long)]
         strict: bool,
-        /// Set a prop, when the root file is a component rather than a plan.
-        /// Checked exactly as `apply` checks it: a required prop with no
-        /// value is an error here too, and nothing stands in for it.
-        #[arg(long = "prop", value_name = "KEY=VALUE")]
-        prop: Vec<String>,
         /// One JSON object per line on stdout; human output stays on stderr.
         /// `validate` produces no step list, so this is the diagnostics and
-        /// nothing else (D25).
+        /// nothing else.
+        // D25.
         #[arg(long)]
         json: bool,
         #[command(flatten)]
@@ -80,18 +77,17 @@ enum Command {
     },
     /// Report what would run, probing the machine where an action can.
     Plan {
+        /// The plan or component file.
         plan: PathBuf,
         /// Do not probe the machine; report every step as unprobed.
         #[arg(long)]
         plan_no_probe: bool,
-        /// Set a prop, when the root file is a component rather than a plan.
-        #[arg(long = "prop", value_name = "KEY=VALUE")]
-        prop: Vec<String>,
         #[command(flatten)]
         run: RunArgs,
     },
     /// Do the work. Stops at the first failed step, unless `--keep-going`.
     Apply {
+        /// The plan or component file.
         plan: PathBuf,
         /// Read the sudo password once, instead of requiring `sudo -n`.
         #[arg(long)]
@@ -106,9 +102,6 @@ enum Command {
         /// is broken. Ctrl-C still stops.
         #[arg(long)]
         keep_going: bool,
-        /// Set a prop, when the root file is a component rather than a plan.
-        #[arg(long = "prop", value_name = "KEY=VALUE")]
-        prop: Vec<String>,
         #[command(flatten)]
         run: RunArgs,
     },
@@ -123,7 +116,8 @@ enum Command {
         /// One JSON document on stdout. With no path, that document is every
         /// builtin action and every step modifier — what a writer of plan
         /// files needs in one call, rather than a column-aligned table to
-        /// scrape or the whole spec to carry (D25).
+        /// scrape or the whole spec to carry.
+        // D25.
         #[arg(long)]
         json: bool,
     },
@@ -159,7 +153,8 @@ struct RunArgs {
     color: Color,
     /// A wall clock for the whole run: `30s`, `5m`, `1h`. Steps still carry
     /// their own `timeout`; this bounds the sum of them. The run exits 124,
-    /// the same code a killed command reports (spec §8, D19).
+    /// the same code a killed command reports.
+    // Spec §8, D19.
     #[arg(long, value_name = "DURATION")]
     deadline: Option<String>,
     #[command(flatten)]
@@ -240,9 +235,18 @@ struct VarArgs {
     /// Load a YAML mapping of variables. Repeatable; later wins.
     #[arg(long = "vars-file", value_name = "PATH")]
     vars_file: Vec<PathBuf>,
+    /// Set a prop, when the root file is a component rather than a plan.
+    /// Repeatable. A required prop with no value is an error, and nothing
+    /// stands in for it.
+    #[arg(long = "prop", value_name = "KEY=VALUE")]
+    prop: Vec<String>,
 }
 
 impl VarArgs {
+    fn props(&self) -> Result<Vec<(String, String)>, Diag> {
+        pairs(&self.prop, "--prop")
+    }
+
     /// Spec §3.3: the command line is the highest precedence layer.
     fn collect(&self) -> Result<Map, Diag> {
         let mut m = Map::new();
@@ -355,12 +359,11 @@ fn run() -> Result<u8, Diag> {
         Command::Validate {
             plan,
             strict,
-            prop,
             json,
             vars,
         } => {
             let plan = check_exists(&plan)?;
-            let props = pairs(&prop, "--prop")?;
+            let props = vars.props()?;
             let selection = Selection {
                 tags: Vec::new(),
                 skip_tags: Vec::new(),
@@ -379,7 +382,7 @@ fn run() -> Result<u8, Diag> {
             if ex.diags.is_empty() {
                 // Nothing to say on the stream: no diagnostics is the whole
                 // of what `validate` reports, and silence plus exit 0 is the
-                // answer. The human line still goes to stderr's side.
+                // answer. Without `--json` the human `ok` line goes to stdout.
                 if !json {
                     output::line(format_args!("  ok  {}", rel(&plan, &base)));
                 }
@@ -395,12 +398,11 @@ fn run() -> Result<u8, Diag> {
         Command::Plan {
             plan,
             plan_no_probe,
-            prop,
             run,
         } => {
             run.apply_color();
             let plan = check_exists(&plan)?;
-            let props = pairs(&prop, "--prop")?;
+            let props = run.vars.props()?;
             let base = cwd();
             let mode = Mode::Plan {
                 probe: !plan_no_probe,
@@ -480,12 +482,11 @@ fn run() -> Result<u8, Diag> {
             verbose,
             stream,
             keep_going,
-            prop,
             run,
         } => {
             run.apply_color();
             let plan = check_exists(&plan)?;
-            let props = pairs(&prop, "--prop")?;
+            let props = run.vars.props()?;
             // Read here, used below: a typo'd `--deadline` is a usage error,
             // and finding it after the sudo prompt would mean asking for a
             // password to run nothing.
@@ -650,8 +651,8 @@ fn expander(vars: &VarArgs, mode: Mode, selection: Selection) -> Result<Expander
     Ok(Expander::new(globals, mode, selection))
 }
 
-/// `KEY=VALUE` pairs from a repeatable flag. Shared by `--prop` on `run` and
-/// on `validate`, which check the same three things.
+/// `KEY=VALUE` pairs from a repeatable flag, for `--prop` on every verb that
+/// takes one.
 fn pairs(given: &[String], flag: &str) -> Result<Vec<(String, String)>, Diag> {
     given
         .iter()
