@@ -21,6 +21,22 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  systemd-probe:
+    name: systemd probe (DIAGNOSTIC — do not merge)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Can a user unit be reached on this runner?
+        run: |
+          echo "XDG_RUNTIME_DIR=[${XDG_RUNTIME_DIR:-unset}]"
+          echo "uid=$(id -u) user=$(id -un)"
+          command -v systemctl || echo "RESULT: no systemctl"
+          echo "--- systemctl --user is-system-running ---"
+          systemctl --user is-system-running || echo "RESULT: systemctl --user unreachable (exit $?)"
+          echo "--- /run/user ---"
+          ls -la /run/user/ 2>&1 || echo "RESULT: no /run/user"
+          echo "--- loginctl ---"
+          loginctl list-sessions 2>&1 || echo "RESULT: no loginctl sessions"
+
   gate:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
