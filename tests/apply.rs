@@ -190,6 +190,40 @@ fn the_scratch_home_plan_applies_twice_changed_then_skipped() {
     );
 }
 
+// Spec §3: files resolve relative to the file that names them, never the cwd.
+// `creates` is one of them, so one plan must reach one verdict from anywhere.
+#[test]
+fn creates_resolves_against_the_plan_not_the_invocation_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let sub = dir.path().join("sub");
+    std::fs::create_dir(&sub).unwrap();
+    std::fs::write(sub.join("hit"), "").unwrap();
+    std::fs::write(
+        sub.join("p.yml"),
+        "- name: Gated on a file beside this plan\n  shell: \"true\"\n  creates: ./hit\n",
+    )
+    .unwrap();
+
+    let verdict_from = |cwd: &Path, plan: &str| {
+        let out = Command::new(env!("CARGO_BIN_EXE_provision"))
+            .args(["plan", plan])
+            .env("NO_COLOR", "1")
+            .current_dir(cwd)
+            .output()
+            .expect("provision failed to start");
+        verdict(
+            &(String::from_utf8_lossy(&out.stdout).into_owned()
+                + &String::from_utf8_lossy(&out.stderr)),
+            "Gated on a file beside this plan",
+        )
+    };
+
+    let beside = verdict_from(&sub, "p.yml");
+    let above = verdict_from(dir.path(), "sub/p.yml");
+    assert_eq!(beside, "skipped creates exists");
+    assert_eq!(above, beside, "same plan, same file, two verdicts");
+}
+
 #[test]
 fn plan_probes_the_same_gates_apply_uses() {
     let dir = tempfile::tempdir().unwrap();
