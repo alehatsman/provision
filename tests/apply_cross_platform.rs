@@ -339,6 +339,97 @@ fn a_timeout_kills_the_whole_tree_on_every_platform() {
     );
 }
 
+// Spec §10's Ctrl-C row, on the platform where it was never true: with no
+// console handler installed, Windows ended provision on the spot — exit
+// 0xC000013A, no summary, no `interrupted`. `tests/apply.rs` has the unix
+// twin, `ctrl_c_kills_the_step_and_exits_130`, and it is `#![cfg(unix)]`.
+//
+// Ctrl-Break rather than Ctrl-C: it is the only console event a program can
+// aim at one process group, and provision handles the two alike. Aiming
+// Ctrl-C at the whole console would stop the test harness with it.
+#[cfg(windows)]
+#[test]
+#[expect(unsafe_code, reason = "the console API has no safe equivalent in std")]
+fn ctrl_break_stops_the_run_and_still_prints_its_summary() {
+    use std::os::windows::process::CommandExt;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn AllocConsole() -> i32;
+        fn GenerateConsoleCtrlEvent(event: u32, group: u32) -> i32;
+    }
+    const CTRL_BREAK_EVENT: u32 = 1;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+
+    let dir = tempfile::tempdir().unwrap();
+    let started = dir.path().join("started.txt");
+    let survived = dir.path().join("survived.txt");
+    std::fs::write(
+        dir.path().join("plan.yml"),
+        format!(
+            "description: a plan to stop\nsteps:\n  - name: waits to be stopped\n    \
+             shell: |\n      Set-Content '{}' x\n      {}\n      Set-Content '{}' x\n    \
+             changed_when: \"false\"\n",
+            started.display(),
+            sleep_for(5),
+            survived.display(),
+        ),
+    )
+    .unwrap();
+
+    // The event goes to processes sharing the sender's console. Under a
+    // terminal there is one already and this fails harmlessly; a runner
+    // with none gets one here, for provision to inherit.
+    // SAFETY: no arguments, and it touches no memory of ours.
+    unsafe {
+        AllocConsole();
+    }
+    let child = Command::new(env!("CARGO_BIN_EXE_provision"))
+        .args(["apply", "plan.yml"])
+        .env("NO_COLOR", "1")
+        .current_dir(dir.path())
+        .creation_flags(CREATE_NEW_PROCESS_GROUP)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    // Wait for the step to be running rather than guessing how long
+    // PowerShell takes to start.
+    let begun = std::time::Instant::now();
+    while !started.exists() {
+        assert!(
+            begun.elapsed() < std::time::Duration::from_secs(60),
+            "the step never started"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    // SAFETY: plain integers. The group is provision's alone, made by
+    // `CREATE_NEW_PROCESS_GROUP`, so the event does not reach this process.
+    let sent = unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, child.id()) };
+    assert_ne!(sent, 0, "the console refused the event");
+
+    let out = child.wait_with_output().unwrap();
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(130), "{text}");
+    assert!(
+        text.contains("exit 130 · interrupted"),
+        "the step was not reported as interrupted:\n{text}"
+    );
+    assert!(
+        text.contains("1 step · 1 failed"),
+        "the summary is still printed:\n{text}"
+    );
+    // The event reached provision's group and not the step's, so the step
+    // ends only if provision killed it.
+    std::thread::sleep(std::time::Duration::from_secs(6));
+    assert!(
+        !survived.exists(),
+        "the step outlived the run that was stopped"
+    );
+}
+
 // ── `json`: a file with two owners (spec §6.11, D31) ──────────────────────
 
 /// Write a JSON file into the test's own tempdir.

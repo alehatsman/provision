@@ -28,12 +28,15 @@ from a Windows path: `facts` reports the right `os`/`home`/`username`,
 applied twice — changed, then ok — covering the powershell interpreter,
 `file`, `template`, `register`, a `when` reading it, `creates`, `unless` and
 `failed_when`. Exit codes 0, 2 and 3 all correct. What is still untested
-there: `pkg` against winget, `service`, and Ctrl-C.
+there: `pkg` against winget and `service`. Ctrl-C was tested natively on
+2026-10-20 and had never worked. With no console handler, provision died
+with `0xC000013A` and printed no summary. It is fixed, and the gate's
+Windows job now drives it (`tests/apply_cross_platform.rs`).
 
 Since 2026-10-15 the gate runs `tasks/tests.yml` natively on `windows-latest`
 (D24), which adds `cli.rs`, `component.rs`, `list.rs` and the unit tests on a
 real Windows host and catches a build break there on every push. It does not
-add the three above: `tests/apply.rs` is `#![cfg(unix)]`, so the suite that
+add the two above: `tests/apply.rs` is `#![cfg(unix)]`, so the suite that
 would exercise them does not compile on Windows, and closing that is a change
 to the suite rather than to a workflow file.
 
@@ -631,7 +634,8 @@ Gate
   still comes from the gate job, not from a local run — the confidence rests
   on `tests/cli.rs`, which is not `cfg(unix)` and has pinned a relative `/`
   path on the Windows job since #31. `tests/apply.rs` is still `#![cfg(unix)]`
-  and the three untested things above are still untested.
+  and two of the three untested things above are still untested. Ctrl-C
+  closed 2026-10-20.
 - **Owner's:** moongit's runner actually reading the stream, cancelling with
   TERM and passing `--deadline`. That is the real gate and it lives in that
   repo. **Check on 2026-12-12**: unexercised by then means D17's CI half and
