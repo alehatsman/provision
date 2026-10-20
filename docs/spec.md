@@ -1,6 +1,6 @@
 # provision — specification
 
-Status: v0.10.0 · 2026-10-20 · owner: aleh
+Status: v0.11.0 · 2026-10-20 · owner: aleh
 
 This is the contract. Code that disagrees with it is wrong, or this file is.
 Fix one.

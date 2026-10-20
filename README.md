@@ -356,7 +356,7 @@ and no support (D23).
 
 ## Status
 
-Version 0.10.0. Phases 0 through 7 are code complete
+Version 0.11.0. Phases 0 through 7 are code complete
 ([docs/plan.md](docs/plan.md)), and `json` landed after them by closing a
 deferred row rather than as a phase of its own (D31).
 `validate`, `plan`, `apply`, `list` and `facts` all work, and all eleven
