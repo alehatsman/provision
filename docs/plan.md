@@ -50,6 +50,9 @@ Open, and all of it the owner's — none of it can close from this machine:
 - Apply to the remaining machines, x1 last (migration.md §7 steps 4–6).
   main_pc WSL is done: applied 2026-09-08, `0 would change` on the re-plan.
   The Windows host is tested but not bootstrapped.
+- Plan each of the five machine plans on a machine mooncake has already
+  converged: `provision plan` reports zero changes, except for steps
+  migration.md predicts.
 - Merge the dotfiles `provision` branch. `provision-ci:latest` exists on
   main_pc now, so CI is no longer red-by-construction.
 - ~~Rulings~~ — all six settled 2026-09-08. D1's windows-gnu amendment and

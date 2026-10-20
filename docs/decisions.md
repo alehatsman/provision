@@ -1134,6 +1134,14 @@ is already unshadowable. `examples/x1.yml` and the README pattern both read
 it through `facts.` as of this amendment. The convention stands; it now has
 something to stand on.
 
+**No prose count of the restricted modifiers.** Spec §8's `list --json`
+paragraph once said "four of the sixteen are legal on one kind of step only".
+That was two claims about two rows of §4's table: `command steps` is a class
+of three actions, not one kind of step, and the two legal on one named kind
+are `props` and `optional`. Neither half was true under the reading that made
+the other true. A count in prose is a hand-kept second list; §4's table is the
+one place, `list --json` returns it, and a test pins the set against it.
+
 **Overturned by.** Wanting the tool to *be* an agent runtime, which is a
 different project and should be named as one.
 
