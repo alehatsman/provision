@@ -16,7 +16,7 @@ pub(crate) mod pkg;
 pub(crate) mod service;
 pub(crate) mod template;
 
-use crate::config::model::Step;
+use crate::config::model::{self, ActionDoc, Step};
 use crate::error::Result;
 use crate::exec::process;
 use crate::exec::sudo::Sudo;
@@ -148,33 +148,31 @@ impl Action {
         matches!(self, Action::Assert { .. })
     }
 
-    /// The step key this variant was parsed from, or `None` for the gate's
-    /// stand-in. No wildcard: a new variant fails the build until it says
-    /// which table row it belongs to.
-    pub(crate) fn key(&self) -> Option<&'static str> {
+    /// The table row this variant belongs to, or `None` for the gate's
+    /// stand-in. No wildcard, and each arm names its row's static: a new
+    /// variant fails the build until it points at a row.
+    pub(crate) fn doc(&self) -> Option<&'static ActionDoc> {
         match self {
-            Action::Shell { .. } => Some("shell"),
-            Action::Cmd(_) => Some("cmd"),
-            Action::Assert { .. } => Some("assert"),
-            Action::Defaults(_) => Some("defaults"),
-            Action::Download(_) => Some("download"),
-            Action::File(_) => Some("file"),
-            Action::Git(_) => Some("git"),
-            Action::Json(_) => Some("json"),
-            Action::Template(_) => Some("template"),
-            Action::Service(_) => Some("service"),
-            Action::Pkg(_) => Some("pkg"),
+            Action::Shell { .. } => Some(&model::SHELL),
+            Action::Cmd(_) => Some(&model::CMD),
+            Action::Assert { .. } => Some(&model::ASSERT),
+            Action::Defaults(_) => Some(&model::DEFAULTS),
+            Action::Download(_) => Some(&model::DOWNLOAD),
+            Action::File(_) => Some(&model::FILE),
+            Action::Git(_) => Some(&model::GIT),
+            Action::Json(_) => Some(&model::JSON),
+            Action::Template(_) => Some(&model::TEMPLATE),
+            Action::Service(_) => Some(&model::SERVICE),
+            Action::Pkg(_) => Some(&model::PKG),
             Action::Gate => None,
         }
     }
 
     /// An action that inspects and changes state itself, rather than reporting
     /// through an exit code. It never reaches the runner's argv path. Read from
-    /// the action table, so the answer is stated once, beside the docs.
+    /// the action's own table row, which the compiler guarantees it has.
     pub(crate) fn is_typed(&self) -> bool {
-        self.key()
-            .and_then(crate::config::model::action_doc)
-            .is_some_and(|d| d.typed)
+        self.doc().is_some_and(|d| d.typed)
     }
 }
 
