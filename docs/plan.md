@@ -691,10 +691,24 @@ is small enough that merge cost exceeds the gain.
 
 ## Deferred, with the condition that reopens each
 
+A condition nobody measures is a condition that never fires. Censused
+against `~/dotfiles` @ `6d5a63e` on **2026-10-20**: two tripped, both
+recorded in place below and neither built. Checked and **not** tripped:
+`defaults` array/dict (zero `type: array` keys), Termux (`pixel.yml` has no
+`shell: pkg install` and no `pkg` step), Windows typed actions (no single
+bootstrap near 500 lines, though "the bootstrap" is now seven files under
+`platforms/windows/host/` and wants a sharper reading if anyone calls it),
+and all four `json` rows (one `json:` step exists in the whole fleet).
+
+Three cannot be answered by reading files and were not guessed at: loops
+(near-identical-modulo-one-value is a judgment, not a count), the run log
+(a question going unanswered twice leaves no artifact), and `pkg`
+repo/tap/PPA (needs a real run per machine).
+
 | Item | Reopens when |
 |---|---|
-| `line_in_file` / `text.replace` action | more than 3 shell steps in dotfiles reimplement sed-with-a-guard |
-| `download` unarchive | more than 3 `download` steps are followed by the same `creates`-gated tar/unzip step |
+| `line_in_file` / `text.replace` action | **Tripped 2026-10-20, not built.** Five, each a `sed -i` under an `unless:`: `platforms/arch/index.yml:21` and `:189`, `platforms/windows/index.yml:287`, `machines/x1/thermal.yml:128` and `:139`. All five edit a system config in place — `pacman.conf`, `vconsole.conf`, `/etc/environment`, two boot cmdlines. The trigger is a prompt to decide, not a decision: D4 asks whether this earns a typed action by needing state inspection, and the `unless:` guards are that inspection already, written by hand |
+| `download` unarchive | **Tripped 2026-10-20, not built.** Five, each a typed `download:` then a `creates`-gated extract: tree-sitter (`gunzip`) and zk (`tar`) in `components/nvim/index.yml`, win32yank (`unzip`) in `components/nvim/win32yank.yml`, lazygit in `components/cli/index.yml`, uv in `components/languages/index.yml`. Four components, three archive formats, one shape. Same D4 question: the `creates:` gate is the state inspection, and an `unarchive:` would be absorbing it |
 | `defaults` `array`/`dict` types | a second array key appears in the mac plans |
 | `pkg` repo/tap/PPA management | a shell recipe from migration.md fails idempotency in practice |
 | Loops | any step repeats itself more than 3 times by copy-paste |
