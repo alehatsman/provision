@@ -505,7 +505,16 @@ impl Runner {
                     spec.plan(&ctx)
                 }
             }
-            _ => unreachable!("is_typed and this match are the same set"),
+            // Named rather than `_`, because the invariant this arm asserts
+            // is only half enforced otherwise. `is_typed` reads the ACTIONS
+            // table, so a new typed action is one row — and that row would
+            // compile, pass `Action::doc()`, flow through `is_typed`, reach
+            // this match and panic at run time. Listing the untyped variants
+            // puts the failure back where the rest of the table's drift
+            // already fails: the build.
+            Action::Shell { .. } | Action::Cmd(_) | Action::Assert { .. } | Action::Gate => {
+                unreachable!("is_typed and this match are the same set")
+            }
         };
 
         let (mut status, detail) = match effect {
