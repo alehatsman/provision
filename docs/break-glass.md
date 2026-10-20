@@ -12,6 +12,12 @@ the summary is printed with `interrupted`, and the exit code is 130
 (spec §10). Nothing after that step runs. Do not `kill -9` provision: that
 skips the process-group kill and can orphan whatever the step started.
 
+Two other things stop a run from outside, and look the same on the machine.
+SIGTERM (a runner cancelling the job) exits 143; `--deadline` running out
+exits 124 and prints `deadline exceeded`. Both kill the current step's
+process group and print the summary, as Ctrl-C does, and nothing after that
+step ran. Read §2 the same way.
+
 ## 2. What state the machine is in
 
 - **Everything above the `✗` line happened. Nothing below it did.** `apply`
