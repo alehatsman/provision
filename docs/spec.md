@@ -1129,8 +1129,13 @@ git:
 - Runs `git` from PATH and fails with a clear message when it is absent.
   `sudo` is not implied and rarely wanted: the checkout belongs to the user
   running the plan.
-- `retry` (§4) applies to the clone and fetch calls: the network is the one
-  thing here that fails and then works.
+- **`retry` (§4) is a validation error here**, as on every typed action: the
+  runner returns before the retry loop is built, so a key it accepted would
+  be a key it dropped. This action is where that rule costs the most — the
+  network is the one thing here that fails and then works — and it is still
+  the rule. A clone that must survive a flaky network is a `shell` step with
+  its own gate, which is the trade §2 accepts rather than grow a second
+  retry loop inside a typed action.
 - **Dirty** means tracked modifications or staged changes (`git status
   --porcelain --untracked-files=no` non-empty); untracked files are
   ignored, because a checkout cannot destroy one, and if one collides with
@@ -1200,8 +1205,10 @@ download:
 - Plan: never fetches. `would change` when `dest` is missing or the hash
   differs; nothing else is knowable without the network and nothing else is
   claimed.
-- **Transport is `curl`**, executed from PATH, with `-fsSL --retry 0`; the
-  step's own `retry` (§4) repeats the whole fetch-and-hash. Every fleet OS
+- **Transport is `curl`**, executed from PATH, with `-fsSL --retry 0`, and
+  **`retry` (§4) is a validation error on the step** — so a fetch is tried
+  exactly once and a flaky network fails the step. The same trade as `git`
+  above, named here because `--retry 0` makes it total. Every fleet OS
   ships curl (Windows since 1803) and a static binary that carries its own
   TLS stack and certificate handling is the wrong trade for a fetch the
   shell already does well. What the action adds is the hash and the

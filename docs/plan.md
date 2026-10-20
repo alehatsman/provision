@@ -553,8 +553,9 @@ Deliverables
   `^{commit}` peel; a test with an annotated tag is mandatory, that is the
   bug tools.yml nearly shipped.
 - `download` (§6.9): `url`, `dest`, `sha256`, `mode`. Temp file, hash,
-  rename; mismatch fails and leaves `dest` alone. Transport is `curl`
-  (owner to confirm). Honours `retry`.
+  rename; mismatch fails and leaves `dest` alone. Transport is `curl`,
+  confirmed by review and settled in spec §6.9. `retry` is a validation
+  error on the step, as on every typed action.
 - `defaults` (§6.10): `domain`, `key`, `type`, `value`, `current_host`.
   Read, compare typed, write. Four types. Non-macOS fails at apply.
 - Tests: fixtures under tests/fixtures/apply for each; `git` against a local
