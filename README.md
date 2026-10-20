@@ -31,7 +31,7 @@ plan, dogfooded from a personal dotfiles repo. Recorded with
 
 ```
 $ provision apply x1.yml
-  x1.yml
+  x1.yml · 3 steps to run · 1 sudo
   ✓ Install zsh                                      ok  101ms
   ~ Deploy .zshrc                                    changed  0ms
     │ --- current
@@ -116,7 +116,7 @@ The job is small and stable. The tool should be too.
   in a directory by their `description:`, `list <component.yml>` prints the
   props one takes, and `list <action>` prints the fields a builtin takes.
 - **Output a human reads.** One line per step, live, colored on a TTY, plain
-  on a pipe, unified diffs for file changes in plan mode, `--json` for
+  on a pipe, unified diffs for file changes, `--json` for
   machines.
 
 ## What it is not
@@ -428,7 +428,7 @@ refuses before touching anything:
 
 ```
 $ provision apply examples/x1.yml        # run on mainpc
-  examples/x1.yml
+  examples/x1.yml · 19 steps to run · 4 files · 4 sudo
   ✗ Refuse to run on the wrong machine               FAILED  0ms
     │ (exit 1 · hostname mainpc belongs to another machine)
 

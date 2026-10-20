@@ -1867,8 +1867,8 @@ the elision says how much it dropped out of how many:
   cut would have been.
 - Plan mode uses `would change` / `would run` in place of `changed`, and
   prints diffs under the line, indented, colored: unified, three lines of
-  context. `--no-diff` suppresses them. The flag exists on `apply` too, where
-  it does nothing, so that a script can pass the same arguments to both.
+  context. `--no-diff` suppresses them. `apply` prints the same diffs under
+  its `changed` lines, and the flag suppresses them there too.
 - The summary counts `would change` before `would run`.
 - Retries render as `attempt 2/3` on the finished line. The spinner
   carries the step's name only; the attempt count is not known until the

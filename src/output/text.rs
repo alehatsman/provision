@@ -36,8 +36,8 @@ pub(crate) struct Text {
     spinner: bool,
     verbose: bool,
     hide_skipped: bool,
-    /// Spec §9.1. The flag exists on `apply` too, where there is no diff to
-    /// suppress, so a script can pass both commands the same arguments.
+    /// Spec §9.1. `apply` prints diffs under `changed` lines too, so this
+    /// suppresses them there as well; it is not a plan-only flag.
     no_diff: bool,
     base: PathBuf,
     /// The call path and file whose header was printed last, so nested
