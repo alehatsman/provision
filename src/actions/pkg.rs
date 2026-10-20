@@ -590,6 +590,12 @@ impl Spec {
                 m.name, m.name
             ));
         }
+        if self.cask && m.cask_flag.is_none() {
+            return Effect::fail(format!(
+                "`cask` does not apply to `{}`; casks are a brew concept",
+                m.name
+            ));
+        }
         // No unprobed guard here, unlike `file`: the query reads a local
         // database and never escalates, plan never mutates, and
         // `update_cache` never runs under plan. There is nothing for root to
@@ -617,6 +623,9 @@ impl Spec {
                     return Effect::Ok;
                 }
                 if act {
+                    if let Err(bad) = self.refresh_cache(ctx) {
+                        return bad;
+                    }
                     if !missing.is_empty() {
                         if let Err(bad) = self.run_on(ctx, m.install, &missing) {
                             return bad;
@@ -681,6 +690,9 @@ impl Spec {
                     } else {
                         Effect::Changed(Some(format!("install {}", missing.join(" "))))
                     };
+                }
+                if let Err(bad) = self.refresh_cache(ctx) {
+                    return bad;
                 }
                 // Install what is absent before upgrading what is not.
                 // `apt-get install --only-upgrade` silently skips a package
@@ -874,8 +886,19 @@ impl Spec {
             .collect()
     }
 
-    /// One call for the whole subset (spec §6.5), with the cache refreshed
-    /// first only when there is something to do.
+    /// Spec §6.5: `update_cache` refreshes once per step, before the first
+    /// install or upgrade call. Callers reach it only with work to do, and
+    /// `absent` never does.
+    fn refresh_cache(&self, ctx: &Ctx<'_>) -> std::result::Result<(), Effect> {
+        if self.update_cache
+            && let Some(refresh) = self.manager.refresh
+        {
+            Self::exec(ctx, refresh)?;
+        }
+        Ok(())
+    }
+
+    /// One call for the whole subset (spec §6.5).
     fn run_on(
         &self,
         ctx: &Ctx<'_>,
@@ -883,12 +906,6 @@ impl Spec {
         names: &[String],
     ) -> std::result::Result<(), Effect> {
         let m = self.manager;
-        if self.update_cache
-            && let Some(refresh) = m.refresh
-        {
-            let argv: Vec<&str> = refresh.to_vec();
-            Self::exec(ctx, &argv)?;
-        }
         let batches: Vec<&[String]> = if m.one_per_call {
             names.chunks(1).collect()
         } else {
