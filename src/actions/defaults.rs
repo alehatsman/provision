@@ -102,7 +102,14 @@ pub(crate) fn parse(
     let Some(value) = render(&value_at.as_scalar_string()?) else {
         return Ok(None);
     };
-    let value = normalize(kind, value.trim(), value_at)?;
+    // A string is compared byte-for-byte (§6.10); the other types are read
+    // as numbers or words, where surrounding whitespace is never meant.
+    let text = if kind == Type::Str {
+        value.as_str()
+    } else {
+        value.trim()
+    };
+    let value = normalize(kind, text, value_at)?;
 
     let current_host = match body.get("current_host") {
         Some(n) => n.as_bool()?,
@@ -181,8 +188,14 @@ fn normalize(kind: Type, text: &str, at: N<'_>) -> Result<String> {
     reason = "the question is whether the stored preference is this value, not whether it is near it: a tolerance would call a drifted key converged and stop the step correcting it"
 )]
 pub(crate) fn matches(kind: Type, have: Option<&str>, want: &str) -> bool {
-    let Some(have) = have.map(str::trim) else {
+    let Some(raw) = have else {
         return false;
+    };
+    // `defaults read` ends every value with one newline. A string keeps
+    // everything else it printed.
+    let have = match kind {
+        Type::Str => raw.strip_suffix('\n').unwrap_or(raw),
+        _ => raw.trim(),
     };
     match kind {
         // `defaults read` prints a bool as 1 or 0, never as true or false.
@@ -313,6 +326,18 @@ mod tests {
         ));
         assert!(matches(Type::Str, Some("png\n"), "png"));
         assert!(!matches(Type::Str, Some("png\n"), "jpg"));
+    }
+
+    #[test]
+    fn a_string_keeps_its_own_whitespace() {
+        // Only the newline `defaults read` adds is stripped; the rest is the
+        // value (§6.10, "string byte-for-byte").
+        assert!(matches(Type::Str, Some("foo \n"), "foo "));
+        assert!(!matches(Type::Str, Some("foo \n"), "foo"));
+        assert!(!matches(Type::Str, Some("foo\n"), "foo "));
+        assert!(matches(Type::Str, Some("  foo\n"), "  foo"));
+        assert!(!matches(Type::Str, Some("  foo\n"), "foo"));
+        assert!(matches(Type::Str, Some("foo\n\n"), "foo\n"));
     }
 
     #[test]
