@@ -464,6 +464,18 @@ pub(crate) fn action_keys() -> impl Iterator<Item = &'static str> {
     ACTIONS.iter().map(|d| d.name)
 }
 
+/// A command step: one whose verdict is its exit code (spec §6.1).
+///
+/// `assert` also runs a command but is judged on its premise rather than on
+/// the exit code (§6.7), and a typed action runs none at all, so neither is
+/// one. Two rules in `expand.rs` turn on this — D18's deferral of a later
+/// `file` `src`, and D3's gate lint — and they used to spell the set out
+/// separately. The expander walks a `Step`, so this takes the key rather than
+/// an `Action`: the action is not parsed yet at either call site.
+pub(crate) fn is_command_key(key: &str) -> bool {
+    matches!(key, "shell" | "cmd")
+}
+
 pub(crate) fn action_doc(action: &str) -> Option<&'static ActionDoc> {
     ACTIONS.iter().find(|d| d.name == action).copied()
 }

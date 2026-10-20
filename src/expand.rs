@@ -1125,7 +1125,7 @@ impl Expander {
         // walk", and a step is not earlier than itself. Same for the path
         // this step declares — a `file` step's `src` under its own `path` is
         // still missing.
-        if matches!(step.key, "shell" | "cmd") {
+        if model::is_command_key(step.key) {
             self.walked_a_command = true;
         }
         let defer_src = self.defers_file_src(step, &ctx);
@@ -1516,7 +1516,7 @@ impl Expander {
             }
             return;
         }
-        if !matches!(step.key, "shell" | "cmd") {
+        if !model::is_command_key(step.key) {
             return;
         }
         let gated = step.mods.unless.is_some()
