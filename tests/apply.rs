@@ -5277,6 +5277,11 @@ fn depth_refuses_a_branch_and_writes_nothing() {
         !checkout_in(dir.path()).exists(),
         "a refused step left a checkout behind:\n{out}"
     );
+    // The parents of `dest` count: §6.8 says before anything is written.
+    assert!(
+        !dir.path().join("deep").exists(),
+        "a refused step left its parent directories behind:\n{out}"
+    );
 }
 
 #[test]

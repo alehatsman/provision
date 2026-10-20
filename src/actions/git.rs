@@ -337,6 +337,11 @@ impl Spec {
         if !act {
             return Effect::Changed(Some(line));
         }
+        if self.depth.is_some()
+            && let Some(bad) = self.refuse_branch(ctx)
+        {
+            return bad;
+        }
         if let Some(bad) = self.make_parents(ctx) {
             return bad;
         }
@@ -369,9 +374,6 @@ impl Spec {
     /// leaves `refs/tags/<ref>` behind when the ref was a tag, so the next
     /// run answers offline the way a full clone does.
     fn shallow_fresh(&self, ctx: &Ctx<'_>) -> Option<Effect> {
-        if let Some(bad) = self.refuse_branch(ctx) {
-            return Some(bad);
-        }
         if let Some(bad) = ctx.perform(&["git", "init", "--quiet", &self.dest], ctx.sudo) {
             return Some(bad);
         }
