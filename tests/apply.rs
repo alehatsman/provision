@@ -3709,6 +3709,77 @@ fn latest_fails_an_install_that_did_nothing() {
     );
 }
 
+// Issue #72: spec §6.5 scopes `update_cache` to the install call, and only
+// when there is something to install. A removal does not need fresh lists.
+#[test]
+fn update_cache_does_not_refresh_before_a_removal() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let log = dir.path().join("apt-get.log");
+    fake_manager(
+        &bin,
+        "dpkg-query",
+        "printf 'held\\t1.0\\tinstall ok installed\\n'",
+    );
+    fake_manager(
+        &bin,
+        "apt-get",
+        &format!("echo \"$@\" >> {}", log.display()),
+    );
+
+    let (_, out) = pkg_apply_with_path(
+        dir.path(),
+        "- name: Remove\n  pkg:\n    name: held\n    state: absent\n    manager: apt\n    update_cache: true\n",
+        &bin,
+    );
+    let calls = std::fs::read_to_string(&log).unwrap_or_default();
+    assert!(calls.contains("remove"), "no removal ran:\n{calls}\n{out}");
+    assert!(!calls.contains("update"), "refreshed for a removal:\n{calls}");
+}
+
+// `latest` with one missing and one held name makes two calls; the refresh
+// belongs to the step, not to each call.
+#[test]
+fn update_cache_refreshes_once_per_step() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let log = dir.path().join("apt-get.log");
+    let installed = dir.path().join("fresh.installed");
+    fake_manager(
+        &bin,
+        "dpkg-query",
+        &format!(
+            "printf 'held\\t1.0\\tinstall ok installed\\n'\n[ -e {} ] && printf 'fresh\\t1.0\\tinstall ok installed\\n'\nexit 0",
+            installed.display()
+        ),
+    );
+    fake_manager(
+        &bin,
+        "apt-get",
+        &format!(
+            "echo \"$@\" >> {}\ncase \"$*\" in *install*fresh*) : > {};; esac",
+            log.display(),
+            installed.display()
+        ),
+    );
+
+    let (code, out) = pkg_apply_with_path(
+        dir.path(),
+        "- name: Latest\n  pkg:\n    names: [held, fresh]\n    state: latest\n    manager: apt\n    update_cache: true\n",
+        &bin,
+    );
+    let calls = std::fs::read_to_string(&log).unwrap_or_default();
+    assert_eq!(code, 0, "{out}\n{calls}");
+    assert!(calls.contains("--only-upgrade"), "no upgrade ran:\n{calls}");
+    assert_eq!(
+        calls.lines().filter(|l| l.contains("update")).count(),
+        1,
+        "{calls}"
+    );
+}
+
 // Spec §6.5: the query is where every verdict comes from, and a query that
 // failed gave no answer. Its exit code was never read, so a `dpkg-query` that
 // errored with empty output read as "nothing installed": `state: absent`
