@@ -1134,6 +1134,23 @@ is already unshadowable. `examples/x1.yml` and the README pattern both read
 it through `facts.` as of this amendment. The convention stands; it now has
 something to stand on.
 
+**Amendment, 2026-10-20 — the gap in "Why" has closed; the decision stands.**
+The third paragraph of "The precedent is already in this repo" says provision's
+own diagnostics never got structured output: prose on stderr under every verb,
+and nothing at all from `apply` because its preflight runs before the sink is
+built. That was true when written (2026-10-15) and stopped being true the same
+day: `3cf9667`, "a problem is an event on the stream, before the summary",
+added a `{"event":"diagnostic","file","line","col","message","note"}` event,
+gave `validate` a `--json`, and moved the preflight's reporting onto the stream
+so `apply --json` on a bad file emits the event on stdout instead of nothing.
+Verified 2026-10-20: `validate --json` and `apply --json` on a plan with an
+unknown key each print one `diagnostic` event on stdout and exit 3. The
+original paragraph is left as the argument that was made. Only the evidence is
+stale: the decision (an agent is a named consumer; verbs that walk stream,
+verbs that answer return a document) and its no-list are unaffected, and
+nothing about them needed the gap to stay open. A reader weighing whether to
+add structured diagnostics should read this as done. (#94)
+
 **Overturned by.** Wanting the tool to *be* an agent runtime, which is a
 different project and should be named as one.
 
