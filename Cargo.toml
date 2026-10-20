@@ -11,7 +11,7 @@ name = "provision"
 # `--version` with the same string. A month of unreleased work reading as
 # the released tag made four reviewers file features that already shipped
 # (D23: the one reader who forgets is the owner). Released: no suffix.
-version = "0.10.0"
+version = "0.11.0"
 edition = "2024"
 license = "MIT"
 autoexamples = false   # examples/ holds YAML plans, not Rust examples
