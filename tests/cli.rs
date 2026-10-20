@@ -2267,3 +2267,46 @@ fn a_file_src_under_a_declared_dest_is_deferred_for_download_and_json() {
         assert_eq!(out.status.code(), Some(0), "{what} did not defer:\n{text}");
     }
 }
+
+/// The command surface is a ceiling, and the README leads with it: "**Five
+/// commands.** `validate`, `plan`, `apply`, `list`, `facts`." The count is not
+/// trivia there — it sits above the table that justified the rewrite, 64
+/// actions mooncake shipped against the 25 the real configs used.
+///
+/// `tests/list.rs` pins the eleven actions against spec §6. This is the other
+/// half of the same claim, and the half more likely to drift: a sixth verb is
+/// one clap variant, with no idempotency story to write and no `list <action>`
+/// entry to keep true, where a twelfth action is neither.
+///
+/// Read from `--help` rather than from the clap type, because the README's
+/// claim is about what a reader is told, and `--help` is where they are told
+/// it. `help` is clap's own verb and is not one of the five.
+#[test]
+fn the_command_surface_is_the_five_verbs_the_readme_promises() {
+    let out = run(&["--help"]);
+    assert_eq!(out.status.code(), Some(0));
+    let text = String::from_utf8_lossy(&out.stdout);
+
+    let block = text
+        .split("Commands:\n")
+        .nth(1)
+        .expect("`--help` lists a Commands block")
+        .split("\n\n")
+        .next()
+        .expect("the block ends at a blank line");
+
+    let verbs: Vec<&str> = block
+        .lines()
+        .filter_map(|l| l.split_whitespace().next())
+        .filter(|v| *v != "help")
+        .collect();
+
+    assert_eq!(
+        verbs,
+        ["validate", "plan", "apply", "list", "facts"],
+        "the command surface changed.\n\
+         A sixth verb is a decision, not an edit: README's \"Five commands\" and \
+         spec §8 both name this set. Change them in the same commit, or do not \
+         add the verb.\n--help said:\n{block}"
+    );
+}
