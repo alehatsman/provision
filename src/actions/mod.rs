@@ -148,20 +148,33 @@ impl Action {
         matches!(self, Action::Assert { .. })
     }
 
+    /// The step key this variant was parsed from, or `None` for the gate's
+    /// stand-in. No wildcard: a new variant fails the build until it says
+    /// which table row it belongs to.
+    pub(crate) fn key(&self) -> Option<&'static str> {
+        match self {
+            Action::Shell { .. } => Some("shell"),
+            Action::Cmd(_) => Some("cmd"),
+            Action::Assert { .. } => Some("assert"),
+            Action::Defaults(_) => Some("defaults"),
+            Action::Download(_) => Some("download"),
+            Action::File(_) => Some("file"),
+            Action::Git(_) => Some("git"),
+            Action::Json(_) => Some("json"),
+            Action::Template(_) => Some("template"),
+            Action::Service(_) => Some("service"),
+            Action::Pkg(_) => Some("pkg"),
+            Action::Gate => None,
+        }
+    }
+
     /// An action that inspects and changes state itself, rather than reporting
-    /// through an exit code. It never reaches the runner's argv path.
+    /// through an exit code. It never reaches the runner's argv path. Read from
+    /// the action table, so the answer is stated once, beside the docs.
     pub(crate) fn is_typed(&self) -> bool {
-        matches!(
-            self,
-            Action::File(_)
-                | Action::Template(_)
-                | Action::Service(_)
-                | Action::Pkg(_)
-                | Action::Git(_)
-                | Action::Defaults(_)
-                | Action::Download(_)
-                | Action::Json(_)
-        )
+        self.key()
+            .and_then(crate::config::model::action_doc)
+            .is_some_and(|d| d.typed)
     }
 }
 

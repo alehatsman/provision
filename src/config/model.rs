@@ -11,10 +11,6 @@ use crate::yaml::N;
 use minijinja::Value;
 use std::time::Duration;
 
-pub(crate) const ACTION_KEYS: &[&str] = &[
-    "shell", "cmd", "file", "template", "pkg", "service", "assert", "git", "defaults", "download",
-    "json",
-];
 pub(crate) const STRUCTURAL_KEYS: &[&str] = &["vars", "vars_file", "import", "use"];
 /// What one step modifier is, for `provision list --json` (D25).
 ///
@@ -126,10 +122,8 @@ pub(crate) fn modifier_keys() -> impl Iterator<Item = &'static str> {
 
 /// Every key a step may carry, for the unknown-key check.
 pub(crate) fn all_step_keys() -> Vec<&'static str> {
-    ACTION_KEYS
-        .iter()
-        .chain(STRUCTURAL_KEYS)
-        .copied()
+    action_keys()
+        .chain(STRUCTURAL_KEYS.iter().copied())
         .chain(modifier_keys())
         .collect()
 }
@@ -146,8 +140,40 @@ pub(crate) struct Field {
     pub note: &'static str,
 }
 
+/// Where a step's action writes, for the two checks that read it: D18's
+/// deferral of a later `file` `src`, and the unrendered-`{{` check on a path
+/// provision reads itself.
+#[derive(Clone, Copy)]
+pub(crate) enum Dest {
+    /// The action names no path of its own. `shell` and `cmd` are the reason
+    /// a plan defers every later `src`: they declare nothing.
+    None,
+    /// The body field naming the path the action always writes.
+    Path(&'static str),
+    /// As `Path`, but `state: absent` removes it, which is no output.
+    PathUnlessAbsent(&'static str),
+}
+
+impl Dest {
+    /// The field to check for an unrendered `{{`, whatever the state.
+    pub(crate) fn field(self) -> Option<&'static str> {
+        match self {
+            Dest::None => None,
+            Dest::Path(f) | Dest::PathUnlessAbsent(f) => Some(f),
+        }
+    }
+}
+
 /// What one action is, in a line, for `provision list <action>`.
+///
+/// `typed` and `dest` have no default on purpose: a new row cannot be written
+/// without deciding both, and a decision nobody made is how an action ends up
+/// silently missing from the runner's typed path or from D18.
 pub(crate) struct ActionDoc {
+    /// An action that inspects and changes state itself rather than reporting
+    /// through an exit code. It never reaches the runner's argv path.
+    pub typed: bool,
+    pub dest: Dest,
     pub summary: &'static str,
     /// One step that uses the action, as YAML to put under `- name:`. The
     /// smoke test runs every one through `validate` and `plan`, so a row
@@ -174,6 +200,8 @@ static ACTIONS: &[(&str, ActionDoc)] = &[
         "shell",
         ActionDoc {
             example: "shell: \"true\"",
+            typed: false,
+            dest: Dest::None,
             summary: "Run a script through an interpreter.",
             fields: &[
                 f("script", "required", "the script to run"),
@@ -191,6 +219,8 @@ static ACTIONS: &[(&str, ActionDoc)] = &[
         "cmd",
         ActionDoc {
             example: "cmd: [echo, hello]",
+            typed: false,
+            dest: Dest::None,
             summary: "Run an argv without a shell.",
             fields: &[],
             shape: Some("a list of arguments: `cmd: [mv, src, dest]`"),
@@ -200,6 +230,8 @@ static ACTIONS: &[(&str, ActionDoc)] = &[
         "file",
         ActionDoc {
             example: "file: {path: ./out/dir, state: dir}",
+            typed: true,
+            dest: Dest::PathUnlessAbsent("path"),
             summary: "Ensure a filesystem entry.",
             fields: &[
                 f("path", "required", "the entry to ensure"),
@@ -234,6 +266,8 @@ static ACTIONS: &[(&str, ActionDoc)] = &[
         "json",
         ActionDoc {
             example: "json: {path: ./out/settings.json, content: {a: 1}}",
+            typed: true,
+            dest: Dest::Path("path"),
             summary: "Ensure a JSON file contains the declared keys, leaving every other key alone.",
             fields: &[
                 f("path", "required", "the JSON file to merge into"),
@@ -256,6 +290,8 @@ static ACTIONS: &[(&str, ActionDoc)] = &[
         "template",
         ActionDoc {
             example: "template: {src: ./t.j2, dest: ./out/rendered}",
+            typed: true,
+            dest: Dest::Path("dest"),
             summary: "Render a `.j2` file and ensure `dest` matches, with `file` semantics.",
             fields: &[
                 f(
@@ -279,6 +315,8 @@ static ACTIONS: &[(&str, ActionDoc)] = &[
         "pkg",
         ActionDoc {
             example: "pkg: {name: git, manager: apt}",
+            typed: true,
+            dest: Dest::None,
             summary: "Ensure packages are present or absent through one manager.",
             fields: &[
                 f("name", "one of name/names", "a single package"),
@@ -317,6 +355,8 @@ static ACTIONS: &[(&str, ActionDoc)] = &[
         "service",
         ActionDoc {
             example: "service: {name: sshd, state: started}",
+            typed: true,
+            dest: Dest::None,
             summary: "Ensure a service state under systemd (system or user) or launchd.",
             fields: &[
                 f("name", "required", "the unit or service name"),
@@ -335,6 +375,8 @@ static ACTIONS: &[(&str, ActionDoc)] = &[
         "assert",
         ActionDoc {
             example: "assert: {expr: \"true\"}",
+            typed: false,
+            dest: Dest::None,
             summary: "Fail the run if a condition does not hold. Never changes anything.",
             fields: &[
                 f(
@@ -356,6 +398,8 @@ static ACTIONS: &[(&str, ActionDoc)] = &[
         "git",
         ActionDoc {
             example: "git: {repo: \"https://example.invalid/r.git\", dest: ./out/r}",
+            typed: true,
+            dest: Dest::Path("dest"),
             summary: "Ensure a checkout of a repository at a ref.",
             fields: &[
                 f("repo", "required", "the URL to clone from"),
@@ -378,6 +422,8 @@ static ACTIONS: &[(&str, ActionDoc)] = &[
         "download",
         ActionDoc {
             example: "download: {url: \"https://example.invalid/x\", dest: ./out/x, sha256: \"0000000000000000000000000000000000000000000000000000000000000000\"}",
+            typed: true,
+            dest: Dest::Path("dest"),
             summary: "Ensure a file fetched from a URL is at `dest`.",
             fields: &[
                 f("url", "required", "what to fetch"),
@@ -398,6 +444,8 @@ static ACTIONS: &[(&str, ActionDoc)] = &[
         "defaults",
         ActionDoc {
             example: "defaults: {domain: com.apple.finder, key: ShowPathbar, type: bool, value: true}",
+            typed: true,
+            dest: Dest::None,
             summary: "Ensure a macOS preference key holds a value.",
             fields: &[
                 f("domain", "required", "com.apple.finder, or NSGlobalDomain"),
@@ -414,6 +462,11 @@ static ACTIONS: &[(&str, ActionDoc)] = &[
 /// Every builtin, in table order, for `list --json`.
 pub(crate) fn action_docs() -> impl Iterator<Item = (&'static str, &'static ActionDoc)> {
     ACTIONS.iter().map(|(n, d)| (*n, d))
+}
+
+/// The action keys, in table order.
+pub(crate) fn action_keys() -> impl Iterator<Item = &'static str> {
+    ACTIONS.iter().map(|(n, _)| *n)
 }
 
 pub(crate) fn action_doc(action: &str) -> Option<&'static ActionDoc> {
@@ -543,7 +596,7 @@ pub(crate) fn parse_step<'a>(at: N<'a>) -> Result<Step<'a>> {
     let subjects: Vec<(&str, N<'a>)> = keys
         .iter()
         .copied()
-        .filter(|(k, _)| ACTION_KEYS.contains(k) || STRUCTURAL_KEYS.contains(k))
+        .filter(|(k, _)| action_doc(k).is_some() || STRUCTURAL_KEYS.contains(k))
         .collect();
 
     let (key, _key_at) = match subjects.len() {
@@ -606,7 +659,9 @@ pub(crate) fn parse_step<'a>(at: N<'a>) -> Result<Step<'a>> {
 }
 
 fn all_subject_keys() -> Vec<&'static str> {
-    ACTION_KEYS.iter().chain(STRUCTURAL_KEYS).copied().collect()
+    action_keys()
+        .chain(STRUCTURAL_KEYS.iter().copied())
+        .collect()
 }
 
 // ── modifier types ────────────────────────────────────────────────────────
@@ -938,7 +993,7 @@ pub(crate) fn check_modifiers(step: &Step<'_>) -> Result<()> {
     // A typed action returns before the runner builds its retry loop, so the
     // key validated and then did nothing.
     if let Some(n) = m.retry.filter(|_| {
-        ACTION_KEYS.contains(&step.key) && !matches!(step.key, "shell" | "cmd" | "assert")
+        action_doc(step.key).is_some() && !matches!(step.key, "shell" | "cmd" | "assert")
     }) {
         return Err(n
             .err(format!("`retry` has no effect on a `{}`", step.key))
