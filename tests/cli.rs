@@ -312,6 +312,64 @@ fn when_and_tags_still_reach_a_structural_step() {
     );
 }
 
+// `retry` on a typed action validated and was then dropped: the runner returns
+// before it builds the retry loop. It is rejected at parse, and the three
+// steps that do have a loop keep it.
+#[test]
+fn retry_on_a_typed_action_is_rejected_and_on_a_command_step_is_not() {
+    let dir = tempfile::tempdir().unwrap();
+    let bodies = [
+        ("file", "file: {path: /tmp/x, state: file, content: x}"),
+        ("template", "template: {src: a, dest: /tmp/x}"),
+        ("pkg", "pkg: {name: git}"),
+        ("service", "service: {name: sshd, state: started}"),
+        (
+            "git",
+            "git: {repo: https://example.com/r.git, dest: /tmp/r}",
+        ),
+        ("defaults", "defaults: {domain: d, key: k, value: 1}"),
+        (
+            "download",
+            "download: {url: https://example.com/f, dest: /tmp/f}",
+        ),
+        ("json", "json: {path: /tmp/x.json, set: {a: 1}}"),
+    ];
+    for (key, body) in bodies {
+        let plan = dir.path().join(format!("{key}.yml"));
+        std::fs::write(
+            &plan,
+            format!("- name: s\n  {body}\n  retry: {{attempts: 3, delay: 1s}}\n"),
+        )
+        .unwrap();
+        let o = run(&["validate", &plan.display().to_string()]);
+        let err = String::from_utf8_lossy(&o.stderr);
+        assert_eq!(o.status.code(), Some(EXIT_VALIDATION), "`{key}`: {err}");
+        assert!(
+            err.contains(&format!("`retry` has no effect on a `{key}`")),
+            "`{key}`: {err}"
+        );
+    }
+    for body in [
+        "shell: \"true\"\n  changed_when: \"false\"",
+        "cmd: [true]\n  changed_when: \"false\"",
+        "assert: {command: \"true\"}",
+    ] {
+        let plan = dir.path().join("ok.yml");
+        std::fs::write(
+            &plan,
+            format!("- name: s\n  {body}\n  retry: {{attempts: 3, delay: 1s}}\n"),
+        )
+        .unwrap();
+        let o = run(&["validate", &plan.display().to_string()]);
+        assert_eq!(
+            o.status.code(),
+            Some(0),
+            "{body}: {}",
+            String::from_utf8_lossy(&o.stderr)
+        );
+    }
+}
+
 // `optional` belongs to `vars_file`, which is itself structural -- so the
 // blanket rule must not eat the one modifier a structural step does honour.
 #[test]

@@ -382,11 +382,11 @@ a string that happens to parse.
 |---|---|---|---|---|
 | `name` | any step | string | action key + first arg | Shown in output. Templated. |
 | `when` | any step | expr | true | Skip the step when false. Evaluated before `unless`/`creates`. |
-| `unless` | command steps | string | — | A shell command, run through the interpreter `shell` defaults to (bash on unix, powershell on Windows), and with the step's own `sudo`, `env` and `cwd` — a root step's gate has to see root's view. Exit 0 means "already done", step skipped. Non-zero means run, **except** a gate that could not run at all: a spawn failure, `126`/`127` from the interpreter, or the gate hitting the step's timeout. Those fail the step (§10). A gate for a tool the plan has not installed yet must therefore ask whether the tool exists, not ask the tool: `command -v <tool> >/dev/null 2>&1`. `<tool> --version` is `127` on a fresh machine, which is a failed step, not a step that needs to run. |
-| `creates` | command steps | path | — | Skip when the path exists. |
+| `unless` | any action | string | — | A shell command, run through the interpreter `shell` defaults to (bash on unix, powershell on Windows), and with the step's own `sudo`, `env` and `cwd` — a root step's gate has to see root's view. Exit 0 means "already done", step skipped. Non-zero means run, **except** a gate that could not run at all: a spawn failure, `126`/`127` from the interpreter, or the gate hitting the step's timeout. Those fail the step (§10). A gate for a tool the plan has not installed yet must therefore ask whether the tool exists, not ask the tool: `command -v <tool> >/dev/null 2>&1`. `<tool> --version` is `127` on a fresh machine, which is a failed step, not a step that needs to run. |
+| `creates` | any action | path | — | Skip when the path exists. |
 | `sudo` | any action | bool | false | Templated (§3.4), but **cannot read a `register`**; a sole `{{ expr }}` must yield a bool. Run the action as root (§7). Windows: error; use `shell` from an elevated prompt. |
 | `timeout` | any action | duration | 10m | Templated (§3.4), but **cannot read a `register`**. Kill the step and fail. `30s`, `5m`, `1h`. |
-| `retry` | command steps | `{attempts, delay}` | none | Both fields templated (§3.4), but **neither can read a `register`**. Re-run on failure. `delay` is a duration. Output shows attempt N/M. |
+| `retry` | `shell`, `cmd`, `assert` | `{attempts, delay}` | none | Both fields templated (§3.4), but **neither can read a `register`**. Re-run on failure. On a typed action (`file`, `template`, `pkg`, `service`, `git`, `defaults`, `download`, `json`) it is a validation error: those actions have no retry loop, and a key that is silently dropped is a typo that costs an afternoon (§3). `delay` is a duration. Output shows attempt N/M. |
 | `env` | action steps | mapping | {} | Extra environment for every command the step runs: `shell`, `cmd`, `assert`'s `command`, `unless`, and the commands a typed action spawns (`pkg`, `service`, `git`, …). Templated. |
 | `cwd` | command steps | path | the invocation directory | Working directory for `shell`, `cmd`, `assert`'s `command`, `unless`, under every command and for every step, including one inside a `use`d component. A command runs where the operator is standing; a shared gate checked out elsewhere must not gate its own checkout. An explicit `cwd:` resolves against the step's own file, like every other path a plan names, and `component_dir` (§3.2) names a component's own directory for a path inside a shell string. Phase 5b, 2026-09-08: this used to be the step's file directory under `apply` and the invocation directory under `run`. Measured against the fleet, no step depended on the old default — zero `cwd:` modifiers, zero relative paths in shell strings — and one rule beats two. |
 | `tags` | any step | list | [] | For `--tags` selection (§8). |
@@ -404,7 +404,7 @@ this table and nothing else — and it is why the last two rows are here. A
 are neither the step's subject nor part of its body, which is what every
 other row is too; the only thing that distinguishes them is that their
 subject is structural rather than an action, and the **Applies to** column
-is where that narrowness is said out loud. `props:` at a step is the call
+is where that narrowness is said out loud. The column is a note, not a rule, with one exception: `retry` on a typed action is rejected at parse, because the runner would drop it. `props:` at a step is the call
 site's *arguments*; the component root's `props:` is the *schema* they are
 checked against, is not a step key, and is not in this table (§3.2).
 

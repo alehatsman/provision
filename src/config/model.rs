@@ -27,8 +27,9 @@ pub(crate) struct ModifierDoc {
     pub name: &'static str,
     /// Where the modifier is **meaningful**, as prose for a reader. It is
     /// deliberately *not* a rule the parser enforces: only structural steps
-    /// reject modifiers they cannot honour (`check_modifiers`), and every
-    /// action step accepts every modifier in this table. Several entries are
+    /// reject modifiers they cannot honour (`check_modifiers`), and `retry`
+    /// is the one action-step key rejected on the typed actions; every other
+    /// modifier in this table is accepted on every action step. Several entries are
     /// narrower than reality on purpose -- `changed_when` is documented for
     /// command steps and a `file` step honours it too.
     ///
@@ -58,16 +59,8 @@ pub(crate) static MODIFIERS: &[ModifierDoc] = &[
         "any step",
         "an expression; false skips the step and, on a `use`/`import`, its whole subtree",
     ),
-    m(
-        "unless",
-        "command steps",
-        "a command; exit 0 skips the step",
-    ),
-    m(
-        "creates",
-        "command steps",
-        "a path; existing skips the step",
-    ),
+    m("unless", "any action", "a command; exit 0 skips the step"),
+    m("creates", "any action", "a path; existing skips the step"),
     m(
         "sudo",
         "any action",
@@ -78,7 +71,11 @@ pub(crate) static MODIFIERS: &[ModifierDoc] = &[
         "any action",
         "per attempt, not per step: `30s`, `5m`, `1h`. bounds every command a typed action spawns, not only `shell`/`cmd`",
     ),
-    m("retry", "command steps", "a mapping: `{attempts, delay}`"),
+    m(
+        "retry",
+        "`shell`, `cmd`, `assert`",
+        "a mapping: `{attempts, delay}`; rejected on a typed action, which has no retry loop",
+    ),
     m(
         "env",
         "action steps",
@@ -921,6 +918,16 @@ pub(crate) fn check_modifiers(step: &Step<'_>) -> Result<()> {
                     .with_note(note));
             }
         }
+    }
+
+    // A typed action returns before the runner builds its retry loop, so the
+    // key validated and then did nothing.
+    if let Some(n) = m.retry.filter(|_| {
+        ACTION_KEYS.contains(&step.key) && !matches!(step.key, "shell" | "cmd" | "assert")
+    }) {
+        return Err(n
+            .err(format!("`retry` has no effect on a `{}`", step.key))
+            .with_note("only `shell`, `cmd` and `assert` steps retry"));
     }
 
     // Spec §4: sudo is root or nothing, and Windows has no sudo (D8).
