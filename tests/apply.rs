@@ -3759,7 +3759,10 @@ fn update_cache_does_not_refresh_before_a_removal() {
     );
     let calls = std::fs::read_to_string(&log).unwrap_or_default();
     assert!(calls.contains("remove"), "no removal ran:\n{calls}\n{out}");
-    assert!(!calls.contains("update"), "refreshed for a removal:\n{calls}");
+    assert!(
+        !calls.contains("update"),
+        "refreshed for a removal:\n{calls}"
+    );
 }
 
 // `latest` with one missing and one held name makes two calls; the refresh
