@@ -1134,6 +1134,27 @@ is already unshadowable. `examples/x1.yml` and the README pattern both read
 it through `facts.` as of this amendment. The convention stands; it now has
 something to stand on.
 
+**Amended 2026-10-20: the precedent got generalised eleven minutes later.**
+"provision's own diagnostics never got it" above, and the clause that `apply`
+emits nothing at all because its preflight runs before the sink is built, were
+true when this decision was written — at 18:01 on 2026-10-15 — and stopped
+being true at 18:12, in `3cf9667`. This decision is what prompted that commit;
+the "Why" simply kept its problem in the present tense it was stated in.
+Under `--json` every problem now rides the stream as its own event, before the
+summary, under `validate`, `plan` and `apply` alike: `report_json` in
+`src/main.rs` builds a `Json` sink over the collected diags and
+`Sink::diagnostic` in `src/output/json.rs` renders each one as
+`{"event":"diagnostic","file":…,"line":…,"col":…,"message":…,"note":…}`.
+
+Half of that sentence stands, and on purpose: a config error still emits prose
+on stderr under `--json`. That half was never the gap. stdout is the machine's
+stream and stderr is the reader's, and a problem is reported on both — the
+structured event did not replace the prose, it joined it.
+
+The decision is untouched. It argued that a machine reader deserves a
+structured answer, and the evidence it argued from is now the thing it
+produced.
+
 **Overturned by.** Wanting the tool to *be* an agent runtime, which is a
 different project and should be named as one.
 
