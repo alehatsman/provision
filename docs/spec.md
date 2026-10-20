@@ -1,6 +1,6 @@
 # provision — specification
 
-Status: v0.10.0 · 2026-10-17 · owner: aleh
+Status: v0.10.0 · 2026-10-20 · owner: aleh
 
 This is the contract. Code that disagrees with it is wrong, or this file is.
 Fix one.
@@ -87,7 +87,7 @@ Rules:
   the machine doing the reading, whatever the plan is for. So does `creates`
   and the `exists` test, which ask about a file at the moment a step runs.
 
-  `home` is a fact (§3.5), so on an ordinary run both are the same home and
+  `home` is a fact (§5), so on an ordinary run both are the same home and
   this rule is invisible. It shows when a plan shadows `home` — a tree
   rendered on one machine for another, a phone or a container — where
   without it the renderer's `/Users/<me>/…` was baked into the target's
@@ -463,7 +463,7 @@ Computed once at startup, lazily where expensive, read-only.
 `provision facts` prints them, and then prints the three names a plan can
 read that are **not** facts — `env.NAME`, `facts.NAME`, `component_dir` —
 because a reader who runs it to find out what is available has otherwise
-been handed an answer that leaves two of them out. `facts --json` is a
+been handed an answer that leaves them out. `facts --json` is a
 contract (D25) and carries the facts alone.
 
 Every fact is reachable two ways, and the difference matters. The **bare
@@ -699,9 +699,9 @@ file:
 Every state that creates something creates the directories leading to it.
 `dir` always did; `file` and `link` do too, so a plan does not need a
 `state: dir` step per directory before the step that says what goes in it.
-That is already how `template` (§6.4), `download` (§6.9) and `git` (§6.5)
-behave, and one rule across the five is easier to hold than four plus an
-exception. `absent` creates nothing: a parent that is missing means the
+That is already how `template` (§6.4), `download` (§6.9) and `git` (§6.8)
+behave, and `json` (§6.11) takes it from `file`, and one rule across all of
+them is easier to hold than several plus an exception. `absent` creates nothing: a parent that is missing means the
 target is already gone.
 
 **Modes are deterministic, not inherited from the umask.** A new file with no
@@ -1670,7 +1670,7 @@ gates, so it has a wall clock worth bounding too. There is no
   before spending a machine on it**: `provision validate job.yml` parses it,
   renders every template and resolves every path while running nothing, and
   `provision plan job.yml` says which steps would run — the same walk at
-  three depths of commitment (§2), which is a pipeline linter no other step
+  three depths of commitment (§8), which is a pipeline linter no other step
   runner in this family ships.
 
   Everything else stays the runner's: what to check out, what to put in the
@@ -2058,7 +2058,7 @@ and nothing else.
 | `retry` and `register` on one step | The register holds the last attempt, and its `rc` is that attempt's |
 | `--stream` and `register` on one step | Output is teed: streamed live *and* captured |
 | `assert` fails | `rc: 1` in `register`; the run stops like any other failure |
-| `--keep-going` and a step whose `register` a later step reads | The register holds the failed step's own result — `rc`, output, and `failed: true` — so a `when` reading it sees what happened. Nothing is invented to stand in for work that did not happen |
+| `--keep-going` and a step whose `register` a later step reads | The register holds the failed step's own result — all six fields (§4) — so a `when` reading it sees what happened. Nothing is invented to stand in for work that did not happen |
 | `--keep-going` and Ctrl-C | The run stops anyway, exit 130. The flag is about a step failing, not about the operator stopping |
 | A problem found mid-`apply` — a `when` reading a register that is not a boolean, a field rendered from one that is undefined | The walk stops there, exit 3; no later step runs. The pre-walk cannot see it, because the register holds a result only once its step has run. `--keep-going` does not apply: a plan that will not render is not a plan to keep going with |
 | `--keep-going` on `plan` or `validate` | Not accepted: neither ever stopped at a failure to begin with |
