@@ -1,7 +1,7 @@
 //! The phase 1 gate: execution.
 //!
 //! Every action ships with a test that runs it twice on a scratch filesystem
-//! and asserts `changed` then `ok` (spec §11). For `shell` that means the two
+//! and asserts `changed` then `ok` (spec §6). For `shell` that means the two
 //! gates it can declare — `unless` and `creates` — and for `assert` it means
 //! that running twice changes nothing at all.
 //!
@@ -2681,7 +2681,7 @@ fn file_creates_missing_parent_directories() {
     assert_eq!(mode_of(&dir.path().join("cfg/deep/a/b")), 0o755);
     assert_eq!(mode_of(&dir.path().join("cfg/deep/a/b/note")), 0o600);
 
-    // §11: the second run changes nothing.
+    // §6: the second run changes nothing.
     let again = run_in(dir.path(), &["apply", plan.to_str().unwrap()]);
     let text = String::from_utf8_lossy(&again.stdout);
     assert_eq!(again.status.code(), Some(0), "{text}");
@@ -3389,7 +3389,7 @@ fn adopt_passes_adopt_to_the_brew_cask_install_call() {
         "--adopt leaked onto the query:\n{calls}"
     );
 
-    // §11: the second run finds it installed and calls nothing.
+    // §6: the second run finds it installed and calls nothing.
     std::fs::write(&log, "").unwrap();
     let (code, out) = pkg_apply_with_path(dir.path(), plan, &bin);
     assert_eq!(code, 0, "{out}");
@@ -5195,7 +5195,7 @@ fn defaults_applies_twice_changed_then_ok() {
         assert!(line_for(&first, step).contains("changed"), "{first}");
     }
 
-    // Spec §11: the second run is the one that matters.
+    // Spec §6: the second run is the one that matters.
     let (code, second) = apply(dir.path(), "defaults_scratch.yml", &[]);
     assert_eq!(code, 0, "{second}");
     for step in ["A bool", "A string", "An int"] {

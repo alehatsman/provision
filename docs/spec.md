@@ -325,6 +325,8 @@ The deferred check is the same check, at the step's own position, against
 the text the template actually rendered (#61).
 
 - Undefined variable: error at plan time, with file:line and the variable name.
+- Every string value is rendered once to judge it and again, by the action,
+  to use it. The two renders are kept apart and share nothing (D32).
 - Filters available: minijinja built-ins plus `expanduser`, `basename`,
   `dirname`, `quote` (shell-quote), `to_yaml`, `to_json`, `crc32`.
 - `crc32` hashes a string's UTF-8 bytes to an integer (CRC-32 as zlib and
@@ -512,6 +514,11 @@ phone gates on `is_termux` and writes its own steps, and whether `pkg` and
 Every action defines: fields, what "changed" means, what `plan` reports,
 and its idempotency guarantee. `changed` is a verdict, not a guess: an
 action that cannot tell reports `unknown`, shown distinctly in output.
+
+**Idempotent is tested, not asserted.** Each action ships an integration test
+that runs it twice on a scratch filesystem or container and asserts `changed`
+on the first run and `ok` on the second. That test is the definition of
+"idempotent" for this project.
 
 **Which actions can un-declare a thing, and which cannot.** A plan asserts
 what should exist. Saying what should *not* is only partly expressible, and
@@ -1199,7 +1206,6 @@ download:
   TLS stack and certificate handling is the wrong trade for a fetch the
   shell already does well. What the action adds is the hash and the
   verdict, not the transport. Absent curl fails with a clear message.
-  Decided by review, owner to confirm.
 - The step's `timeout` bounds the fetch.
 
 ### 6.10 `defaults`
@@ -1415,16 +1421,11 @@ gates, so it has a wall clock worth bounding too. There is no
   anything on that is not already on.
 
   **`--strict` is where D3 now lives.** A bare `shell` step runs and reports
-  `ok` (§6.1), so nothing stops a convergence plan from carrying one that
-  rewrites `/etc/pacman.conf` on every apply while `plan` reports nothing to
-  do. That is a real regression to guard against, and the guard is this
-  check rather than a default verdict: a task or CI job file, where every
-  step is an exit code and there is no state to declare, should not have to
-  answer for a discipline it does not need — there the default stays off,
-  same as always. A plan is the shape that usually does have state to
-  declare, so it gets the discipline by default rather than on request
-  (D21): a convergence plan's own CI runs plain `validate` and already has
-  it.
+  `ok` (§6.1), so a convergence plan can carry one that rewrites
+  `/etc/pacman.conf` on every apply while `plan` reports nothing to do; this
+  check is the guard, not a default verdict. A plan is the shape that usually
+  has state to declare, so it gets the check by default (D21). A task or CI
+  file, where every step is an exit code, stays off.
 
   Two exceptions, and only two: a `file` or `json` step's `src` after a
   `shell` or `cmd` step in the same walk, and such a `src` **at or under a
@@ -1448,24 +1449,17 @@ gates, so it has a wall clock worth bounding too. There is no
 
   **A subtree gated off on this host is still read for shape** (D27). The
   walk descends into a structural step whose `when` is false and applies the
-  idempotency gate and §6.10's `defaults` os-gate to the steps inside — but
+  idempotency gate and §6.10's `defaults` os-gate to the steps inside —
   shape only: nothing there is rendered, no condition is evaluated, no
   variable is bound, and no step is reported. The step itself is still
-  reported `skipped   when: false`. Without this a `when: os == "linux"`
-  component was invisible to `validate` on a Mac, so the same plan got
-  different verdicts on different hosts and an ungated `shell` was caught by
-  whichever machine happened to match. **The descent itself is
-  unconditional; only the gate inside it is gated on `strict`.** It used to
-  be gated as a whole, which made a tag declared inside a gated-off subtree
-  visible on a plan root and invisible on a task root — so the same
-  `--tags` value was accepted on one and refused on the other for the same
-  bytes. Whether a tag exists is a property of the file (§8) and cannot
-  depend on the root's shape, so a walk with `strict` off still descends
-  and still collects the tag set; it just checks nothing.
-  Everything needing a *value* — types, undefined
-  variables, missing files, prop arity — stays unchecked in there, because a
-  gated-off subtree may legitimately read names this host does not have: it
-  is checked for what it says, never for what it would do.
+  reported `skipped   when: false`. Otherwise the same plan gets different
+  verdicts on different hosts. **The descent is unconditional; only the gate
+  inside it is gated on `strict`,** because whether a tag exists is a
+  property of the file (§8) and `--tags` must not depend on the root's shape.
+  Everything needing a *value* — types, undefined variables, missing files,
+  prop arity — stays unchecked in there: a gated-off subtree may read names
+  this host does not have, so it is checked for what it says, never for what
+  it would do.
 
   It is therefore evaluated against **this host's facts and PATH**, and that
   is kept as narrow as it can be. A rule about a *named* backend holds on
@@ -1627,19 +1621,10 @@ gates, so it has a wall clock worth bounding too. There is no
   `any step` through `command steps` and `action steps` down to a single
   structural key, and §4's table is where every modifier's own answer is.
 
-  **No tally of the restricted ones appears here, on purpose.** This
-  sentence used to carry one — "four of the sixteen are legal on one kind of
-  step only" — and it was two claims pointing at two different rows of that
-  table: the four is `command steps`, which is a class of three actions and
-  so precisely not one kind of step, while the two legal on one named kind
-  are `props` and `optional`. Neither half was true under the reading that
-  made the other one true. A tally in prose is the same hand-kept second
-  list this section refuses two paragraphs above, for the same reason: §4's
-  table is the one place, `list --json` returns that table, and a test pins
-  the whole set against it — so the table cannot drift, and a number here is
-  checked by nothing that runs. This one was wrong from the day it was
-  written and stood until the **Applies to** column made it checkable at
-  all.
+  **No count of the restricted ones appears here, on purpose.** A count in
+  prose is a hand-kept second list; §4's table is the one place, `list
+  --json` returns that table, and a test pins the whole set against it (D25).
+
 
   The same one-table rule holds: the unknown-key check reads the modifier
   table the dump prints, so a modifier that is documented is one the parser
@@ -2075,21 +2060,3 @@ and nothing else.
 | `service` on a launchd path on a machine that is not macOS | Validation error naming the fact that decided it |
 | `service` with `enabled: false` on a static, indirect, generated or alias systemd unit | `is-enabled` exits 0 for all of those, so the step would change forever and `disable` is a no-op. Use `state:` alone on units that have no enablement to change |
 | A typed action's command hangs | Killed on the step's `timeout` and reported `timed out after N`, the same as a `shell` step. Probes and mutations take the same path: a hung package manager hangs the query as readily as the install |
-
-## 11. Validation of this spec
-
-Before code: walk every step type in `~/dotfiles` (the estimate was 64
-files and ~950 steps; the walk found 58 files, 371 steps and 27 templates
-— `docs/audit.md` §1)
-against §3–§6 and record each construct that has no mapping. The migration
-document must list all of them. Zero unmapped constructs, or an explicit
-decision to rewrite each, is the gate for starting Phase 0.
-
-During build: each action ships with an integration test that runs it
-twice on a scratch filesystem or container and asserts `changed` on the
-first run and `ok` on the second. That test is the definition of
-"idempotent" for this project.
-
-After build: `provision plan` on all five machine plans reports zero
-changes on a machine mooncake has already converged, except for steps the
-migration document predicts.
