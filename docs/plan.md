@@ -1,6 +1,6 @@
 # provision — build plan
 
-Status: phases 0–7 code complete · 2026-10-20
+Status: phases 0–7 code complete · 2026-10-21
 
 ## Where this stands
 
@@ -36,7 +36,18 @@ on stdout. mini_pc's host plan was applied the same day with the rebuilt
 binary: 33 steps, nothing to change. Ctrl-C was tested natively on
 2026-10-20 and had never worked. With no console handler, provision died
 with `0xC000013A` and printed no summary. It is fixed, and the gate's
-Windows job now drives it (`tests/apply_cross_platform.rs`).
+Windows job now drives it (`tests/apply_cross_platform.rs`). A fourth thing
+real Windows use found, this one from a plan rather than a probe:
+`state: link` had never worked there at all — the `symlink` helper had no
+Windows body, so every link step failed with "symlinks are not supported on
+this platform" (#124), and a dotfiles component carried a PowerShell
+junction step with an `unless:` as the workaround. Fixed 2026-10-21: a
+file or directory symlink by what `src` names, falling back to an NTFS
+junction for a directory when Windows refuses the privilege, and the target
+stored with `\` because the filesystem does not read `/` as a separator in
+one (spec §6.3). Three native Windows bugs in two days, none of which the
+gate could have found: the privilege, the console handler and the separator
+are all properties of the host, not of the build.
 
 Since 2026-10-15 the gate runs `tasks/tests.yml` natively on `windows-latest`
 (D24), which adds `cli.rs`, `component.rs`, `list.rs` and the unit tests on a

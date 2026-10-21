@@ -1,6 +1,6 @@
 # provision — specification
 
-Status: v0.11.0 · 2026-10-20 · owner: aleh
+Status: v0.11.0 · 2026-10-21 · owner: aleh
 
 This is the contract. Code that disagrees with it is wrong, or this file is.
 Fix one.
@@ -703,6 +703,11 @@ file:
   either, a link to an existing directory is made as a junction instead,
   which holds `src` resolved to an absolute path and counts as pointing at
   `src` when it resolves to the same place; a link to a file fails saying so.
+  "Exactly as written" has one Windows exception: a `/` in `src` is stored
+  as `\`. The filesystem resolves a relative symlink target itself and does
+  not read `/` as a separator, so a link written with one is made and then
+  cannot be followed (error 123). A relative link stays relative; only the
+  separator changes.
 - `absent` removes a file, a symlink, or an empty directory; a non-empty
   directory requires `force: true`. A path that is already gone is `ok`, not
   `changed`.

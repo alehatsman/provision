@@ -248,7 +248,15 @@ $ provision apply tasks/tools.yml
 ```
 
 Then `provision apply tasks/ci-fast.yml` before a commit and
-`provision apply tasks/ci.yml` before a push.
+`provision apply tasks/ci.yml` before a push — or once per clone,
+
+```
+$ provision apply tasks/setup-hooks.yml
+```
+
+which writes the two as git hooks so neither is an intention run by hand. It
+refuses a `pre-commit` or `pre-push` this task did not write, rather than
+replacing one.
 
 The gate itself is [rust-quality](https://github.com/alehatsman/rust-quality),
 pinned in `tasks/tools.yml` and checked out under `~/.cache/provision/tools/`.

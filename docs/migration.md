@@ -1,8 +1,12 @@
 # Migrating `~/dotfiles` from mooncake to provision
 
 Status: v1.2 · 2026-09-08 · executed against `~/dotfiles` at commit `9548bbd`
-on branch `provision`; §7 step 1 is done
+on branch `provision`
 (58 YAML files, 371 steps, 27 `.j2` templates, 18 components, 5 machines).
+The rewrite below is the plan and does not move; how far §7's order has got
+is tracked in [plan.md](plan.md)'s "Open, and all of it the owner's", which
+is the one ledger — §7 step 1 was all that was done the day this was
+written, and more is now.
 
 Counts below are the audited ones from [audit.md](audit.md), which closed the
 spec §11 gate. The earlier hand counts in draft v0.1 were taken before the
