@@ -1,5 +1,9 @@
 # provision
 
+[![gate](https://github.com/alehatsman/provision/actions/workflows/gate.yml/badge.svg)](https://github.com/alehatsman/provision/actions/workflows/gate.yml)
+
+![A machine.yml listing packages, dotfiles, tools, repo and ci, feeding a monitor that ticks each one off in turn and ends on "Machine ready", beside the words "provision - one machine, one plan, one binary"](docs/hero.png)
+
 A small, single-binary provisioning tool for your own machines. Rust.
 
 One YAML file per machine. Eleven actions. Sequential execution, fail-fast,
